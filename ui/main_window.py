@@ -156,9 +156,9 @@ class MainWindow:
             self.perform_backup()
         elif command == "accounting":
             self.show_accounting_ui()
-
-        
+    
     def show_accounting_ui(self):
+        """عرض واجهة المحاسبة"""
         for widget in self.content_frame.winfo_children():
             widget.destroy()
 
@@ -186,9 +186,7 @@ class MainWindow:
             )
         )
         process_btn.pack(pady=20)
-
-
-
+    
     def show_dashboard(self):
         """عرض لوحة التحكم"""
         for widget in self.content_frame.winfo_children():
@@ -284,6 +282,81 @@ class MainWindow:
                     bg='white', fg='#7f8c8d',
                     anchor='w').pack(fill='x', padx=20, pady=2)
     
+    def show_simple_customers_ui(self):
+        """عرض واجهة زبائن مبسطة"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        frame = tk.Frame(self.content_frame, bg='white')
+        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title = tk.Label(frame, text="إدارة الزبائن",
+                        font=('Arial', 20, 'bold'),
+                        bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        msg = tk.Label(frame,
+                      text="عذراً، واجهة الزبائن الرئيسية غير متاحة حالياً.\nسيتم إضافتها قريباً.",
+                      font=('Arial', 14),
+                      bg='white', fg='#7f8c8d')
+        msg.pack(pady=50)
+        
+        back_btn = tk.Button(frame, text="← العودة للرئيسية",
+                           command=self.show_dashboard,
+                           bg='#3498db', fg='white',
+                           font=('Arial', 12))
+        back_btn.pack(pady=20)
+    
+    def show_simple_invoices_ui(self):
+        """عرض واجهة فواتير مبسطة"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        frame = tk.Frame(self.content_frame, bg='white')
+        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title = tk.Label(frame, text="إدارة الفواتير",
+                        font=('Arial', 20, 'bold'),
+                        bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        msg = tk.Label(frame,
+                      text="عذراً، واجهة الفواتير الرئيسية غير متاحة حالياً.\nسيتم إضافتها قريباً.",
+                      font=('Arial', 14),
+                      bg='white', fg='#7f8c8d')
+        msg.pack(pady=50)
+        
+        back_btn = tk.Button(frame, text="← العودة للرئيسية",
+                           command=self.show_dashboard,
+                           bg='#3498db', fg='white',
+                           font=('Arial', 12))
+        back_btn.pack(pady=20)
+    
+    def show_simple_report_ui(self):
+        """عرض واجهة تقارير مبسطة"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        frame = tk.Frame(self.content_frame, bg='white')
+        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title = tk.Label(frame, text="التقارير والإحصائيات",
+                        font=('Arial', 20, 'bold'),
+                        bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        msg = tk.Label(frame,
+                      text="عذراً، واجهة التقارير الرئيسية غير متاحة حالياً.\nسيتم إضافتها قريباً.",
+                      font=('Arial', 14),
+                      bg='white', fg='#7f8c8d')
+        msg.pack(pady=50)
+        
+        back_btn = tk.Button(frame, text="← العودة للرئيسية",
+                           command=self.show_dashboard,
+                           bg='#3498db', fg='white',
+                           font=('Arial', 12))
+        back_btn.pack(pady=20)
+    
     def show_customers_ui(self):
         """عرض واجهة الزبائن"""
         for widget in self.content_frame.winfo_children():
@@ -299,7 +372,7 @@ class MainWindow:
         except ImportError as e:
             logger.error(f"خطأ في تحميل واجهة الزبائن: {e}")
             # عرض واجهة بديلة
-        self.show_simple_customers_ui()
+            self.show_simple_customers_ui()
     
     def show_invoices_ui(self):
         """عرض واجهة الفواتير"""
@@ -316,7 +389,7 @@ class MainWindow:
         except ImportError as e:
             logger.error(f"خطأ في تحميل واجهة الفواتير: {e}")
             # عرض واجهة بديلة
-        self.show_simple_invoices_ui()
+            self.show_simple_invoices_ui()
     
     def show_reports_ui(self):
         """عرض واجهة التقارير"""
@@ -333,7 +406,7 @@ class MainWindow:
         except ImportError as e:
             logger.error(f"خطأ في تحميل واجهة التقارير: {e}")
             # عرض واجهة بديلة
-        self.show_simple_report_ui()
+            self.show_simple_report_ui()
     
     def show_users_ui(self):
         """عرض واجهة المستخدمين"""

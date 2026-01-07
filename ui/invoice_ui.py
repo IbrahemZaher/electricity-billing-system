@@ -1,4 +1,5 @@
 # ui/invoice_ui.py
+from auth.permissions import require_permission, Permission
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
@@ -410,15 +411,27 @@ class InvoiceUI(tk.Frame):
     
     def create_new_invoice(self):
         """إنشاء فاتورة جديدة"""
+        try:
+            require_permission(Permission.CREATE_BILLS)
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+
         dialog = CreateInvoiceDialog(self, self.user_data)
         self.wait_window(dialog)
-        
+
         if dialog.result:
             self.load_invoices()
             messagebox.showinfo("نجاح", "تم إنشاء الفاتورة بنجاح")
     
     def edit_invoice(self, invoice_id=None):
         """تعديل فاتورة موجودة"""
+        try:
+            require_permission(Permission.EDIT_BILLS)
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+
         if not invoice_id:
             selection = self.tree.selection()
             if not selection:
@@ -426,28 +439,34 @@ class InvoiceUI(tk.Frame):
                 return
             item = self.tree.item(selection[0])
             invoice_id = item['values'][0]
-        
+
         dialog = EditInvoiceDialog(self, invoice_id, self.user_data)
         self.wait_window(dialog)
-        
+
         if dialog.result:
             self.load_invoices()
             messagebox.showinfo("نجاح", "تم تعديل الفاتورة بنجاح")
     
     def delete_invoice(self):
         """حذف فاتورة"""
+        try:
+            require_permission(Permission.EDIT_BILLS)
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+
         selection = self.tree.selection()
         if not selection:
             messagebox.showwarning("تحذير", "يرجى اختيار فاتورة للحذف")
             return
-        
+
         item = self.tree.item(selection[0])
         invoice_id = item['values'][0]
         invoice_number = item['values'][1]
-        
+
         if not messagebox.askyesno("تأكيد الحذف", f"هل أنت متأكد من حذف الفاتورة {invoice_number}؟"):
             return
-        
+
         try:
             result = self.invoice_manager.delete_invoice(invoice_id)
             if result['success']:
@@ -462,6 +481,12 @@ class InvoiceUI(tk.Frame):
     
     def print_invoice(self, invoice_id=None):
         """طباعة الفاتورة"""
+        try:
+            require_permission(Permission.VIEW_REPORTS)
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+
         if not invoice_id:
             selection = self.tree.selection()
             if not selection:
@@ -469,25 +494,24 @@ class InvoiceUI(tk.Frame):
                 return
             item = self.tree.item(selection[0])
             invoice_id = item['values'][0]
-        
+
         try:
-            # هنا سيتم استدعاء نظام الطباعة
-            # مؤقتاً: عرض رسالة
             messagebox.showinfo("طباعة", f"سيتم طباعة الفاتورة #{invoice_id}")
-            
-            # يمكنك استدعاء وحدة الطباعة هنا
-            # from modules.printing import print_invoice
-            # print_invoice(invoice_id)
-            
         except Exception as e:
             logger.error(f"خطأ في طباعة الفاتورة: {e}")
             messagebox.showerror("خطأ", f"فشل طباعة الفاتورة: {str(e)}")
     
     def cancel_invoice(self, invoice_id):
         """إلغاء الفاتورة"""
+        try:
+            require_permission(Permission.EDIT_BILLS)
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+
         if not messagebox.askyesno("تأكيد الإلغاء", "هل أنت متأكد من إلغاء هذه الفاتورة؟"):
             return
-        
+
         try:
             result = self.invoice_manager.update_invoice(invoice_id, {'status': 'cancelled'})
             if result['success']:
