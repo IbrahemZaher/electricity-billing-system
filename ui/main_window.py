@@ -4,6 +4,10 @@ from tkinter import ttk, messagebox
 import logging
 from datetime import datetime
 from config.settings import APP_NAME, VERSION, COMPANY_NAME
+from ui.archive_ui import ArchiveUI
+from tkinter import filedialog
+from utils.excel_handler import ExcelHandler
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +146,11 @@ class MainWindow:
             self.show_invoices_ui()
         elif command == "reports":
             self.show_reports_ui()
+        elif command == "archive":
+            if self.check_permission('view_archive'):
+                self.show_archive_ui()
+            else:
+                messagebox.showerror("خطأ", "ليس لديك صلاحية الدخول إلى هذا القسم")
         elif command == "users":
             if self.check_permission('manage_users'):
                 self.show_users_ui()
@@ -156,6 +165,11 @@ class MainWindow:
             self.perform_backup()
         elif command == "accounting":
             self.show_accounting_ui()
+        elif command == "settings":
+            if self.check_permission('manage_settings'):
+                self.show_settings_ui()
+            else:
+                messagebox.showerror("خطأ", "ليس لديك صلاحية الدخول إلى هذا القسم")
     
     def show_accounting_ui(self):
         """عرض واجهة المحاسبة"""
@@ -206,7 +220,136 @@ class MainWindow:
         
         # عرض ميزات قيد التطوير
         self.show_coming_features(dashboard_frame)
-    
+
+    def show_archive_ui(self):
+        """عرض واجهة الأرشيف"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        archive_ui = ArchiveUI(self.content_frame)
+        logger.info("تم تحميل واجهة الأرشيف بنجاح")
+
+    def show_users_ui(self):
+        """عرض واجهة المستخدمين"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        try:
+            # حاول استيراد user_management_ui أولاً
+            from ui.user_management_ui import UsersUI
+            users_ui = UsersUI(self.content_frame)
+            logger.info("تم تحميل واجهة المستخدمين بنجاح")
+        except ImportError:
+            try:
+                # إذا فشل، حاول استيراد users_ui
+                from ui.users_ui import UsersUI
+                users_ui = UsersUI(self.content_frame)
+                logger.info("تم تحميل واجهة المستخدمين من users_ui")
+            except ImportError as e:
+                logger.error(f"خطأ في تحميل واجهة المستخدمين: {e}")
+                # عرض واجهة بديلة
+                self.show_simple_users_ui()
+
+    def show_simple_users_ui(self):
+        """عرض واجهة مستخدمين مبسطة"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        frame = tk.Frame(self.content_frame, bg='white')
+        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title = tk.Label(frame, text="إدارة المستخدمين",
+                        font=('Arial', 20, 'bold'),
+                        bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        msg = tk.Label(frame,
+                      text="وحدة إدارة المستخدمين قيد التطوير\nسيتم إضافتها قريباً",
+                      font=('Arial', 14),
+                      bg='white', fg='#7f8c8d')
+        msg.pack(pady=50)
+        
+        back_btn = tk.Button(frame, text="← العودة للرئيسية",
+                           command=self.show_dashboard,
+                           bg='#3498db', fg='white',
+                           font=('Arial', 12))
+        back_btn.pack(pady=20)
+
+    def show_activity_log_ui(self):
+        """عرض واجهة سجل النشاط"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        try:
+            from ui.activity_log_ui import ActivityLogUI
+            activity_ui = ActivityLogUI(self.content_frame)
+            logger.info("تم تحميل واجهة سجل النشاط بنجاح")
+        except ImportError as e:
+            logger.error(f"خطأ في تحميل سجل النشاط: {e}")
+            self.show_simple_activity_log_ui()
+
+    def show_simple_activity_log_ui(self):
+        """عرض واجهة سجل نشاط مبسطة"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        frame = tk.Frame(self.content_frame, bg='white')
+        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title = tk.Label(frame, text="سجل النشاط",
+                        font=('Arial', 20, 'bold'),
+                        bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        msg = tk.Label(frame,
+                      text="وحدة سجل النشاط قيد التطوير\nسيتم إضافتها قريباً",
+                      font=('Arial', 14),
+                      bg='white', fg='#7f8c8d')
+        msg.pack(pady=50)
+        
+        back_btn = tk.Button(frame, text="← العودة للرئيسية",
+                           command=self.show_dashboard,
+                           bg='#3498db', fg='white',
+                           font=('Arial', 12))
+        back_btn.pack(pady=20)
+
+    def show_settings_ui(self):
+        """عرض واجهة الإعدادات"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        try:
+            from ui.settings_ui import SettingsUI
+            settings_ui = SettingsUI(self.content_frame)
+            logger.info("تم تحميل واجهة الإعدادات بنجاح")
+        except ImportError as e:
+            logger.error(f"خطأ في تحميل الإعدادات: {e}")
+            self.show_simple_settings_ui()
+
+    def show_simple_settings_ui(self):
+        """عرض واجهة إعدادات مبسطة"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        frame = tk.Frame(self.content_frame, bg='white')
+        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title = tk.Label(frame, text="الإعدادات",
+                        font=('Arial', 20, 'bold'),
+                        bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        msg = tk.Label(frame,
+                      text="وحدة الإعدادات قيد التطوير\nسيتم إضافتها قريباً",
+                      font=('Arial', 14),
+                      bg='white', fg='#7f8c8d')
+        msg.pack(pady=50)
+        
+        back_btn = tk.Button(frame, text="← العودة للرئيسية",
+                           command=self.show_dashboard,
+                           bg='#3498db', fg='white',
+                           font=('Arial', 12))
+        back_btn.pack(pady=20)
+        
     def show_simple_statistics(self, parent):
         """عرض إحصائيات مبسطة"""
         stats_frame = tk.Frame(parent, bg='white')
@@ -397,7 +540,7 @@ class MainWindow:
             widget.destroy()
         
         try:
-            from ui.report_ui  import ReportUI
+            from ui.report_ui import ReportUI
             report_ui = ReportUI(self.content_frame, self.user_data)
             report_ui.pack(fill='both', expand=True)
         
@@ -408,64 +551,37 @@ class MainWindow:
             # عرض واجهة بديلة
             self.show_simple_report_ui()
     
-    def show_users_ui(self):
-        """عرض واجهة المستخدمين"""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
+    def check_permission(self, permission_name):
+        """التحقق من صلاحية المستخدم"""
+        # الأدوار والصلاحيات الافتراضية
+        role_permissions = {
+            'admin': ['manage_users', 'view_activity_log', 'add_invoice', 
+                    'edit_invoice', 'delete_invoice', 'manage_customers', 
+                    'view_reports', 'manage_settings', 'export_data', 'import_data',
+                    'view_archive', 'manage_backup'],
+            'accountant': ['add_invoice', 'edit_invoice', 'manage_customers', 
+                          'view_reports', 'export_data', 'import_data'],
+            'cashier': ['view_invoices', 'view_customers', 'add_payment'],
+            'viewer': ['view_reports', 'view_customers']
+        }
         
-        frame = tk.Frame(self.content_frame, bg='white')
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        user_role = self.user_data.get('role', 'viewer')
         
-        title = tk.Label(frame, text="إدارة المستخدمين",
-                        font=('Arial', 20, 'bold'),
-                        bg='white', fg='#2c3e50')
-        title.pack(pady=10)
+        # تسجيل محاولة الوصول (باستخدام get لتجنب KeyError)
+        username = self.user_data.get('username', 'غير معروف')
+        if not username or username == 'غير معروف':
+            username = self.user_data.get('full_name', 'مستخدم')
         
-        msg = tk.Label(frame,
-                      text="وحدة إدارة المستخدمين قيد التطوير\nسيتم إضافتها قريباً",
-                      font=('Arial', 14),
-                      bg='white', fg='#7f8c8d')
-        msg.pack(pady=50)
+        logger.info(f"التحقق من الصلاحية: {permission_name} للمستخدم: {username}، الدور: {user_role}")
         
-        back_btn = tk.Button(frame, text="← العودة للرئيسية",
-                           command=self.show_dashboard,
-                           bg='#3498db', fg='white',
-                           font=('Arial', 12))
-        back_btn.pack(pady=20)
-    
-    def show_activity_log_ui(self):
-        """عرض واجهة سجل النشاط"""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-        
-        frame = tk.Frame(self.content_frame, bg='white')
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        title = tk.Label(frame, text="سجل النشاط",
-                        font=('Arial', 20, 'bold'),
-                        bg='white', fg='#2c3e50')
-        title.pack(pady=10)
-        
-        msg = tk.Label(frame,
-                      text="وحدة سجل النشاط قيد التطوير\nسيتم إضافتها قريباً",
-                      font=('Arial', 14),
-                      bg='white', fg='#7f8c8d')
-        msg.pack(pady=50)
-        
-        back_btn = tk.Button(frame, text="← العودة للرئيسية",
-                           command=self.show_dashboard,
-                           bg='#3498db', fg='white',
-                           font=('Arial', 12))
-        back_btn.pack(pady=20)
-    
-    def check_permission(self, permission):
-        """التحقق من الصلاحية"""
-        if self.user_data['role'] == 'admin':
+        # إذا كان admin، يعود True لكل الصلاحيات
+        if user_role == 'admin':
             return True
         
-        permissions = self.user_data.get('permissions', {})
-        return permissions.get(permission, False)
-    
+        # خلاف ذلك، يتحقق من الصلاحيات
+        user_permissions = role_permissions.get(user_role, [])
+        return permission_name in user_permissions
+
     def perform_backup(self):
         """تنفيذ النسخ الاحتياطي"""
         try:
@@ -544,13 +660,53 @@ class MainWindow:
         self.root.after(1000, self.update_time)
     
     def export_data(self):
-        """تصدير البيانات"""
-        messagebox.showinfo("تصدير", "سيتم تطوير هذه الخاصية قريباً")
+        """تصدير البيانات إلى Excel"""
+        try:
+            # نافذة اختيار نوع البيانات للتصدير
+            export_dialog = ExportDialog(self.root)
+            self.root.wait_window(export_dialog)
+            
+            if export_dialog.export_type and export_dialog.data_to_export:
+                # اختيار مكان الحفظ
+                filename = filedialog.asksaveasfilename(
+                    defaultextension=".xlsx",
+                    filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                    title="حفظ ملف Excel"
+                )
+                
+                if filename:
+                    # التصدير الفعلي
+                    ExcelHandler.export_to_excel(
+                        export_dialog.data_to_export,
+                        filename,
+                        sheet_name=export_dialog.export_type
+                    )
+                    messagebox.showinfo("نجاح", f"تم تصدير البيانات إلى:\n{filename}")
+                    
+        except Exception as e:
+            logger.error(f"خطأ في تصدير البيانات: {e}")
+            messagebox.showerror("خطأ", f"فشل تصدير البيانات: {str(e)}")
+
+
     
     def import_data(self):
-        """استيراد البيانات"""
-        messagebox.showinfo("استيراد", "سيتم تطوير هذه الخاصية قريباً")
-    
+        """استيراد بيانات من ملف Excel"""
+        try:
+            filename = filedialog.askopenfilename(
+                filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")],
+                title="اختر ملف Excel"
+            )
+            
+            if filename:
+                data = ExcelHandler.import_from_excel(filename)
+                messagebox.showinfo("نجاح", 
+                                f"تم استيراد {len(data)} سجل\n"
+                                f"الأعمدة: {list(data[0].keys()) if data else 'لا توجد بيانات'}")
+                
+        except Exception as e:
+            messagebox.showerror("خطأ", f"فشل الاستيراد: {str(e)}")
+
+
     def refresh(self):
         """تحديث البيانات"""
         current_view = str(self.content_frame.winfo_children()[0]) if self.content_frame.winfo_children() else ""

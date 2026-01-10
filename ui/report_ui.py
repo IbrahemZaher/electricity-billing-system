@@ -545,6 +545,7 @@ class ReportUI(tk.Frame):
 
 class BalanceTypeDialog(tk.Toplevel):
     """نافذة اختيار نوع تقرير الرصيد"""
+    
     def __init__(self, parent):
         super().__init__(parent)
         self.title("اختر نوع تقرير الرصيد")
@@ -555,6 +556,7 @@ class BalanceTypeDialog(tk.Toplevel):
         self.center_window()
     
     def center_window(self):
+        """توسيط النافذة"""
         self.update_idletasks()
         width = self.winfo_width()
         height = self.winfo_height()
@@ -563,6 +565,7 @@ class BalanceTypeDialog(tk.Toplevel):
         self.geometry(f'{width}x{height}+{x}+{y}')
     
     def create_widgets(self):
+        """إنشاء عناصر الواجهة"""
         main_frame = tk.Frame(self, padx=20, pady=20)
         main_frame.pack(fill='both', expand=True)
         
@@ -586,11 +589,20 @@ class BalanceTypeDialog(tk.Toplevel):
         btn_frame = tk.Frame(main_frame, pady=20)
         btn_frame.pack(fill='x')
         
-        tk.Button(btn_frame, text="موافق", command=self.ok,
+        tk.Button(btn_frame, text="موافق", command=self.on_ok,
                  bg='#27ae60', fg='white').pack(side='right', padx=5)
         tk.Button(btn_frame, text="إلغاء", command=self.cancel,
                  bg='#e74c3c', fg='white').pack(side='right')
-
+    
+    def on_ok(self):
+        """معالجة زر موافق"""
+        self.balance_type = self.selected_type.get()
+        self.destroy()
+    
+    def cancel(self):
+        """إلغاء العملية"""
+        self.balance_type = None
+        self.destroy()
 
 class SalesGroupDialog(tk.Toplevel):
     """نافذة اختيار نوع تجميع تقرير المبيعات"""

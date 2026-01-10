@@ -1,5 +1,8 @@
 # ui/invoice_ui.py
-from auth.permissions import require_permission, Permission
+# السطر 1 في invoice_ui.py يصبح:
+from auth import require_permission, Permission
+# بدلاً من:
+# from auth.permissions import require_permission, Permission
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
