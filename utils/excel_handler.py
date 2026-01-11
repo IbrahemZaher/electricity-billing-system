@@ -1,156 +1,127 @@
-"""
-معالج Excel للتصدير والاستيراد
-"""
 import pandas as pd
-from datetime import datetime
-import os
-from typing import List, Dict, Optional
-import tempfile
+import numpy as np
+import logging
+from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 class ExcelHandler:
-    """معالج ملفات Excel"""
+    """معالج ملفات Excel مع دعم متقدم للاستيراد والتصدير"""
     
     @staticmethod
-    def export_to_excel(data: List[Dict], 
-                       filename: str, 
-                       sheet_name: str = "البيانات") -> str:
+    def import_from_excel(filename: str) -> List[Dict[str, Any]]:
+        """
+        استيراد بيانات من ملف Excel مع معالجة متقدمة
+        
+        Args:
+            filename: مسار ملف Excel
+            
+        Returns:
+            قائمة من القواميس تحتوي على البيانات
+        """
+        try:
+            # قراءة ملف Excel - قراءة جميع الأعمدة كنص
+            df = pd.read_excel(filename, dtype=str)
+            
+            # تحويل NaN إلى None لتفادي مشاكل قاعدة البيانات
+            df = df.where(pd.notnull(df), None)
+            
+            # تحويل DataFrame إلى قائمة من القواميس
+            data = df.to_dict('records')
+            
+            logger.info(f"تم استيراد {len(data)} سطر من ملف Excel: {filename}")
+            return data
+            
+        except FileNotFoundError:
+            logger.error(f"الملف غير موجود: {filename}")
+            return []
+        except Exception as e:
+            logger.error(f"خطأ في قراءة ملف Excel {filename}: {e}")
+            return []
+    
+    @staticmethod
+    def export_to_excel(data: List[Dict[str, Any]], filename: str, sheet_name: str = "البيانات") -> bool:
         """
         تصدير البيانات إلى ملف Excel
         
         Args:
-            data: قائمة من القواميس
-            filename: اسم الملف الناتج
+            data: قائمة البيانات
+            filename: مسار ملف الحفظ
             sheet_name: اسم الورقة
             
         Returns:
-            مسار الملف الناتج
+            نجاح أو فشل العملية
         """
         try:
-            # تحويل البيانات إلى DataFrame
+            if not data:
+                return False
+            
+            # إنشاء DataFrame من البيانات
             df = pd.DataFrame(data)
             
-            # حفظ في Excel
-            if not filename.endswith('.xlsx'):
-                filename += '.xlsx'
-            
-            # تأكد من وجود المجلد
-            os.makedirs(os.path.dirname(filename) if os.path.dirname(filename) else '.', 
-                       exist_ok=True)
-            
-            # التصدير مع دعم العربية
+            # استخدام محرك openpyxl مع دعم اللغة العربية
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
                 
-                # ضبط عرض الأعمدة
+                # ضبط عرض الأعمدة تلقائياً
                 worksheet = writer.sheets[sheet_name]
                 for column in df:
-                    column_width = max(df[column].astype(str).map(len).max(), len(column)) + 2
+                    column_length = max(df[column].astype(str).map(len).max(), len(str(column))) + 2
                     col_idx = df.columns.get_loc(column)
-                    worksheet.column_dimensions[chr(65 + col_idx)].width = min(column_width, 50)
+                    column_letter = chr(65 + col_idx)  # A, B, C, ...
+                    worksheet.column_dimensions[column_letter].width = min(column_length, 50)
             
-            return filename
+            logger.info(f"تم تصدير {len(data)} سطر إلى ملف Excel: {filename}")
+            return True
             
         except Exception as e:
-            raise Exception(f"خطأ في التصدير إلى Excel: {str(e)}")
+            logger.error(f"خطأ في تصدير ملف Excel: {e}")
+            return False
     
     @staticmethod
-    def import_from_excel(filename: str, sheet_name: str = 0) -> List[Dict]:
-        """
-        استيراد البيانات من ملف Excel
+    def clean_value(value):
+        """تنظيف وتنسيق القيمة من Excel"""
+        if value is None:
+            return None
         
-        Args:
-            filename: مسار ملف Excel
-            sheet_name: اسم أو رقم الورقة
-            
-        Returns:
-            قائمة من القواميس
-        """
+        # تحويل إلى نص
+        value_str = str(value).strip()
+        
+        # إذا كانت القيمة فارغة بعد التحويل
+        if not value_str or value_str.lower() in ['nan', 'null', 'none', '']:
+            return None
+        
+        return value_str
+    
+    @staticmethod
+    def convert_to_float(value):
+        """تحويل القيمة إلى رقم عشري"""
+        if value is None:
+            return 0.0
+        
         try:
-            # قراءة الملف
-            df = pd.read_excel(filename, sheet_name=sheet_name)
-            
-            # تحويل إلى قواميس
-            data = df.to_dict('records')
-            
-            # تنظيف القيم NaN
-            for item in data:
-                for key, value in item.items():
-                    if pd.isna(value):
-                        item[key] = None
-            
-            return data
-            
-        except Exception as e:
-            raise Exception(f"خطأ في الاستيراد من Excel: {str(e)}")
+            # إزالة الفواصل (مثل 1,000.50)
+            clean_val = str(value).replace(',', '').strip()
+            if not clean_val:
+                return 0.0
+            return float(clean_val)
+        except:
+            return 0.0
     
     @staticmethod
-    def export_bills_to_excel(bills_data: List[Dict], 
-                             include_customer_info: bool = True) -> str:
+    def get_column_value(record: Dict[str, Any], possible_names: List[str], default=None):
         """
-        تصدير بيانات الفواتير إلى Excel
+        الحصول على قيمة عمود مع احتمالات متعددة للأسماء
         
         Args:
-            bills_data: بيانات الفواتير
-            include_customer_info: تضمين معلومات العميل
+            record: سجل البيانات
+            possible_names: قائمة بالأسماء المحتملة للعمود
+            default: القيمة الافتراضية
             
         Returns:
-            مسار الملف الناتج
+            قيمة العمود أو القيمة الافتراضية
         """
-        if not bills_data:
-            raise Exception("لا توجد بيانات للتصدير")
-        
-        # إنشاء اسم ملف فريد
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"فواتير_الكهرباء_{timestamp}.xlsx"
-        
-        return ExcelHandler.export_to_excel(bills_data, filename, "الفواتير")
-    
-    @staticmethod
-    def create_template(template_type: str) -> str:
-        """
-        إنشاء قوالب Excel
-        
-        Args:
-            template_type: نوع القالب ('customers', 'meter_readings', 'bills')
-            
-        Returns:
-            مسار ملف القالب
-        """
-        templates = {
-            'customers': [
-                {
-                    'customer_code': 'CUST001',
-                    'full_name': 'اسم العميل',
-                    'phone': '0555555555',
-                    'address': 'العنوان',
-                    'meter_number': 'MTR001',
-                    'connection_type': 'سكني'
-                }
-            ],
-            'meter_readings': [
-                {
-                    'customer_code': 'CUST001',
-                    'reading_date': '2024-01-15',
-                    'current_reading': '1500.50',
-                    'reading_type': 'فعلي'
-                }
-            ],
-            'bills': [
-                {
-                    'customer_code': 'CUST001',
-                    'billing_month': '2024-01',
-                    'units_consumed': '250.5',
-                    'total_amount': '500.75'
-                }
-            ]
-        }
-        
-        if template_type not in templates:
-            raise Exception(f"نموذج غير معروف: {template_type}")
-        
-        # حفظ القالب
-        filename = f"قالب_{template_type}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-        return ExcelHandler.export_to_excel(templates[template_type], filename, template_type)
-
-# كائن عام للاستخدام
-excel_handler = ExcelHandler()
+        for name in possible_names:
+            if name in record and record[name] is not None:
+                return record[name]
+        return default
