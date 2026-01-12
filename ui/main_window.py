@@ -120,6 +120,7 @@ class MainWindow:
             ("📊 التقارير", "reports"),
             ("💰 المحاسبة", "accounting"),
             ("🗃️ الأرشيف", "archive"),
+            ("🔄 مدير الاستيراد", "import_manager"),  # أضف هذا السطر هنا
             ("👤 المستخدمين", "users"),
             ("📝 سجل النشاط", "activity_log"),
             ("⚙️ الإعدادات", "settings"),
@@ -129,11 +130,12 @@ class MainWindow:
         
         for i, (text, command) in enumerate(modules):
             btn = ttk.Button(self.sidebar_frame,
-                           text=text,
-                           style='Sidebar.TButton',
-                           command=lambda cmd=command: self.handle_sidebar_click(cmd))
+                        text=text,
+                        style='Sidebar.TButton',
+                        command=lambda cmd=command: self.handle_sidebar_click(cmd))
             btn.pack(fill='x', padx=10, pady=5, ipady=10)
-    
+
+
     def handle_sidebar_click(self, command):
         """معالجة النقر على أزرار الشريط الجانبي"""
         if command == "logout":
@@ -170,7 +172,22 @@ class MainWindow:
                 self.show_settings_ui()
             else:
                 messagebox.showerror("خطأ", "ليس لديك صلاحية الدخول إلى هذا القسم")
-    
+         # ... الكود الحالي ...
+        elif command == "import_manager":
+            if self.check_permission('manage_import'):
+                self.show_import_manager()
+            else:
+                messagebox.showerror("خطأ", "ليس لديك صلاحية الدخول إلى هذا القسم")
+
+
+    def show_import_manager(self):
+        """عرض واجهة مدير الاستيراد"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        from ui.import_manager import ImportManagerUI
+        import_manager = ImportManagerUI(self.content_frame, self.user_data)
+        
     def show_accounting_ui(self):
         """عرض واجهة المحاسبة"""
         for widget in self.content_frame.winfo_children():
@@ -612,11 +629,11 @@ class MainWindow:
         # قائمة ملف
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="ملف", menu=file_menu)
-        file_menu.add_command(label="تصدير البيانات", command=self.export_data)
-        file_menu.add_command(label="استيراد البيانات", command=self.import_data)
+        file_menu.add_command(label="📥 مدير الاستيراد المتقدم", command=self.show_import_manager)  # ← أضف هذا السطر
+        file_menu.add_command(label="📤 تصدير البيانات", command=self.export_data)
+        file_menu.add_command(label="📥 استيراد البيانات", command=self.import_data)
         file_menu.add_separator()
         file_menu.add_command(label="خروج", command=self.root.quit)
-        
         # قائمة عرض
         view_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="عرض", menu=view_menu)

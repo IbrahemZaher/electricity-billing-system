@@ -252,7 +252,80 @@ class CustomerManager:
                     'sectors': [dict(row) for row in results],
                     'total': sum(row['customer_count'] or 0 for row in results)
                 }
-                
+              
         except Exception as e:
             logger.error(f"خطأ في جلب توزيع الزبائن: {e}")
             return {'sectors': [], 'total': 0}
+   
+        # modules/customers.py - إضافة دالة جديدة
+    def delete_all_customers(self, confirm=True) -> Dict:
+        """حذف جميع الزبائن (يستخدم مع الحذر)"""
+        try:
+            with db.get_cursor() as cursor:
+                # الحصول على عدد الزبائن قبل الحذف
+                cursor.execute("SELECT COUNT(*) as count FROM customers")
+                count_before = cursor.fetchone()['count']
+                
+                if count_before == 0:
+                    return {
+                        'success': True,
+                        'message': 'لا توجد زبائن لحذفها',
+                        'deleted_count': 0
+                    }
+                
+                # حذف جميع الزبائن
+                cursor.execute("DELETE FROM customers RETURNING id, name")
+                deleted_customers = cursor.fetchall()
+                
+                logger.info(f"تم حذف {len(deleted_customers)} زبون")
+                
+                # إرجاع النتيجة مع تفاصيل الحذف
+                return {
+                    'success': True,
+                    'deleted_count': len(deleted_customers),
+                    'deleted_customers': [dict(customer) for customer in deleted_customers],
+                    'message': f"تم حذف {len(deleted_customers)} زبون بنجاح"
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في حذف جميع الزبائن: {e}")
+            return {
+                'success': False,
+                'error': f"فشل حذف الزبائن: {str(e)}"
+            }
+
+    def delete_customers_by_sector(self, sector_id: int) -> Dict:
+        """حذف زبائن قطاع محدد"""
+        try:
+            with db.get_cursor() as cursor:
+                # الحصول على اسم القطاع
+                cursor.execute("SELECT name FROM sectors WHERE id = %s", (sector_id,))
+                sector = cursor.fetchone()
+                
+                if not sector:
+                    return {'success': False, 'error': 'القطاع غير موجود'}
+                
+                # حذف زبائن القطاع
+                cursor.execute("""
+                    DELETE FROM customers 
+                    WHERE sector_id = %s 
+                    RETURNING id, name
+                """, (sector_id,))
+                
+                deleted_customers = cursor.fetchall()
+                
+                logger.info(f"تم حذف {len(deleted_customers)} زبون من قطاع {sector['name']}")
+                
+                return {
+                    'success': True,
+                    'deleted_count': len(deleted_customers),
+                    'sector_name': sector['name'],
+                    'message': f"تم حذف {len(deleted_customers)} زبون من قطاع {sector['name']}"
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في حذف زبائن القطاع: {e}")
+            return {
+                'success': False,
+                'error': f"فشل حذف زبائن القطاع: {str(e)}"
+            }

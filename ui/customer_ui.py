@@ -56,6 +56,7 @@ class CustomerUI(tk.Frame):
         # شريط الحالة السفلي
         self.create_statusbar()
     
+        # ui/customer_ui.py - إضافة زر جديد في create_toolbar
     def create_toolbar(self):
         """إنشاء شريط الأدوات العلوي"""
         toolbar = tk.Frame(self, bg='#2c3e50', height=60)
@@ -64,30 +65,255 @@ class CustomerUI(tk.Frame):
         
         # عنوان الشريط
         title_label = tk.Label(toolbar, 
-                              text="إدارة الزبائن",
-                              font=('Arial', 16, 'bold'),
-                              bg='#2c3e50', fg='white')
+                            text="إدارة الزبائن",
+                            font=('Arial', 16, 'bold'),
+                            bg='#2c3e50', fg='white')
         title_label.pack(side='left', padx=20)
         
         # أزرار الأدوات
         buttons_frame = tk.Frame(toolbar, bg='#2c3e50')
         buttons_frame.pack(side='right', padx=20)
         
-        buttons = [
-            ("➕ إضافة زبون جديد", self.add_customer, "#27ae60"),
-            ("✏️ تعديل المحدد", self.edit_customer, "#3498db"),
-            ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c"),
-            ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6"),
-            ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6")
-        ]
+        # إذا كان المستخدم مديراً، أضف زر الحذف الكامل
+        if self.user_data.get('role') == 'admin':
+            buttons = [
+                ("➕ إضافة زبون جديد", self.add_customer, "#27ae60"),
+                ("✏️ تعديل المحدد", self.edit_customer, "#3498db"),
+                ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c"),
+                ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6"),
+                ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6"),
+                ("🗑️🔥 حذف وإعادة الاستيراد", self.delete_and_reimport, "#e74c3c", 'bold')  # زر جديد
+            ]
+        else:
+            buttons = [
+                ("➕ إضافة زبون جديد", self.add_customer, "#27ae60"),
+                ("✏️ تعديل المحدد", self.edit_customer, "#3498db"),
+                ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c"),
+                ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6"),
+                ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6")
+            ]
         
-        for text, command, color in buttons:
+        for button_info in buttons:
+            if len(button_info) == 4:  # زر مع تنسيق خاص
+                text, command, color, font_weight = button_info
+            else:
+                text, command, color = button_info
+                font_weight = 'normal'
+            
             btn = tk.Button(buttons_frame, text=text, command=command,
-                          bg=color, fg='white',
-                          font=('Arial', 10),
-                          padx=12, pady=6, cursor='hand2')
+                        bg=color, fg='white',
+                        font=('Arial', 10, font_weight),
+                        padx=12, pady=6, cursor='hand2')
             btn.pack(side='left', padx=5)
-    
+        
+        # إذا كان المستخدم مديراً، أضف زر حذف القطاع
+        if self.user_data.get('role') == 'admin':
+            tk.Button(buttons_frame, text="🗑️ حذف قطاع",
+                    command=self.delete_sector_customers,
+                    bg='#c0392b', fg='white',
+                    font=('Arial', 10),
+                    padx=12, pady=6, cursor='hand2').pack(side='left', padx=5)
+
+    # إضافة دوال جديدة في customer_ui.py
+    def delete_and_reimport(self):
+        """حذف جميع الزبائن وإعادة الاستيراد من Excel"""
+        if not self.check_admin_permission():
+            return
+        
+        # تحذير شديد
+        warning_msg = """
+        ⚠️  تحذير شديد - هذا الإجراء خطير!
+        
+        سيؤدي هذا إلى:
+        1. حذف جميع الزبائن من قاعدة البيانات
+        2. حذف جميع الفواتير المرتبطة بهم
+        3. فقدان جميع البيانات التاريخية
+        
+        هل أنت متأكد تماماً من رغبتك في المتابعة؟
+        """
+        
+        confirm = messagebox.askyesno("تحذير شديد", warning_msg)
+        if not confirm:
+            return
+        
+        # تأكيد إضافي
+        double_check = messagebox.askyesno("تأكيد نهائي", 
+                                        "⚠️ تأكيد نهائي: هل أنت متأكد 100%؟\n"
+                                        "هذا الإجراء لا يمكن التراجع عنه!")
+        if not double_check:
+            return
+        
+        try:
+            # 1. عرض نافذة اختيار مجلد Excel
+            from tkinter import filedialog
+            excel_folder = filedialog.askdirectory(
+                title="اختر مجلد ملفات Excel"
+            )
+            
+            if not excel_folder:
+                return
+            
+            # 2. التحقق من وجود ملفات Excel
+            import os
+            excel_files = [f for f in os.listdir(excel_folder) if f.endswith('.xlsx')]
+            if not excel_files:
+                messagebox.showerror("خطأ", "لا توجد ملفات Excel في المجلد المحدد")
+                return
+            
+            # 3. عرض الملفات التي سيتم استيرادها
+            files_msg = f"سيتم استيراد {len(excel_files)} ملف:\n\n"
+            for file in excel_files:
+                files_msg += f"• {file}\n"
+            
+            if not messagebox.askyesno("تأكيد الملفات", files_msg + "\nهل تريد المتابعة؟"):
+                return
+            
+            # 4. حذف جميع الزبائن
+            delete_result = self.customer_manager.delete_all_customers()
+            
+            if not delete_result.get('success'):
+                messagebox.showerror("خطأ", f"فشل حذف الزبائن: {delete_result.get('error')}")
+                return
+            
+            # 5. استيراد البيانات الجديدة
+            from database.migrations import ExcelMigration
+            
+            # شريط تقدم
+            progress_window = tk.Toplevel(self)
+            progress_window.title("جاري الاستيراد...")
+            progress_window.geometry("400x150")
+            progress_window.resizable(False, False)
+            
+            progress_label = tk.Label(progress_window, 
+                                    text="جاري استيراد البيانات من Excel...",
+                                    font=('Arial', 12))
+            progress_label.pack(pady=20)
+            
+            progress_bar = ttk.Progressbar(progress_window, 
+                                        mode='indeterminate',
+                                        length=300)
+            progress_bar.pack(pady=10)
+            progress_bar.start()
+            
+            status_label = tk.Label(progress_window, 
+                                text="يرجى الانتظار...",
+                                font=('Arial', 10))
+            status_label.pack()
+            
+            progress_window.update()
+            
+            # تنفيذ الاستيراد
+            migrator = ExcelMigration(excel_folder)
+            success = migrator.migrate_all_data()
+            
+            progress_bar.stop()
+            progress_window.destroy()
+            
+            if success:
+                # 6. تحديث القائمة
+                self.refresh_customers()
+                
+                # 7. عرض تقرير النتائج
+                report = f"""
+                ✅ تمت العملية بنجاح!
+                
+                نتائج العملية:
+                • تم حذف {delete_result.get('deleted_count', 0)} زبون
+                • تم استيراد {len(excel_files)} ملف Excel
+                
+                يمكنك الآن:
+                1. مراجعة البيانات المستوردة
+                2. التحقق من دقة المعلومات
+                3. بدء استخدام النظام
+                """
+                
+                messagebox.showinfo("تمت العملية", report)
+                logger.info(f"تم حذف وإعادة استيراد {delete_result.get('deleted_count', 0)} زبون")
+                
+            else:
+                messagebox.showerror("خطأ", "فشل استيراد البيانات من Excel")
+                
+        except Exception as e:
+            logger.error(f"خطأ في حذف وإعادة الاستيراد: {e}")
+            messagebox.showerror("خطأ", f"فشل العملية: {str(e)}")
+
+    def delete_sector_customers(self):
+        """حذف زبائن قطاع معين"""
+        if not self.check_admin_permission():
+            return
+        
+        # نافذة اختيار القطاع
+        sector_dialog = tk.Toplevel(self)
+        sector_dialog.title("حذف زبائن قطاع")
+        sector_dialog.geometry("400x200")
+        sector_dialog.resizable(False, False)
+        
+        tk.Label(sector_dialog, 
+                text="اختر القطاع لحذف زبائنه:",
+                font=('Arial', 12, 'bold')).pack(pady=10)
+        
+        sector_var = tk.StringVar()
+        sector_combo = ttk.Combobox(sector_dialog, 
+                                textvariable=sector_var,
+                                values=[s['name'] for s in self.sectors],
+                                state='readonly',
+                                font=('Arial', 11),
+                                width=30)
+        sector_combo.pack(pady=10)
+        
+        # زر التأكيد
+        def confirm_delete():
+            sector_name = sector_var.get()
+            if not sector_name:
+                messagebox.showwarning("تحذير", "يرجى اختيار قطاع")
+                return
+            
+            # تحذير
+            warning = f"""
+            ⚠️ تحذير!
+            
+            سيتم حذف جميع زبائن قطاع: {sector_name}
+            هل أنت متأكد؟
+            """
+            
+            if messagebox.askyesno("تحذير", warning):
+                # البحث عن معرف القطاع
+                sector_id = None
+                for sector in self.sectors:
+                    if sector['name'] == sector_name:
+                        sector_id = sector['id']
+                        break
+                
+                if sector_id:
+                    result = self.customer_manager.delete_customers_by_sector(sector_id)
+                    if result.get('success'):
+                        messagebox.showinfo("نجاح", result['message'])
+                        self.refresh_customers()
+                        sector_dialog.destroy()
+                    else:
+                        messagebox.showerror("خطأ", result.get('error', 'فشل الحذف'))
+        
+        btn_frame = tk.Frame(sector_dialog)
+        btn_frame.pack(pady=20)
+        
+        tk.Button(btn_frame, text="حذف", command=confirm_delete,
+                bg='#e74c3c', fg='white',
+                font=('Arial', 11)).pack(side='left', padx=10)
+        
+        tk.Button(btn_frame, text="إلغاء", 
+                command=sector_dialog.destroy,
+                bg='#95a5a6', fg='white',
+                font=('Arial', 11)).pack(side='left', padx=10)
+
+    def check_admin_permission(self):
+        """التحقق من صلاحيات المدير"""
+        if self.user_data.get('role') != 'admin':
+            messagebox.showerror("صلاحيات", 
+                            "هذا الإجراء متاح فقط للمديرين")
+            return False
+        return True
+
+        
     def create_search_bar(self):
         """إنشاء شريط البحث والتصفية"""
         search_frame = tk.Frame(self, bg='#f1f8ff', relief='groove', borderwidth=2)

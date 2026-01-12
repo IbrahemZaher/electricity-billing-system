@@ -40,8 +40,9 @@ PRINTER_CONFIG = {
 # الصلاحيات الافتراضية
 DEFAULT_PERMISSIONS = {
     'admin': {
-        'all': True
-    },
+        'all': True,
+        'manage_import': True,
+        'delete_all_customers': True    },
     'manager': {
         'view_customers': True,
         'add_customers': True,
@@ -54,7 +55,8 @@ DEFAULT_PERMISSIONS = {
         'view_reports': True,
         'export_data': True,
         'manage_users': False,
-        'view_activity_log': True
+        'view_activity_log': True,
+        'manage_import': True  # ← أضف هذا السطر
     },
     'accountant': {
         'view_customers': True,
