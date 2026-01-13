@@ -131,7 +131,7 @@ class InvoiceForm:
                 search_term in customer.get('box_number', '').lower() or
                 search_term in str(customer.get('id', '')).lower()):
                 
-                display_text = f"{customer['id']} - {customer['name']} | علبة: {customer.get('box_number', '')} | رصيد: {customer.get('current_balance', 0):,.0f} ل.س"
+                display_text = f"{customer['id']} - {customer['name']} | علبة: {customer.get('box_number', '')} | رصيد: {customer.get('current_balance', 0):,.0f} كيلو واط"
                 self.customer_listbox.insert(tk.END, display_text)
                 self.customer_listbox.customer_data = getattr(self.customer_listbox, 'customer_data', []) + [customer]
     
@@ -141,7 +141,7 @@ class InvoiceForm:
         self.customer_listbox.customer_data = []
         
         for customer in self.customers[:50]:  # عرض أول 50 زبون فقط
-            display_text = f"{customer['id']} - {customer['name']} | علبة: {customer.get('box_number', '')} | رصيد: {customer.get('current_balance', 0):,.0f} ل.س"
+            display_text = f"{customer['id']} - {customer['name']} | علبة: {customer.get('box_number', '')} | رصيد: {customer.get('current_balance', 0):,.0f} كيلو واط"
             self.customer_listbox.insert(tk.END, display_text)
             self.customer_listbox.customer_data.append(customer)
     
@@ -169,7 +169,7 @@ class InvoiceForm:
         👤 الزبون: {self.selected_customer['name']}
         📍 القطاع: {self.selected_customer.get('sector_name', 'غير محدد')}
         📦 العلبة: {self.selected_customer.get('box_number', '')} | المسلسل: {self.selected_customer.get('serial_number', '')}
-        💰 الرصيد الحالي: {self.selected_customer.get('current_balance', 0):,.0f} ل.س
+        💰 الرصيد الحالي: {self.selected_customer.get('current_balance', 0):,.0f} كيلو واط
         📊 آخر قراءة عداد: {self.selected_customer.get('last_counter_reading', 0):,.0f}
         """
         
@@ -300,7 +300,7 @@ class InvoiceForm:
         الزبون: {self.selected_customer['name']}
         القطاع: {self.selected_customer.get('sector_name', 'غير محدد')}
         العلبة: {self.selected_customer.get('box_number', '')} | المسلسل: {self.selected_customer.get('serial_number', '')}
-        الرصيد السابق: {self.selected_customer.get('current_balance', 0):,.0f} ل.س
+        الرصيد السابق: {self.selected_customer.get('current_balance', 0):,.0f} كيلو واط
         """
         
         customer_label = tk.Label(details_frame, text=customer_info,
@@ -331,7 +331,7 @@ class InvoiceForm:
         • القراءة الجديدة: {calc['new_reading']:,.0f}
         • الكمية المقطوعة: {calc['consumed_kilowatt']:,.1f} كيلو
         
-        💳 الرصيد الجديد: {calc['current_balance']:,.0f} ل.س
+        💳 الرصيد الجديد: {calc['current_balance']:,.0f} كيلو واط
         🔑 كود التيليغرام: {calc.get('telegram_password', '')}
         """
         

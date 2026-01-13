@@ -503,7 +503,7 @@ class CustomerUI(tk.Frame):
                     sector,
                     box,
                     serial,
-                    f"{balance:,.0f} ل.س",
+                    f"{balance:,.0f} كيلو واط",
                     phone,
                     f"{visa:,.0f}",
                     "نشط" if is_active else "غير نشط"
@@ -517,7 +517,7 @@ class CustomerUI(tk.Frame):
             # تحديث الإحصائيات
             stats_text = (f"رصيد سالب: {balance_stats['negative']} | "
                          f"رصيد موجب: {balance_stats['positive']} | "
-                         f"إجمالي الرصيد: {balance_stats['total_balance']:,.0f} ل.س")
+                         f"إجمالي الرصيد: {balance_stats['total_balance']:,.0f} كيلو واط")
             self.stats_label.config(text=stats_text)
             
         except Exception as e:

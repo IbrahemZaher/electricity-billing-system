@@ -126,7 +126,7 @@ class ExcelMigration:
                         'serial_number': serial_number,
                         'name': name,
                         'phone_number': phone_number,
-                        'current_balance': safe_float(row.get('الرصيد الحالي', 0)),
+                        'current_balance': safe_float(row.get('الرصيد', 0)),
                         'last_counter_reading': safe_float(row.get('نهاية جديدة', 0)),
                         'visa_balance': safe_float(row.get('تنزيل تأشيرة', 0)),
                         'withdrawal_amount': safe_float(row.get('سحب المشترك', 0)),

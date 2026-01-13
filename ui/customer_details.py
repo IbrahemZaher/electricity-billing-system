@@ -157,7 +157,7 @@ class CustomerDetails:
         balance_status = 'سالب' if balance < 0 else 'موجب' if balance > 0 else 'صفر'
         
         financial_info = [
-            ('الرصيد الحالي', f"{balance:,.0f} ل.س", balance_color),
+            ('الرصيد الحالي', f"{balance:,.0f} كيلو واط", balance_color),
             ('حالة الرصيد', balance_status, balance_color),
             ('رصيد التأشيرة', f"{self.customer_data.get('visa_balance', 0):,.0f}", '#3498db'),
             ('سحب المشترك', f"{self.customer_data.get('withdrawal_amount', 0):,.0f}", '#9b59b6')
