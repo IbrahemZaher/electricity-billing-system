@@ -77,3 +77,19 @@ BACKUP_CONFIG = {
     ],
     'backup_interval_hours': 24
 }
+
+# إعدادات الأداء
+PERFORMANCE_SETTINGS = {
+    'fast_search_limit': 50,  # عدد نتائج البحث
+    'auto_save_interval': 60,  # ثانية للحفظ التلقائي
+    'cache_customers': True,   # تخزين مؤقت للزبائن
+    'parallel_backup': True,   # نسخ احتياطي موازي
+    'fast_printing': True,     # طباعة سريعة
+}
+
+# إعدادات الاتصال
+CONNECTION_POOL = {
+    'min_connections': 5,
+    'max_connections': 50,
+    'connection_timeout': 30,
+}

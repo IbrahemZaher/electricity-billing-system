@@ -264,8 +264,8 @@ class ReportUI(tk.Frame):
         الزبائن:
         --------
         • إجمالي الزبائن: {report.get('total_customers', 0):,}
-        • زبائن برصيد سالب: {report.get('negative_count', 0):,} ({abs(report.get('negative_total', 0)):,.0f} ل.س)
-        • زبائن برصيد موجب: {report.get('positive_count', 0):,} ({report.get('positive_total', 0):,.0f} ل.س)
+        • زبائن برصيد سالب: {report.get('negative_count', 0):,} ({abs(report.get('negative_total', 0)):,.0f} كيلو واط)
+        • زبائن برصيد موجب: {report.get('positive_count', 0):,} ({report.get('positive_total', 0):,.0f} كيلو واط)
         
         المبيعات:
         ---------
@@ -351,10 +351,11 @@ class ReportUI(tk.Frame):
         {'='*50}
         
         إجمالي الزبائن: {report.get('total_count', 0):,}
-        إجمالي الرصيد: {report.get('total_balance', 0):,.0f} ل.س
-        إجمالي الرصيد السالب: {report.get('negative_total', 0):,.0f} ل.س
-        إجمالي الرصيد الموجب: {report.get('positive_total', 0):,.0f} ل.س
-        صافي الرصيد: {(report.get('positive_total', 0) + report.get('negative_total', 0)):,.0f} ل.س
+        إجمالي الرصيد: {report.get('total_balance', 0):,.0f} كيلو واط
+        إجمالي الرصيد السالب: {report.get('negative_total', 0):,.0f} كيلو واط
+        إجمالي الرصيد الموجب: {report.get('positive_total', 0):,.0f} كيلو واط
+        صافي الرصيد: {(report.get('positive_total', 0) + report.get('negative_total', 0)):,.0f} كيلو واط
+        
         
         تم الإنشاء: {report.get('generated_at', '')}
         """

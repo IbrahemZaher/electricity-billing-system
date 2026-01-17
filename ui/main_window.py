@@ -188,36 +188,21 @@ class MainWindow:
         from ui.import_manager import ImportManagerUI
         import_manager = ImportManagerUI(self.content_frame, self.user_data)
         
+        # في ui/main_window.py في الدالة show_accounting_ui
     def show_accounting_ui(self):
         """عرض واجهة المحاسبة"""
         for widget in self.content_frame.winfo_children():
             widget.destroy()
 
-        frame = ttk.Frame(self.content_frame)
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-
-        title = ttk.Label(frame, text="المحاسبة", font=("Arial", 20, "bold"))
-        title.pack(pady=10)
-
-        ttk.Label(frame, text="رقم الزبون").pack(anchor='w')
-        customer_id_entry = ttk.Entry(frame)
-        customer_id_entry.pack(fill='x', pady=5)
-
-        ttk.Label(frame, text="القراءة الجديدة").pack(anchor='w')
-        new_reading_entry = ttk.Entry(frame)
-        new_reading_entry.pack(fill='x', pady=5)
-
-        process_btn = ttk.Button(
-            frame,
-            text="تنفيذ المحاسبة",
-            command=lambda: print(
-                "READY:",
-                customer_id_entry.get(),
-                new_reading_entry.get()
-            )
-        )
-        process_btn.pack(pady=20)
-    
+        try:
+            from ui.accounting_ui import AccountingUI
+            accounting_ui = AccountingUI(self.content_frame, self.user_data)
+            accounting_ui.pack(fill='both', expand=True)
+            logger.info("تم تحميل واجهة المحاسبة بنجاح")
+        except ImportError as e:
+            logger.error(f"خطأ في تحميل واجهة المحاسبة: {e}")
+            self.show_simple_accounting_ui()
+        
     def show_dashboard(self):
         """عرض لوحة التحكم"""
         for widget in self.content_frame.winfo_children():

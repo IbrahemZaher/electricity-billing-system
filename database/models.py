@@ -196,6 +196,30 @@ class Models:
                 VALUES (%s, %s, %s)
                 ON CONFLICT (key) DO NOTHING
             """, (key, value, description))
+        
+    
+        indexes = [
+            # فهارس لجداول للبحث السريع
+            "CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);",
+            "CREATE INDEX IF NOT EXISTS idx_customers_box_number ON customers(box_number);",
+            "CREATE INDEX IF NOT EXISTS idx_customers_sector_id ON customers(sector_id);",
+            "CREATE INDEX IF NOT EXISTS idx_customers_is_active ON customers(is_active);",
+            
+            "CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON invoices(customer_id);",
+            "CREATE INDEX IF NOT EXISTS idx_invoices_payment_date ON invoices(payment_date);",
+            "CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON invoices(invoice_number);",
+            
+            "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);",
+            "CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);",
+            
+            "CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);",
+            "CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);"
+        ]
+        
+        for index_sql in indexes:
+            cursor.execute(index_sql)
+        
+        logger.info("تم إنشاء الفهارس للبحث السريع")
 
 # إنشاء كائن النماذج
 models = Models()
