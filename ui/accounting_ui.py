@@ -55,9 +55,23 @@ class AccountingUI(tk.Frame):
         # شريط الأدوات العلوي
         self.create_toolbar(main_frame)
         
-        # إطار المحتوى القابل للتمرير
-        content_frame = tk.Frame(main_frame, bg='#f5f7fa')
-        content_frame.pack(fill='both', expand=True, padx=20, pady=10)
+                # إطار المحتوى القابل للتمرير
+        canvas = tk.Canvas(main_frame, bg='#f5f7fa', highlightthickness=0)
+        canvas.pack(fill='both', expand=True, padx=20, pady=10)
+
+        scrollbar = tk.Scrollbar(main_frame, orient='vertical', command=canvas.yview)
+        scrollbar.pack(side='right', fill='y')
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        content_frame = tk.Frame(canvas, bg='#f5f7fa')
+        canvas.create_window((0, 0), window=content_frame, anchor='nw')
+
+        def on_configure(event):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+
+        content_frame.bind('<Configure>', on_configure)
+
         
         # ===================== قسم البحث السريع =====================
         search_section = tk.LabelFrame(content_frame, text="🔍 بحث سريع عن الزبائن", 
@@ -163,7 +177,11 @@ class AccountingUI(tk.Frame):
         
         # شبكة لإدخال البيانات
         acc_frame = tk.Frame(acc_section, bg='white')
-        acc_frame.pack(fill='x')
+        acc_frame.pack(fill='both', expand=True)
+
+        acc_frame.columnconfigure(0, weight=0)
+        acc_frame.columnconfigure(1, weight=1)
+
         
         # حقل القراءة الجديدة
         tk.Label(acc_frame, text="القراءة الجديدة:", 
@@ -292,15 +310,21 @@ class AccountingUI(tk.Frame):
         user_info.pack(side='right', padx=20)
     
     def center_window(self):
-        """توسيط النافذة"""
-        if hasattr(self.parent, 'update_idletasks'):
-            self.parent.update_idletasks()
-            width = self.parent.winfo_width()
-            height = self.parent.winfo_height()
-            x = (self.parent.winfo_screenwidth() // 2) - (width // 2)
-            y = (self.parent.winfo_screenheight() // 2) - (height // 2)
-            self.parent.geometry(f'{width}x{height}+{x}+{y}')
-    
+        root = self.parent.winfo_toplevel()
+
+        root.update_idletasks()
+
+        width = 1200
+        height = 700
+
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+
+        x = (screen_width // 2) - (width // 2)
+        y = (screen_height // 2) - (height // 2)
+
+        root.geometry(f'{width}x{height}+{x}+{y}')
+
     def quick_search(self, event=None):
         """بحث فوري أثناء الكتابة"""
         search_term = self.search_var.get().strip()
