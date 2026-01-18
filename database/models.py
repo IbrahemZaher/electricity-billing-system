@@ -8,6 +8,69 @@ logger = logging.getLogger(__name__)
 class Models:
     def __init__(self):
         self.create_tables()
+
+    def update_invoices_table(self):
+        """تحديث جدول الفواتير بإضافة الأعمدة المفقودة"""
+        try:
+            with db.get_cursor() as cursor:
+                # التحقق من وجود الأعمدة وإضافتها إذا كانت غير موجودة
+                columns_to_add = [
+                    ('free_kilowatt', 'DECIMAL(10, 2) DEFAULT 0'),
+                    ('visa_application', 'VARCHAR(100)'),
+                    ('customer_withdrawal', 'VARCHAR(100)'),
+                    ('notes', 'TEXT')
+                ]
+                
+                for column_name, column_type in columns_to_add:
+                    # التحقق إذا كان العمود موجوداً
+                    cursor.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'invoices' 
+                        AND column_name = %s
+                    """, (column_name,))
+                    
+                    if not cursor.fetchone():
+                        # إضافة العمود إذا لم يكن موجوداً
+                        cursor.execute(f"""
+                            ALTER TABLE invoices 
+                            ADD COLUMN {column_name} {column_type}
+                        """)
+                        logger.info(f"تم إضافة العمود {column_name} إلى جدول invoices")
+                    else:
+                        logger.info(f"العمود {column_name} موجود بالفعل")
+                        
+        except Exception as e:
+            logger.error(f"خطأ في تحديث جدول invoices: {e}")
+    
+    def create_indexes(self, cursor):
+        """إنشاء الفهارس للبحث السريع"""
+        try:
+            indexes = [
+                "CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);",
+                "CREATE INDEX IF NOT EXISTS idx_customers_box_number ON customers(box_number);",
+                "CREATE INDEX IF NOT EXISTS idx_customers_sector_id ON customers(sector_id);",
+                "CREATE INDEX IF NOT EXISTS idx_customers_is_active ON customers(is_active);",
+                
+                "CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON invoices(customer_id);",
+                "CREATE INDEX IF NOT EXISTS idx_invoices_payment_date ON invoices(payment_date);",
+                "CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON invoices(invoice_number);",
+                
+                "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);",
+                "CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);",
+                
+                "CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);",
+                "CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);"
+            ]
+            
+            for index_sql in indexes:
+                cursor.execute(index_sql)
+            
+            logger.info("تم إنشاء الفهارس للبحث السريع")
+            
+        except Exception as e:
+            logger.error(f"خطأ في إنشاء الفهارس: {e}")
+            raise
     
     def create_tables(self):
         """إنشاء جميع الجداول الضرورية"""
@@ -150,6 +213,12 @@ class Models:
                 # إضافة البيانات الأساسية
                 self.seed_initial_data(cursor)
                 
+                # إنشاء الفهارس
+                self.create_indexes(cursor)
+                
+            # تحديث جدول الفواتير بإضافة الأعمدة المفقودة
+            self.update_invoices_table()
+                
         except Exception as e:
             logger.error(f"خطأ في إنشاء الجداول: {e}")
             raise
@@ -196,30 +265,6 @@ class Models:
                 VALUES (%s, %s, %s)
                 ON CONFLICT (key) DO NOTHING
             """, (key, value, description))
-        
-    
-        indexes = [
-            # فهارس لجداول للبحث السريع
-            "CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);",
-            "CREATE INDEX IF NOT EXISTS idx_customers_box_number ON customers(box_number);",
-            "CREATE INDEX IF NOT EXISTS idx_customers_sector_id ON customers(sector_id);",
-            "CREATE INDEX IF NOT EXISTS idx_customers_is_active ON customers(is_active);",
-            
-            "CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON invoices(customer_id);",
-            "CREATE INDEX IF NOT EXISTS idx_invoices_payment_date ON invoices(payment_date);",
-            "CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON invoices(invoice_number);",
-            
-            "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);",
-            "CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);",
-            
-            "CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);",
-            "CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);"
-        ]
-        
-        for index_sql in indexes:
-            cursor.execute(index_sql)
-        
-        logger.info("تم إنشاء الفهارس للبحث السريع")
 
 # إنشاء كائن النماذج
 models = Models()

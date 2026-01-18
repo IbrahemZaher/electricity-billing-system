@@ -89,51 +89,70 @@ class FastOperations:
         except Exception as e:
             logger.error(f"خطأ في جلب بيانات الزبون: {e}")
             return {}
-    
+            
     @staticmethod
-    def fast_process_invoice(customer_id: int, new_reading: float, 
-                           visa_amount: float = 0, discount: float = 0,
-                           user_id: int = 1) -> Dict:
-        """معالجة فاتورة سريعة (عملية واحدة)"""
+    def fast_process_invoice(customer_id: int, **kwargs):
+        """معالجة فاتورة سريعة (متوافقة مع الإصدارات القديمة والجديدة)"""
         try:
+            # دعم المعاملات القديمة والجديدة
+            new_reading = kwargs.get('new_reading')
+            visa_amount = kwargs.get('visa_amount', 0)
+            discount = kwargs.get('discount', 0)
+            user_id = kwargs.get('user_id', 1)
+            
+            kilowatt_amount = kwargs.get('kilowatt_amount')
+            free_kilowatt = kwargs.get('free_kilowatt', 0)
+            price_per_kilo = kwargs.get('price_per_kilo', 7200)
+            visa_application = kwargs.get('visa_application', '')
+            customer_withdrawal = kwargs.get('customer_withdrawal', '')
+            
             with db.get_cursor() as cursor:
-                # 1. جلب بيانات الزبون والحساب في استعلام واحد
+                # جلب بيانات الزبون
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         c.current_balance,
                         c.last_counter_reading,
                         c.sector_id,
                         c.name,
-                        s.name as sector_name,
-                        (SELECT value FROM settings WHERE key = 'default_price_per_kilo') as default_price
+                        s.name as sector_name
                     FROM customers c
-                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    INNER JOIN sectors s ON c.sector_id = s.id
                     WHERE c.id = %s AND c.is_active = TRUE
                     FOR UPDATE
                 """, (customer_id,))
-                
+                                
                 customer = cursor.fetchone()
                 if not customer:
                     return {"success": False, "error": "الزبون غير موجود"}
                 
-                # 2. إجراء الحسابات
-                previous_reading = customer['last_counter_reading'] or 0
-                current_balance = customer['current_balance'] or 0
+                previous_reading = float(customer['last_counter_reading'] or 0)
+                current_balance = float(customer['current_balance'] or 0)
                 
-                if new_reading < previous_reading:
-                    return {"success": False, "error": "القراءة الجديدة أقل من السابقة"}
+                # إذا تم تمرير new_reading (النموذج القديم)
+                if new_reading is not None:
+                    # تحويل من النموذج القديم إلى الجديد
+                    kilowatt_amount = new_reading - previous_reading - free_kilowatt
+                    if kilowatt_amount < 0:
+                        return {"success": False, "error": "القراءة الجديدة أقل من القراءة السابقة"}
+                    # تحويل visa_amount إلى visa_application
+                    if visa_amount:
+                        visa_application = str(visa_amount)
+                else:
+                    # النموذج الجديد
+                    if kilowatt_amount is None:
+                        return {"success": False, "error": "كمية الدفع مطلوبة"}
+                    new_reading = previous_reading + kilowatt_amount + free_kilowatt
                 
-                consumption = new_reading - previous_reading
-                price_per_kilo = float(customer['default_price'] or 7200)
-                amount = consumption * price_per_kilo
-                total_amount = amount - discount
-                new_balance = current_balance - total_amount + visa_amount
+                # حساب الرصيد الجديد (مثل النظام القديم)
+                new_balance = current_balance + kilowatt_amount + free_kilowatt
                 
-                # 3. إنشاء رقم فاتورة تلقائي
+                # حساب المبلغ الكلي
+                total_amount = (kilowatt_amount * price_per_kilo) - discount
+                
+                # إنشاء رقم فاتورة تلقائي
                 invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}-{customer_id}"
                 
-                # 4. تنفيذ كل العمليات في transaction واحدة
-                # تحديث الزبون
+                # تحديث بيانات الزبون
                 cursor.execute("""
                     UPDATE customers 
                     SET current_balance = %s,
@@ -141,33 +160,35 @@ class FastOperations:
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     RETURNING *
-                """, (new_balance, new_reading, customer_id))
+                """, (float(new_balance), float(new_reading), customer_id))
                 
                 # إدخال الفاتورة
                 cursor.execute("""
                     INSERT INTO invoices (
                         customer_id, sector_id, user_id, invoice_number,
-                        payment_date, payment_time, kilowatt_amount,
+                        payment_date, payment_time, kilowatt_amount, free_kilowatt,
                         price_per_kilo, discount, total_amount,
-                        previous_reading, new_reading, visa_application,
-                        current_balance, notes, created_at
+                        previous_reading, new_reading, visa_application, customer_withdrawal,
+                        current_balance, created_at
                     ) VALUES (
                         %s, %s, %s, %s,
-                        CURRENT_DATE, CURRENT_TIME, %s,
-                        %s, %s, %s, %s, %s, %s,
-                        %s, 'معالجة سريعة', CURRENT_TIMESTAMP
+                        CURRENT_DATE, CURRENT_TIME, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, CURRENT_TIMESTAMP
                     )
                     RETURNING id
                 """, (
                     customer_id, customer['sector_id'], user_id, invoice_number,
-                    consumption, price_per_kilo, discount, total_amount,
-                    previous_reading, new_reading, visa_amount,
-                    new_balance
+                    float(kilowatt_amount), float(free_kilowatt), float(price_per_kilo), 
+                    float(discount), float(total_amount),
+                    float(previous_reading), float(new_reading), 
+                    visa_application, customer_withdrawal,
+                    float(new_balance)
                 ))
                 
                 invoice_id = cursor.fetchone()['id']
                 
-                # 5. تسجيل النشاط
+                # تسجيل النشاط
                 cursor.execute("""
                     INSERT INTO activity_logs (user_id, action_type, description)
                     VALUES (%s, 'fast_invoice', %s)
@@ -180,16 +201,18 @@ class FastOperations:
                     "customer_name": customer['name'],
                     "previous_reading": previous_reading,
                     "new_reading": new_reading,
-                    "consumption": consumption,
+                    "kilowatt_amount": kilowatt_amount,
+                    "free_kilowatt": free_kilowatt,
                     "total_amount": total_amount,
                     "new_balance": new_balance,
                     "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
-                
+                    
         except Exception as e:
             logger.error(f"خطأ في المعالجة السريعة: {e}")
             return {"success": False, "error": str(e)}
-    
+
+
     @staticmethod
     def quick_export_to_excel(data: List[Dict], filename: str) -> str:
         """تصدير سريع إلى Excel"""
