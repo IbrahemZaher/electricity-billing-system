@@ -185,7 +185,7 @@ class InvoiceForm:
         fields_frame = tk.Frame(parent, bg='#f5f7fa', padx=30, pady=20)
         fields_frame.pack(fill='both', expand=True)
         
-        # تعريف الحقول
+        # تعريف الحقول الجديدة
         fields = [
             ('kilowatt_amount', 'كمية الدفع (كيلو)', 'entry', {'width': 15}),
             ('free_kilowatt', 'المجاني (كيلو)', 'entry', {'width': 15, 'default': '0'}),
@@ -196,7 +196,7 @@ class InvoiceForm:
             ('visa_application', 'تنزيل تأشيرة', 'entry', {'width': 20}),
             ('customer_withdrawal', 'سحب المشترك', 'entry', {'width': 20})
         ]
-        
+    
         self.payment_vars = {}
         
         for i, (field_name, label, field_type, options) in enumerate(fields):

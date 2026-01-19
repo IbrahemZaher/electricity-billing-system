@@ -266,5 +266,5 @@ class Models:
                 ON CONFLICT (key) DO NOTHING
             """, (key, value, description))
 
-# إنشاء كائن النماذج
+# تأكد أن هذا السطر موجود في النهاية
 models = Models()

@@ -1,3 +1,5 @@
+# modules/printing.py
+
 import arabic_reshaper
 from bidi.algorithm import get_display
 from PIL import Image, ImageDraw, ImageFont
@@ -57,7 +59,11 @@ class FastPrinter:
             price = invoice_data.get('price_per_kilo', 7200)
             total = invoice_data.get('total_amount', 0)
             balance = invoice_data.get('new_balance', 0)
-            
+
+            # الحصول على القيم الجديدة
+            kilowatt_amount = invoice_data.get('kilowatt_amount', 0)
+            free_kilowatt = invoice_data.get('free_kilowatt', 0)
+                
             # الطباعة
             self.printer.set(align='center')
             self.printer.textln(company + "\n")
@@ -85,7 +91,15 @@ class FastPrinter:
             self.printer.textln(f"القراءة السابقة: {previous:,.0f}\n")
             self.printer.textln(f"القراءة الجديدة: {new:,.0f}\n")
             self.printer.textln(f"الكمية: {consumption:,.1f} كيلو\n")
-            
+
+             # في قسم الكميات
+            if free_kilowatt > 0:
+                self.printer.textln(f"الكمية المدفوعة: {kilowatt_amount:,.1f} كيلو\n")
+                self.printer.textln(f"المجاني: {free_kilowatt:,.1f} كيلو\n")
+                self.printer.textln(f"إجمالي القطع: {(kilowatt_amount + free_kilowatt):,.1f} كيلو\n")
+            else:
+                self.printer.textln(f"الكمية: {kilowatt_amount:,.1f} كيلو\n")
+                
             # السعر والمبلغ
             self.printer.textln(f"سعر الكيلو: {price:,.0f} ل.س\n")
             

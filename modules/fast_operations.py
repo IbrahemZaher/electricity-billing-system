@@ -92,19 +92,14 @@ class FastOperations:
             
     @staticmethod
     def fast_process_invoice(customer_id: int, **kwargs):
-        """معالجة فاتورة سريعة (متوافقة مع الإصدارات القديمة والجديدة)"""
+        """معالجة فاتورة سريعة"""
         try:
-            # دعم المعاملات القديمة والجديدة
-            new_reading = kwargs.get('new_reading')
-            visa_amount = kwargs.get('visa_amount', 0)
-            discount = kwargs.get('discount', 0)
+            # استقبال البيانات الجديدة
+            kilowatt_amount = float(kwargs.get('kilowatt_amount', 0))
+            free_kilowatt = float(kwargs.get('free_kilowatt', 0))
+            price_per_kilo = float(kwargs.get('price_per_kilo', 7200))
+            discount = float(kwargs.get('discount', 0))
             user_id = kwargs.get('user_id', 1)
-            
-            kilowatt_amount = kwargs.get('kilowatt_amount')
-            free_kilowatt = kwargs.get('free_kilowatt', 0)
-            price_per_kilo = kwargs.get('price_per_kilo', 7200)
-            visa_application = kwargs.get('visa_application', '')
-            customer_withdrawal = kwargs.get('customer_withdrawal', '')
             
             with db.get_cursor() as cursor:
                 # جلب بيانات الزبون
@@ -120,7 +115,7 @@ class FastOperations:
                     WHERE c.id = %s AND c.is_active = TRUE
                     FOR UPDATE
                 """, (customer_id,))
-                                
+                
                 customer = cursor.fetchone()
                 if not customer:
                     return {"success": False, "error": "الزبون غير موجود"}
@@ -128,33 +123,17 @@ class FastOperations:
                 previous_reading = float(customer['last_counter_reading'] or 0)
                 current_balance = float(customer['current_balance'] or 0)
                 
-                # إذا تم تمرير new_reading (النموذج القديم)
-                if new_reading is not None:
-                    # تحويل من النموذج القديم إلى الجديد
-                    kilowatt_amount = new_reading - previous_reading - free_kilowatt
-                    if kilowatt_amount < 0:
-                        return {"success": False, "error": "القراءة الجديدة أقل من القراءة السابقة"}
-                    # تحويل visa_amount إلى visa_application
-                    if visa_amount:
-                        visa_application = str(visa_amount)
-                else:
-                    # النموذج الجديد
-                    if kilowatt_amount is None:
-                        return {"success": False, "error": "كمية الدفع مطلوبة"}
-                    new_reading = previous_reading + kilowatt_amount + free_kilowatt
-                
-                # حساب الرصيد الجديد (مثل النظام القديم)
+                # الحسابات الجديدة
+                new_reading = previous_reading + kilowatt_amount + free_kilowatt
                 new_balance = current_balance + kilowatt_amount + free_kilowatt
-                
-                # حساب المبلغ الكلي
                 total_amount = (kilowatt_amount * price_per_kilo) - discount
                 
-                # إنشاء رقم فاتورة تلقائي
+                # إنشاء رقم فاتورة
                 invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}-{customer_id}"
                 
                 # تحديث بيانات الزبون
                 cursor.execute("""
-                    UPDATE customers 
+                    UPDATE customers
                     SET current_balance = %s,
                         last_counter_reading = %s,
                         updated_at = CURRENT_TIMESTAMP
@@ -179,10 +158,11 @@ class FastOperations:
                     RETURNING id
                 """, (
                     customer_id, customer['sector_id'], user_id, invoice_number,
-                    float(kilowatt_amount), float(free_kilowatt), float(price_per_kilo), 
+                    float(kilowatt_amount), float(free_kilowatt), float(price_per_kilo),
                     float(discount), float(total_amount),
-                    float(previous_reading), float(new_reading), 
-                    visa_application, customer_withdrawal,
+                    float(previous_reading), float(new_reading),
+                    kwargs.get('visa_application', ''),
+                    kwargs.get('customer_withdrawal', ''),
                     float(new_balance)
                 ))
                 
@@ -211,7 +191,6 @@ class FastOperations:
         except Exception as e:
             logger.error(f"خطأ في المعالجة السريعة: {e}")
             return {"success": False, "error": str(e)}
-
 
     @staticmethod
     def quick_export_to_excel(data: List[Dict], filename: str) -> str:

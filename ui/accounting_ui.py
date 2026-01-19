@@ -1,5 +1,6 @@
 """
-ui/accounting_ui.py - واجهة محاسبة متكاملة تعمل على الشاشة كاملة
+ui/accounting_ui.py - واجهة محاسبة متكاملة مع النظام الجديد
+تم التحديث لدعم نظام كمية الدفع والمجاني بدلاً من القراءة الجديدة
 """
 
 import tkinter as tk
@@ -12,7 +13,7 @@ from modules.printing import FastPrinter
 logger = logging.getLogger(__name__)
 
 class AccountingUI(tk.Frame):
-    """واجهة محاسبة محسنة وسريعة تعمل على الشاشة كاملة"""
+    """واجهة محاسبة محسنة تعمل بالنظام الجديد (كمية الدفع + مجاني)"""
     
     def __init__(self, parent, user_data):
         super().__init__(parent)
@@ -23,6 +24,8 @@ class AccountingUI(tk.Frame):
         
         self.selected_customer = None
         self.sectors = []
+        self.last_invoice_result = None
+        self.search_results_data = []
         
         # تكوين الإطار ليملأ الشاشة كاملة
         self.pack(fill='both', expand=True)
@@ -43,7 +46,7 @@ class AccountingUI(tk.Frame):
             self.sectors = []
     
     def create_widgets(self):
-        """إنشاء واجهة كاملة الشاشة"""
+        """إنشاء واجهة كاملة الشاشة بالنظام الجديد"""
         # إزالة أي عناصر سابقة
         for widget in self.winfo_children():
             widget.destroy()
@@ -55,7 +58,7 @@ class AccountingUI(tk.Frame):
         # شريط الأدوات العلوي
         self.create_toolbar(main_frame)
         
-                # إطار المحتوى القابل للتمرير
+        # إطار المحتوى القابل للتمرير
         canvas = tk.Canvas(main_frame, bg='#f5f7fa', highlightthickness=0)
         canvas.pack(fill='both', expand=True, padx=20, pady=10)
 
@@ -71,7 +74,6 @@ class AccountingUI(tk.Frame):
             canvas.configure(scrollregion=canvas.bbox('all'))
 
         content_frame.bind('<Configure>', on_configure)
-
         
         # ===================== قسم البحث السريع =====================
         search_section = tk.LabelFrame(content_frame, text="🔍 بحث سريع عن الزبائن", 
@@ -93,6 +95,7 @@ class AccountingUI(tk.Frame):
                                     bg='#ecf0f1', relief='solid')
         self.search_entry.pack(side='left', padx=5, fill='x', expand=True)
         self.search_entry.bind('<KeyRelease>', self.quick_search)
+        self.search_entry.focus_set()
         
         # زر البحث
         search_btn = tk.Button(search_row, text="بحث", 
@@ -108,8 +111,8 @@ class AccountingUI(tk.Frame):
         results_frame.pack_propagate(False)
         
         # شريط التمرير
-        scrollbar = tk.Scrollbar(results_frame)
-        scrollbar.pack(side='right', fill='y')
+        scrollbar_results = tk.Scrollbar(results_frame)
+        scrollbar_results.pack(side='right', fill='y')
         
         # قائمة النتائج
         self.results_listbox = tk.Listbox(results_frame, 
@@ -117,10 +120,10 @@ class AccountingUI(tk.Frame):
                                          bg='white', fg='#2c3e50',
                                          selectbackground='#3498db',
                                          selectforeground='white',
-                                         yscrollcommand=scrollbar.set,
+                                         yscrollcommand=scrollbar_results.set,
                                          height=8)
         self.results_listbox.pack(side='left', fill='both', expand=True)
-        scrollbar.config(command=self.results_listbox.yview)
+        scrollbar_results.config(command=self.results_listbox.yview)
         self.results_listbox.bind('<<ListboxSelect>>', self.on_search_select)
         
         # ===================== قسم بيانات الزبون =====================
@@ -168,8 +171,8 @@ class AccountingUI(tk.Frame):
         info_frame.columnconfigure(1, weight=1)
         info_frame.columnconfigure(3, weight=1)
         
-        # ===================== قسم المحاسبة السريعة =====================
-        acc_section = tk.LabelFrame(content_frame, text="💰 إدخال بيانات الفاتورة", 
+        # ===================== قسم المحاسبة السريعة (النظام الجديد) =====================
+        acc_section = tk.LabelFrame(content_frame, text="💰 إدخال بيانات الفاتورة (النظام الجديد)", 
                                    font=('Arial', 14, 'bold'),
                                    bg='white', fg='#2c3e50',
                                    padx=15, pady=15, relief='groove')
@@ -181,59 +184,91 @@ class AccountingUI(tk.Frame):
 
         acc_frame.columnconfigure(0, weight=0)
         acc_frame.columnconfigure(1, weight=1)
-
         
-        # حقل القراءة الجديدة
-        tk.Label(acc_frame, text="القراءة الجديدة:", 
+        # حقل كمية الدفع (بدلاً من القراءة الجديدة)
+        tk.Label(acc_frame, text="كمية الدفع (كيلو):*", 
                 bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=0, column=0, sticky='e', padx=5, pady=12)
+                fg='#e74c3c').grid(row=0, column=0, sticky='e', padx=5, pady=12)
         
-        reading_frame = tk.Frame(acc_frame, bg='white')
-        reading_frame.grid(row=0, column=1, padx=5, pady=12, sticky='ew')
+        kilowatt_frame = tk.Frame(acc_frame, bg='white')
+        kilowatt_frame.grid(row=0, column=1, padx=5, pady=12, sticky='ew')
         
-        self.reading_var = tk.StringVar()
-        self.reading_entry = tk.Entry(reading_frame, textvariable=self.reading_var,
+        self.kilowatt_var = tk.StringVar()
+        self.kilowatt_entry = tk.Entry(kilowatt_frame, textvariable=self.kilowatt_var,
                                      font=('Arial', 12), width=15,
                                      bg='#ecf0f1', relief='solid')
-        self.reading_entry.pack(side='left', padx=2)
+        self.kilowatt_entry.pack(side='left', padx=2)
         
-        # أزرار التحكم في القراءة
-        tk.Button(reading_frame, text="+100", 
-                 command=lambda: self.adjust_reading(100),
+        # أزرار التحكم في كمية الدفع
+        tk.Button(kilowatt_frame, text="+100", 
+                 command=lambda: self.adjust_kilowatt(100),
                  bg='#3498db', fg='white',
                  font=('Arial', 10)).pack(side='left', padx=2)
         
-        tk.Button(reading_frame, text="+10", 
-                 command=lambda: self.adjust_reading(10),
+        tk.Button(kilowatt_frame, text="+10", 
+                 command=lambda: self.adjust_kilowatt(10),
                  bg='#3498db', fg='white',
                  font=('Arial', 10)).pack(side='left', padx=2)
         
-        tk.Button(reading_frame, text="-10", 
-                 command=lambda: self.adjust_reading(-10),
+        tk.Button(kilowatt_frame, text="-10", 
+                 command=lambda: self.adjust_kilowatt(-10),
                  bg='#e74c3c', fg='white',
                  font=('Arial', 10)).pack(side='left', padx=2)
+        
+        # حقل المجاني
+        tk.Label(acc_frame, text="المجاني (كيلو):", 
+                bg='white', font=('Arial', 12),
+                fg='#34495e').grid(row=1, column=0, sticky='e', padx=5, pady=12)
+        
+        self.free_var = tk.StringVar(value="0")
+        self.free_entry = tk.Entry(acc_frame, textvariable=self.free_var,
+                                  font=('Arial', 12), width=20,
+                                  bg='#ecf0f1', relief='solid')
+        self.free_entry.grid(row=1, column=1, padx=5, pady=12, sticky='w')
+        
+        # حقل سعر الكيلو
+        tk.Label(acc_frame, text="سعر الكيلو (ل.س):", 
+                bg='white', font=('Arial', 12),
+                fg='#34495e').grid(row=2, column=0, sticky='e', padx=5, pady=12)
+        
+        self.price_var = tk.StringVar(value="7200")
+        self.price_entry = tk.Entry(acc_frame, textvariable=self.price_var,
+                                   font=('Arial', 12), width=20,
+                                   bg='#ecf0f1', relief='solid')
+        self.price_entry.grid(row=2, column=1, padx=5, pady=12, sticky='w')
+        
+        # حقل الحسم
+        tk.Label(acc_frame, text="الحسم (ل.س):", 
+                bg='white', font=('Arial', 12),
+                fg='#34495e').grid(row=3, column=0, sticky='e', padx=5, pady=12)
+        
+        self.discount_var = tk.StringVar(value="0")
+        self.discount_entry = tk.Entry(acc_frame, textvariable=self.discount_var,
+                                      font=('Arial', 12), width=20,
+                                      bg='#ecf0f1', relief='solid')
+        self.discount_entry.grid(row=3, column=1, padx=5, pady=12, sticky='w')
         
         # حقل التأشيرة
         tk.Label(acc_frame, text="تنزيل تأشيرة:", 
                 bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=1, column=0, sticky='e', padx=5, pady=12)
+                fg='#34495e').grid(row=4, column=0, sticky='e', padx=5, pady=12)
         
         self.visa_var = tk.StringVar()
         self.visa_entry = tk.Entry(acc_frame, textvariable=self.visa_var,
                                   font=('Arial', 12), width=20,
                                   bg='#ecf0f1', relief='solid')
-        self.visa_entry.grid(row=1, column=1, padx=5, pady=12, sticky='w')
+        self.visa_entry.grid(row=4, column=1, padx=5, pady=12, sticky='w')
         
-        # حقل الحسم
-        tk.Label(acc_frame, text="الحسم:", 
+        # حقل سحب المشترك
+        tk.Label(acc_frame, text="سحب المشترك:", 
                 bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=2, column=0, sticky='e', padx=5, pady=12)
+                fg='#34495e').grid(row=5, column=0, sticky='e', padx=5, pady=12)
         
-        self.discount_var = tk.StringVar()
-        self.discount_entry = tk.Entry(acc_frame, textvariable=self.discount_var,
-                                      font=('Arial', 12), width=20,
-                                      bg='#ecf0f1', relief='solid')
-        self.discount_entry.grid(row=2, column=1, padx=5, pady=12, sticky='w')
+        self.withdrawal_var = tk.StringVar()
+        self.withdrawal_entry = tk.Entry(acc_frame, textvariable=self.withdrawal_var,
+                                        font=('Arial', 12), width=20,
+                                        bg='#ecf0f1', relief='solid')
+        self.withdrawal_entry.grid(row=5, column=1, padx=5, pady=12, sticky='w')
         
         # جعل الأعمدة قابلة للتوسع
         acc_frame.columnconfigure(1, weight=1)
@@ -272,6 +307,14 @@ class AccountingUI(tk.Frame):
                             padx=40, pady=15, cursor='hand2')
         clear_btn.pack(side='left', padx=10)
         
+        # زر حساب المعاينة
+        preview_btn = tk.Button(btn_frame, text="🧮 حساب المعاينة", 
+                              command=self.calculate_preview,
+                              bg='#9b59b6', fg='white',
+                              font=('Arial', 14),
+                              padx=40, pady=15, cursor='hand2')
+        preview_btn.pack(side='left', padx=10)
+        
         # ===================== قسم النتائج =====================
         result_section = tk.LabelFrame(content_frame, text="📊 تفاصيل المعالجة", 
                                       font=('Arial', 14, 'bold'),
@@ -288,6 +331,9 @@ class AccountingUI(tk.Frame):
                                                     wrap='word')
         self.result_text.pack(fill='both', expand=True)
         self.result_text.config(state='disabled')
+        
+        # عرض رسالة ترحيبية
+        self.show_result_message("🔍 ابدأ بالبحث عن زبون باستخدام حقل البحث أعلاه...")
     
     def create_toolbar(self, parent):
         """إنشاء شريط الأدوات العلوي"""
@@ -297,7 +343,7 @@ class AccountingUI(tk.Frame):
         
         # العنوان
         title_label = tk.Label(toolbar, 
-                              text="مولدة الريان - نظام المحاسبة السريعة",
+                              text="مولدة الريان - نظام المحاسبة السريعة (النظام الجديد)",
                               font=('Arial', 18, 'bold'),
                               bg='#2c3e50', fg='white')
         title_label.pack(side='left', padx=20)
@@ -310,8 +356,8 @@ class AccountingUI(tk.Frame):
         user_info.pack(side='right', padx=20)
     
     def center_window(self):
+        """توسيط النافذة على الشاشة"""
         root = self.parent.winfo_toplevel()
-
         root.update_idletasks()
 
         width = 1200
@@ -324,7 +370,8 @@ class AccountingUI(tk.Frame):
         y = (screen_height // 2) - (height // 2)
 
         root.geometry(f'{width}x{height}+{x}+{y}')
-
+        root.minsize(1000, 600)
+    
     def quick_search(self, event=None):
         """بحث فوري أثناء الكتابة"""
         search_term = self.search_var.get().strip()
@@ -367,7 +414,7 @@ class AccountingUI(tk.Frame):
             return
         
         idx = selection[0]
-        if hasattr(self, 'search_results_data') and self.search_results_data:
+        if hasattr(self, 'search_results_data') and idx < len(self.search_results_data):
             customer = self.search_results_data[idx]
             self.select_customer(customer['id'])
     
@@ -391,72 +438,158 @@ class AccountingUI(tk.Frame):
             self.info_vars['visa'].set(f"{customer_data.get('visa_balance', 0):,.0f}")
             self.info_vars['withdrawal'].set(f"{customer_data.get('withdrawal_amount', 0):,.0f}")
             
-            # تعبئة حقل القراءة الجديدة بالقراءة السابقة
-            last_reading = customer_data.get('last_counter_reading', 0)
-            self.reading_var.set(str(last_reading))
+            # تصفير حقول الإدخال
+            self.kilowatt_var.set("")
+            self.free_var.set("0")
+            self.price_var.set("7200")
+            self.discount_var.set("0")
+            self.visa_var.set("")
+            self.withdrawal_var.set("")
             
             # تفعيل الأزرار
             self.process_btn.config(state='normal', bg='#27ae60')
             self.print_btn.config(state='normal', bg='#3498db')
             
             # إظهار رسالة في منطقة النتائج
-            self.show_result_message(f"✅ تم تحديد الزبون: {customer_data.get('name', '')}\nيمكنك الآن إدخال القراءة الجديدة وإجراء المحاسبة.")
+            self.show_result_message(f"✅ تم تحديد الزبون: {customer_data.get('name', '')}\n"
+                                   f"الرصيد الحالي: {customer_data.get('current_balance', 0):,.0f} كيلو واط\n"
+                                   f"آخر قراءة عداد: {customer_data.get('last_counter_reading', 0):,.0f}\n\n"
+                                   f"⚠️ أدخل كمية الدفع والمجاني ثم اضغط على 'معالجة سريعة'")
+            
+            # وضع التركيز على حقل كمية الدفع
+            self.kilowatt_entry.focus_set()
             
         except Exception as e:
             logger.error(f"خطأ في تحديد الزبون: {e}")
             messagebox.showerror("خطأ", f"فشل تحميل بيانات الزبون: {str(e)}")
     
-    def adjust_reading(self, amount):
-        """ضبط القراءة بزيادة/نقصان"""
+    def adjust_kilowatt(self, amount):
+        """ضبط كمية الدفع بزيادة/نقصان"""
         try:
-            current = float(self.reading_var.get() or 0)
+            current = float(self.kilowatt_var.get() or 0)
             new_value = current + amount
             if new_value >= 0:
-                self.reading_var.set(str(int(new_value)))
+                self.kilowatt_var.set(str(int(new_value)))
         except ValueError:
-            self.reading_var.set("0")
+            self.kilowatt_var.set("0")
     
-    def fast_process(self):
-        """معالجة فاتورة سريعة"""
+    def calculate_preview(self):
+        """حساب معاينة الفاتورة دون حفظ"""
         if not self.selected_customer:
             messagebox.showerror("خطأ", "يرجى اختيار زبون أولاً")
             return
         
         try:
             # التحقق من المدخلات
-            if not self.reading_var.get().strip():
-                messagebox.showerror("خطأ", "يرجى إدخال القراءة الجديدة")
+            if not self.kilowatt_var.get().strip():
+                messagebox.showerror("خطأ", "يرجى إدخال كمية الدفع")
                 return
             
-            new_reading = float(self.reading_var.get())
-            visa_amount = float(self.visa_var.get() or 0)
+            kilowatt_amount = float(self.kilowatt_var.get())
+            free_kilowatt = float(self.free_var.get() or 0)
+            price_per_kilo = float(self.price_var.get() or 7200)
             discount = float(self.discount_var.get() or 0)
             
-            # التحقق من القراءة الجديدة
+            # الحسابات
             last_reading = float(self.selected_customer.get('last_counter_reading', 0))
-            if new_reading < last_reading:
-                messagebox.showerror("خطأ", "القراءة الجديدة يجب أن تكون أكبر من أو تساوي القراءة السابقة")
+            current_balance = float(self.selected_customer.get('current_balance', 0))
+            
+            # القراءة الجديدة = القراءة السابقة + كمية الدفع + المجاني
+            new_reading = last_reading + kilowatt_amount + free_kilowatt
+            
+            # الرصيد الجديد = الرصيد الحالي + كمية الدفع + المجاني
+            new_balance = current_balance + kilowatt_amount + free_kilowatt
+            
+            # المبلغ الكلي = (كمية الدفع * سعر الكيلو) - الحسم
+            total_amount = (kilowatt_amount * price_per_kilo) - discount
+            
+            # عرض المعاينة
+            preview_text = f"""
+            📊 معاينة الحساب (غير محفوظة):
+            
+            الزبون: {self.selected_customer.get('name', '')}
+            
+            البيانات المدخلة:
+            • كمية الدفع: {kilowatt_amount:,.1f} كيلو
+            • المجاني: {free_kilowatt:,.1f} كيلو
+            • سعر الكيلو: {price_per_kilo:,.0f} ل.س
+            • الحسم: {discount:,.0f} ل.س
+            
+            نتائج الحساب:
+            • القراءة السابقة: {last_reading:,.0f}
+            • القراءة الجديدة: {new_reading:,.0f}
+            • الإجمالي المقطوع: {(kilowatt_amount + free_kilowatt):,.1f} كيلو
+            • المبلغ الإجمالي: {total_amount:,.0f} ليرة سورية
+            • الرصيد الجديد: {new_balance:,.0f} كيلو واط
+            
+            للحفظ الفعلي اضغط على "⚡ معالجة سريعة"
+            """
+            
+            self.show_result_message(preview_text)
+            
+        except ValueError:
+            messagebox.showerror("خطأ", "يرجى إدخال أرقام صحيحة في الحقول الرقمية")
+        except Exception as e:
+            logger.error(f"خطأ في حساب المعاينة: {e}")
+            messagebox.showerror("خطأ", f"فشل حساب المعاينة: {str(e)}")
+    
+    def fast_process(self):
+        """معالجة فاتورة سريعة بالنظام الجديد"""
+        if not self.selected_customer:
+            messagebox.showerror("خطأ", "يرجى اختيار زبون أولاً")
+            return
+        
+        try:
+            # التحقق من المدخلات
+            if not self.kilowatt_var.get().strip():
+                messagebox.showerror("خطأ", "يرجى إدخال كمية الدفع")
                 return
+            
+            # جمع البيانات
+            kilowatt_amount = float(self.kilowatt_var.get())
+            free_kilowatt = float(self.free_var.get() or 0)
+            price_per_kilo = float(self.price_var.get() or 7200)
+            discount = float(self.discount_var.get() or 0)
+            visa_application = self.visa_var.get()
+            customer_withdrawal = self.withdrawal_var.get()
+            
+            # التحقق من صحة البيانات
+            if kilowatt_amount < 0 or free_kilowatt < 0:
+                messagebox.showerror("خطأ", "كمية الدفع والمجاني يجب أن تكون أرقاماً موجبة")
+                return
+            
+            # الحسابات للمعاينة
+            last_reading = float(self.selected_customer.get('last_counter_reading', 0))
+            total_kilowatt = kilowatt_amount + free_kilowatt
             
             # إظهار تأكيد
             confirm_msg = f"""
             هل أنت متأكد من معالجة الفاتورة؟
             
             الزبون: {self.selected_customer.get('name', '')}
-            القراءة السابقة: {last_reading:,.0f}
-            القراءة الجديدة: {new_reading:,.0f}
-            الاستهلاك: {new_reading - last_reading:,.1f} كيلو
+            
+            البيانات المدخلة:
+            • كمية الدفع: {kilowatt_amount:,.1f} كيلو
+            • المجاني: {free_kilowatt:,.1f} كيلو
+            • الإجمالي: {total_kilowatt:,.1f} كيلو
+            • سعر الكيلو: {price_per_kilo:,.0f} ل.س
+            • الحسم: {discount:,.0f} ل.س
+            
+            ستصبح القراءة الجديدة: {last_reading + total_kilowatt:,.0f}
             """
             
             if not messagebox.askyesno("تأكيد المعالجة", confirm_msg):
                 return
             
-            # معالجة الفاتورة
+            # معالجة الفاتورة باستخدام التابع المعدل
             result = self.fast_ops.fast_process_invoice(
                 customer_id=self.selected_customer['id'],
-                new_reading=new_reading,
-                visa_amount=visa_amount,
+                kilowatt_amount=kilowatt_amount,
+                free_kilowatt=free_kilowatt,
+                price_per_kilo=price_per_kilo,
                 discount=discount,
+                visa_application=visa_application,
+                customer_withdrawal=customer_withdrawal,
                 user_id=self.user_data.get('id', 1)
             )
             
@@ -468,9 +601,11 @@ class AccountingUI(tk.Frame):
                 تفاصيل الفاتورة:
                 • رقم الفاتورة: {result.get('invoice_number', 'N/A')}
                 • الزبون: {result.get('customer_name', 'N/A')}
+                • كمية الدفع: {result.get('kilowatt_amount', 0):,.1f} كيلو
+                • المجاني: {result.get('free_kilowatt', 0):,.1f} كيلو
+                • الإجمالي المقطوع: {(result.get('kilowatt_amount', 0) + result.get('free_kilowatt', 0)):,.1f} كيلو
                 • القراءة السابقة: {result.get('previous_reading', 0):,.0f}
                 • القراءة الجديدة: {result.get('new_reading', 0):,.0f}
-                • الاستهلاك: {result.get('consumption', 0):,.1f} كيلو
                 • المبلغ الإجمالي: {result.get('total_amount', 0):,.0f} ليرة سورية
                 • الرصيد الجديد: {result.get('new_balance', 0):,.0f}
                 • وقت المعالجة: {result.get('processed_at', 'N/A')}
@@ -485,9 +620,9 @@ class AccountingUI(tk.Frame):
                 
                 # تحديث بيانات الزبون المعروضة
                 self.selected_customer['current_balance'] = result['new_balance']
-                self.selected_customer['last_counter_reading'] = new_reading
+                self.selected_customer['last_counter_reading'] = result['new_reading']
                 self.info_vars['balance'].set(f"{result['new_balance']:,.0f}")
-                self.info_vars['reading'].set(f"{new_reading:,.0f}")
+                self.info_vars['reading'].set(f"{result['new_reading']:,.0f}")
                 
                 # سؤال عن الطباعة
                 if messagebox.askyesno("طباعة", "هل تريد طباعة الفاتورة الآن؟"):
@@ -522,12 +657,14 @@ class AccountingUI(tk.Frame):
                 'serial_number': self.selected_customer.get('serial_number', ''),
                 'previous_reading': self.last_invoice_result.get('previous_reading', 0),
                 'new_reading': self.last_invoice_result.get('new_reading', 0),
-                'consumption': self.last_invoice_result.get('consumption', 0),
-                'price_per_kilo': 7200,  # يمكن جلبها من الإعدادات
+                'kilowatt_amount': self.last_invoice_result.get('kilowatt_amount', 0),
+                'free_kilowatt': self.last_invoice_result.get('free_kilowatt', 0),
+                'consumption': self.last_invoice_result.get('kilowatt_amount', 0) + self.last_invoice_result.get('free_kilowatt', 0),
+                'price_per_kilo': 7200,
                 'total_amount': self.last_invoice_result.get('total_amount', 0),
                 'new_balance': self.last_invoice_result.get('new_balance', 0),
                 'invoice_number': self.last_invoice_result.get('invoice_number', ''),
-                'discount': 0
+                'discount': self.last_invoice_result.get('discount', 0)
             }
             
             if self.printer.print_fast_invoice(invoice_data):
@@ -550,18 +687,26 @@ class AccountingUI(tk.Frame):
     
     def clear_input_fields(self):
         """تصفير حقول الإدخال فقط"""
+        self.kilowatt_var.set("")
+        self.free_var.set("0")
+        self.price_var.set("7200")
+        self.discount_var.set("0")
         self.visa_var.set("")
-        self.discount_var.set("")
+        self.withdrawal_var.set("")
+        
         if self.selected_customer:
             last_reading = self.selected_customer.get('last_counter_reading', 0)
-            self.reading_var.set(str(last_reading))
+            self.kilowatt_entry.focus_set()
     
     def clear_fields(self):
         """تصفير جميع الحقول"""
         self.search_var.set("")
-        self.reading_var.set("")
+        self.kilowatt_var.set("")
+        self.free_var.set("0")
+        self.price_var.set("7200")
+        self.discount_var.set("0")
         self.visa_var.set("")
-        self.discount_var.set("")
+        self.withdrawal_var.set("")
         
         # تصفير حقول المعلومات
         for var in self.info_vars.values():
@@ -571,11 +716,15 @@ class AccountingUI(tk.Frame):
         self.results_listbox.delete(0, tk.END)
         
         # تصفير منطقة النتائج
-        self.show_result_message("🔍 ابدأ بالبحث عن زبون...")
+        self.show_result_message("🔍 ابدأ بالبحث عن زبون باستخدام حقل البحث أعلاه...")
         
         # إلغاء تحديد الزبون
         self.selected_customer = None
+        self.last_invoice_result = None
         
         # تعطيل الأزرار
         self.process_btn.config(state='disabled', bg='#95a5a6')
         self.print_btn.config(state='disabled', bg='#95a5a6')
+        
+        # وضع التركيز على حقل البحث
+        self.search_entry.focus_set()
