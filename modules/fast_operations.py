@@ -233,6 +233,22 @@ class FastOperations:
                     if invoices:
                         df_invoices = pd.DataFrame([dict(i) for i in invoices])
                         df_invoices.to_excel(writer, sheet_name='invoices', index=False)
+
+                # في دالة backup_to_excel_parallel() بعد تصدير الفواتير
+                # تصدير السجل التاريخي
+                with db.get_cursor() as cursor:
+                    cursor.execute('''
+                        SELECT h.*, c.name as customer_name
+                        FROM customer_history h
+                        LEFT JOIN customers c ON h.customer_id = c.id
+                        ORDER BY h.created_at DESC
+                        LIMIT 5000
+                    ''')
+                    history = cursor.fetchall()
+                    if history:
+                        df_history = pd.DataFrame([dict(h) for h in history])
+                        df_history.to_excel(writer, sheet_name='history', index=False)
+
             
             logger.info(f"تم النسخ الاحتياطي الموازي: {backup_file}")
             return True

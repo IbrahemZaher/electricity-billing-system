@@ -82,6 +82,7 @@ class CustomerUI(tk.Frame):
                 ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c"),
                 ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6"),
                 ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6"),
+                ("📜 السجل التاريخي", self.show_customer_history, "#8e44ad"),
                 ("🗑️🔥 حذف وإعادة الاستيراد", self.delete_and_reimport, "#e74c3c", 'bold')  # زر جديد
             ]
         else:
@@ -670,3 +671,24 @@ class CustomerUI(tk.Frame):
     def show_error_message(self, message):
         """عرض رسالة خطأ"""
         messagebox.showerror("خطأ", message)
+    # ثم أضف الدالة الجديدة:
+    def show_customer_history(self):
+        """عرض السجل التاريخي للزبون"""
+        customer_id = self.get_selected_customer_id()
+        if not customer_id:
+            messagebox.showwarning("تحذير", "يرجى تحديد زبون أولاً")
+            return
+        
+        try:
+            # جلب بيانات الزبون
+            customer = self.customer_manager.get_customer(customer_id)
+            if not customer:
+                messagebox.showerror("خطأ", "الزبون غير موجود")
+                return
+            
+            from ui.customer_history_ui import CustomerHistoryUI
+            CustomerHistoryUI(self, customer, self.user_data)
+            
+        except Exception as e:
+            logger.error(f"خطأ في عرض السجل التاريخي: {e}")
+            messagebox.showerror("خطأ", f"فشل عرض السجل: {str(e)}")

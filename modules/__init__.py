@@ -10,5 +10,6 @@ __all__ = [
     'InvoiceManager',
     'ReportManager',
     'AccountingEngine',
-    'ArchiveManager'
+    'ArchiveManager',
+    'HistoryManager'  # أضف هذا السطر
 ]
