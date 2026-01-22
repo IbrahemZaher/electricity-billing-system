@@ -104,20 +104,19 @@ class LoginWindow:
             messagebox.showerror("خطأ", "يرجى إدخال اسم المستخدم وكلمة المرور")
             return
         
-        # Note: We'll need to fix the auth import later
-        # user = auth.login(username, password)
-        user = {"id": 1, "full_name": "Admin", "role": "admin", "permissions": {"all": True}}
-        
-        if user:
+        # استدعاء دالة تسجيل الدخول من auth
+        user = auth.login(username, password)
+
+        if user and 'error' not in user:
             # إغلاق نافذة تسجيل الدخول
             self.window.destroy()
-            
+
             # استيراد MainWindow بعد إغلاق نافذة تسجيل الدخول لتجنب الاستيراد الدائري
             from ui.main_window import MainWindow
             main_window = MainWindow(user)
             main_window.run()
         else:
-            messagebox.showerror("خطأ", "اسم المستخدم أو كلمة المرور غير صحيحة")
+            messagebox.showerror("خطأ", user['error'] if user and 'error' in user else "اسم المستخدم أو كلمة المرور غير صحيحة")
     
     def run(self):
         """تشغيل النافذة"""

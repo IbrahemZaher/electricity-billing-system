@@ -53,7 +53,7 @@ class Authentication:
                 user = cursor.fetchone()
                 
                 if not user:
-                    return None
+                    return {'error': 'اسم المستخدم أو كلمة المرور غير صحيحة'}
                 
                 if not user['is_active']:
                     return {'error': 'الحساب غير مفعل'}
@@ -82,12 +82,12 @@ class Authentication:
                         'token': token
                     }
                 else:
-                    return None
+                    return {'error': 'اسم المستخدم أو كلمة المرور غير صحيحة'}
                     
         except Exception as e:
             logger.error(f"خطأ في تسجيل الدخول: {e}")
-            return None
-    
+            return {'error': 'حدث خطأ أثناء تسجيل الدخول'}
+
     def register_user(self, user_data):
         """تسجيل مستخدم جديد"""
         try:
