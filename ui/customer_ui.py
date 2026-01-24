@@ -4,6 +4,7 @@ from tkinter import ttk, messagebox
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional
+from auth.permissions import has_permission, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -56,69 +57,58 @@ class CustomerUI(tk.Frame):
         # شريط الحالة السفلي
         self.create_statusbar()
     
-        # ui/customer_ui.py - إضافة زر جديد في create_toolbar
+            # ui/customer_ui.py - إضافة زر جديد في create_toolbar
+    # تحديث دالة create_toolbar:
     def create_toolbar(self):
         """إنشاء شريط الأدوات العلوي"""
         toolbar = tk.Frame(self, bg='#2c3e50', height=60)
         toolbar.pack(fill='x', padx=0, pady=0)
         toolbar.pack_propagate(False)
         
-        # عنوان الشريط
         title_label = tk.Label(toolbar, 
                             text="إدارة الزبائن",
                             font=('Arial', 16, 'bold'),
                             bg='#2c3e50', fg='white')
         title_label.pack(side='left', padx=20)
         
-        # أزرار الأدوات
         buttons_frame = tk.Frame(toolbar, bg='#2c3e50')
         buttons_frame.pack(side='right', padx=20)
         
-        # إذا كان المستخدم مديراً، أضف زر الحذف الكامل
-        if self.user_data.get('role') == 'admin':
-            buttons = [
-                ("➕ إضافة زبون جديد", self.add_customer, "#27ae60"),
-                ("✏️ تعديل المحدد", self.edit_customer, "#3498db"),
-                ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c"),
-                ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6"),
-                ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6"),
-                ("📜 السجل التاريخي", self.show_customer_history, "#8e44ad"),
-                ("🗑️🔥 حذف وإعادة الاستيراد", self.delete_and_reimport, "#e74c3c", 'bold')  # زر جديد
-            ]
-        else:
-            buttons = [
-                ("➕ إضافة زبون جديد", self.add_customer, "#27ae60"),
-                ("✏️ تعديل المحدد", self.edit_customer, "#3498db"),
-                ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c"),
-                ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6"),
-                ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6")
-            ]
+        # استخدام الصلاحيات بدلاً من التحقق المباشر
+        buttons = [
+            ("➕ إضافة زبون جديد", self.add_customer, "#27ae60", 'customers.add'),
+            ("✏️ تعديل المحدد", self.edit_customer, "#3498db", 'customers.edit'),
+            ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c", 'customers.delete'),
+            ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6", 'customers.view'),
+            ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6", 'customers.view_details'),
+            ("📜 السجل التاريخي", self.show_customer_history, "#8e44ad", 'customers.view_history'),
+            ("🗑️🔥 حذف وإعادة الاستيراد", self.delete_and_reimport, "#e74c3c", 'customers.reimport'),
+            ("🗑️ حذف قطاع", self.delete_sector_customers, "#c0392b", 'customers.manage_sectors')
+        ]
         
-        for button_info in buttons:
-            if len(button_info) == 4:  # زر مع تنسيق خاص
-                text, command, color, font_weight = button_info
+        for text, command, color, permission in buttons:
+            if has_permission(permission):
+                btn = tk.Button(buttons_frame, text=text, command=command,
+                            bg=color, fg='white',
+                            font=('Arial', 10),
+                            padx=12, pady=6, cursor='hand2')
+                btn.pack(side='left', padx=5)
             else:
-                text, command, color = button_info
-                font_weight = 'normal'
-            
-            btn = tk.Button(buttons_frame, text=text, command=command,
-                        bg=color, fg='white',
-                        font=('Arial', 10, font_weight),
-                        padx=12, pady=6, cursor='hand2')
-            btn.pack(side='left', padx=5)
-        
-        # إذا كان المستخدم مديراً، أضف زر حذف القطاع
-        if self.user_data.get('role') == 'admin':
-            tk.Button(buttons_frame, text="🗑️ حذف قطاع",
-                    command=self.delete_sector_customers,
-                    bg='#c0392b', fg='white',
-                    font=('Arial', 10),
-                    padx=12, pady=6, cursor='hand2').pack(side='left', padx=5)
+                # زر معطل
+                btn = tk.Button(buttons_frame, text=text,
+                            state='disabled',
+                            bg='#95a5a6', fg='white',
+                            font=('Arial', 10),
+                            padx=12, pady=6)
+                btn.pack(side='left', padx=5)
 
     # إضافة دوال جديدة في customer_ui.py
     def delete_and_reimport(self):
-        """حذف جميع الزبائن وإعادة الاستيراد من Excel"""
-        if not self.check_admin_permission():
+        """حذف جميع الزبائن وإعادة الاستيراد"""
+        try:
+            require_permission('customers.reimport')
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
             return
         
         # تحذير شديد
@@ -240,9 +230,11 @@ class CustomerUI(tk.Frame):
 
     def delete_sector_customers(self):
         """حذف زبائن قطاع معين"""
-        if not self.check_admin_permission():
-            return
-        
+        try:
+            require_permission('customers.manage_sectors')
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return        
         # نافذة اختيار القطاع
         sector_dialog = tk.Toplevel(self)
         sector_dialog.title("حذف زبائن قطاع")
@@ -566,7 +558,14 @@ class CustomerUI(tk.Frame):
         item = self.tree.item(selection[0])
         return item['values'][0]  # العمود الأول هو ID
     
+    # تحديث دوال محددة:
     def add_customer(self):
+        """فتح نموذج إضافة زبون جديد"""
+        try:
+            require_permission('customers.add')
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
         """فتح نموذج إضافة زبون جديد"""
         from ui.customer_form import CustomerForm
         form = CustomerForm(self, "إضافة زبون جديد", self.sectors)
@@ -585,6 +584,13 @@ class CustomerUI(tk.Frame):
                 messagebox.showerror("خطأ", f"فشل إضافة الزبون: {str(e)}")
     
     def edit_customer(self):
+        """فتح نموذج تعديل الزبون المحدد"""
+        try:
+            require_permission('customers.edit')
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+
         """فتح نموذج تعديل الزبون المحدد"""
         customer_id = self.get_selected_customer_id()
         if not customer_id:
@@ -615,6 +621,13 @@ class CustomerUI(tk.Frame):
             messagebox.showerror("خطأ", f"فشل تعديل الزبون: {str(e)}")
     
     def delete_customer(self):
+        """حذف الزبون المحدد"""
+        try:
+            require_permission('customers.delete')
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+
         """حذف الزبون المحدد"""
         customer_id = self.get_selected_customer_id()
         if not customer_id:
