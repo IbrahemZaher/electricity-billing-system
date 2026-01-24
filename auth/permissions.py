@@ -28,7 +28,8 @@ def has_permission(permission_key: str) -> bool:
         return False
     
     user_id = Session.current_user['id']
-    result = permission_engine.has_permission(user_id, permission_key)
+    user_role = Session.get_role()  # تمرير الدور لتجنب استعلام إضافي
+    result = permission_engine.has_permission(user_id, permission_key, user_role)
     
     logger.debug(f"التحقق من الصلاحية: {permission_key} للمستخدم {user_id} => {result}")
     return result
@@ -138,5 +139,5 @@ def check_permission(user, permission):
     
     new_permission = permission_map.get(permission, permission)
     
-    # استخدام النظام الجديد
-    return permission_engine.has_permission(user['id'], new_permission)
+    # استخدام النظام الجديد مع تمرير الدور
+    return permission_engine.has_permission(user['id'], new_permission, user.get('role'))

@@ -8,6 +8,7 @@
 
 from database.connection import db
 import logging
+import time
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -17,41 +18,61 @@ class PermissionEngine:
     
     def __init__(self):
         self.db = db
+        self._permissions_cache = {}  # user_id -> (timestamp, permissions_dict)
+        self._cache_ttl = 30  # seconds
         
-    def has_permission(self, user_id: int, permission_key: str) -> bool:
+    def has_permission(self, user_id: int, permission_key: str, user_role: str | None = None) -> bool:
         """
         التحقق من صلاحية المستخدم
         
         Args:
             user_id: معرف المستخدم
             permission_key: مفتاح الصلاحية (مثل 'customers.view')
+            user_role: دور المستخدم (اختياري) لتجنب استعلام إضافي
             
         Returns:
             bool: True إذا كان لديه الصلاحية، False إذا لم يكن
         """
-        # الحل السريع: إذا كان admin، أعطيه كل الصلاحيات
-        try:
-            with self.db.get_cursor() as cursor:
-                cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
-                user = cursor.fetchone()
-                if user and user['role'] == 'admin':
-                    logger.debug(f"المستخدم {user_id} هو admin، لديه كل الصلاحيات")
-                    return True  # المسؤول لديه كل الصلاحيات!
-        except Exception as e:
-            logger.warning(f"خطأ في التحقق من دور المستخدم: {e}")
-            # نتابع بالطرق الأخرى إذا فشل الاستعلام
+        # 1. اختصار للمسؤولين - إذا تم تمرير الدور أو جلب من الكاش
+        if user_role == 'admin':
+            logger.debug(f"تم تمرير role=admin للمستخدم {user_id} → صلاحيات كاملة (shortcut)")
+            return True
         
-        # 1. أولاً: النظام الجديد (الجداول)
-        result = self._check_new_system(user_id, permission_key)
+        # 2. إذا لم يتم تمرير الدور، نحاول الحصول عليه من الكاش أولاً
+        if user_role is None:
+            cached = self._permissions_cache.get(user_id)
+            if cached and (time.time() - cached[0]) < self._cache_ttl:
+                cached_role = cached[1].get('_role')
+                if cached_role == 'admin':
+                    logger.debug(f"المستخدم {user_id} في الكاش هو admin، لديه كل الصلاحيات")
+                    return True
+                user_role = cached_role
+            
+        # 3. إذا لم يكن الدور في الكاش، نجلب من قاعدة البيانات
+        if user_role is None:
+            try:
+                with self.db.get_cursor() as cursor:
+                    cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+                    user = cursor.fetchone()
+                    if user and user.get('role') == 'admin':
+                        logger.debug(f"المستخدم {user_id} في DB هو admin، لديه كل الصلاحيات")
+                        return True
+                    user_role = user.get('role') if user else None
+            except Exception as e:
+                logger.warning(f"خطأ في التحقق من دور المستخدم: {e}")
+                # نتابع بالطرق الأخرى إذا فشل الاستعلام
         
-        # 2. إذا كان هناك نتيجة محددة (True/False)، نرجعها
+        # 4. أولاً: النظام الجديد (الجداول)
+        result = self._check_new_system(user_id, permission_key, user_role)
+        
+        # 5. إذا كان هناك نتيجة محددة (True/False)، نرجعها
         if result is not None:
             return result
         
-        # 3. أخيراً: النظام القديم (للتوافق)
-        return self._check_old_system(user_id, permission_key)
+        # 6. أخيراً: النظام القديم (للتوافق)
+        return self._check_old_system(user_id, permission_key, user_role)
 
-    def _check_new_system(self, user_id: int, permission_key: str) -> Optional[bool]:
+    def _check_new_system(self, user_id: int, permission_key: str, user_role: str | None) -> Optional[bool]:
         """
         التحقق من النظام الجديد (الجداول)
         
@@ -106,7 +127,7 @@ class PermissionEngine:
             logger.error(f"خطأ في النظام الجديد: {e}", exc_info=True)
             return None  # حدث خطأ، نرجع للنظام القديم
     
-    def _check_old_system(self, user_id: int, permission_key: str) -> bool:
+    def _check_old_system(self, user_id: int, permission_key: str, user_role: str | None) -> bool:
         """
         النظام القديم (للتوافق المؤقت)
         
@@ -117,26 +138,31 @@ class PermissionEngine:
         """
         try:
             with self.db.get_cursor() as cursor:
-                # جلب بيانات المستخدم
-                cursor.execute("""
-                    SELECT role, permissions 
-                    FROM users 
-                    WHERE id = %s
-                """, (user_id,))
-                
-                user = cursor.fetchone()
-                if not user:
-                    logger.warning(f"المستخدم {user_id} غير موجود")
-                    return False
+                # جلب بيانات المستخدم (إذا لم نكن نعرف الدور بالفعل)
+                if user_role is None:
+                    cursor.execute("""
+                        SELECT role, permissions 
+                        FROM users 
+                        WHERE id = %s
+                    """, (user_id,))
+                    user = cursor.fetchone()
+                    if not user:
+                        logger.warning(f"المستخدم {user_id} غير موجود")
+                        return False
+                    user_role = user.get('role')
+                    permissions = user.get('permissions', {})
+                else:
+                    # إذا كان الدور معروفاً، نحتاج فقط permissions
+                    cursor.execute("SELECT permissions FROM users WHERE id = %s", (user_id,))
+                    user = cursor.fetchone()
+                    permissions = user.get('permissions', {}) if user else {}
                 
                 # 1. إذا كان admin
-                if user['role'] == 'admin':
+                if user_role == 'admin':
                     logger.debug(f"المستخدم {user_id} هو admin، لديه كل الصلاحيات")
                     return True
                 
                 # 2. التحقق من JSONB القديم
-                permissions = user.get('permissions', {})
-                
                 # إذا كان 'all': true
                 if permissions.get('all'):
                     logger.debug(f"المستخدم {user_id} لديه 'all': true في permissions القديمة")
@@ -163,15 +189,62 @@ class PermissionEngine:
                     ]
                 }
                 
-                user_role_permissions = role_permissions_map.get(user['role'], [])
+                user_role_permissions = role_permissions_map.get(user_role, [])
                 has_permission = permission_key in user_role_permissions
                 
-                logger.debug(f"المستخدم {user_id} (دور: {user['role']}) - الصلاحية {permission_key}: {has_permission} في النظام القديم")
+                logger.debug(f"المستخدم {user_id} (دور: {user_role}) - الصلاحية {permission_key}: {has_permission} في النظام القديم")
                 return has_permission
                 
         except Exception as e:
             logger.error(f"خطأ في النظام القديم: {e}", exc_info=True)
             return False
+    
+    def _get_user_permissions_old(self, user_id: int) -> Dict[str, bool]:
+        """
+        الحصول على صلاحيات المستخدم من النظام القديم
+        
+        Returns:
+            dict: {permission_key: True/False}
+        """
+        permissions = {}
+        try:
+            with self.db.get_cursor() as cursor:
+                cursor.execute("SELECT role, permissions FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                if not user:
+                    return {}
+                
+                # تحميل صلاحيات JSON إذا وجدت
+                user_permissions = user.get('permissions', {})
+                if isinstance(user_permissions, dict):
+                    permissions.update(user_permissions)
+                
+                # إضافة الصلاحيات الافتراضية للدور
+                role = user.get('role')
+                role_permissions_map = {
+                    'accountant': [
+                        'customers.view', 'invoices.view', 'invoices.create',
+                        'reports.view', 'system.import_data'
+                    ],
+                    'cashier': [
+                        'customers.view', 'invoices.view', 'invoices.create',
+                        'accounting.access'
+                    ],
+                    'viewer': [
+                        'customers.view', 'reports.view'
+                    ]
+                }
+                
+                for perm in role_permissions_map.get(role, []):
+                    permissions.setdefault(perm, True)
+                
+                # إضافة الدور كحقل خاص للمساعدة في الكاش
+                permissions['_role'] = role
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب صلاحيات النظام القديم: {e}")
+        
+        return permissions
     
     def get_user_permissions(self, user_id: int) -> Dict[str, bool]:
         """
@@ -180,10 +253,16 @@ class PermissionEngine:
         Returns:
             dict: {permission_key: True/False}
         """
+        # 1. التحقق من الكاش أولاً
+        cached = self._permissions_cache.get(user_id)
+        if cached and (time.time() - cached[0]) < self._cache_ttl:
+            logger.debug(f"استخدام صلاحيات الكاش للمستخدم {user_id}")
+            return cached[1]
+        
         permissions = {}
         
         try:
-            # أولاً: النظام الجديد
+            # 2. أولاً: النظام الجديد
             with self.db.get_cursor() as cursor:
                 cursor.execute("""
                     SELECT 
@@ -206,11 +285,36 @@ class PermissionEngine:
                 for row in cursor.fetchall():
                     permissions[row['permission_key']] = row['has_permission']
                 
+                # إذا كان هناك نتائج، نضيف الدور
+                if permissions:
+                    cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
+                    user = cursor.fetchone()
+                    if user:
+                        permissions['_role'] = user.get('role')
+                
         except Exception as e:
-            logger.error(f"خطأ في جلب صلاحيات المستخدم: {e}")
-            # إذا فشل النظام الجديد، نستخدم القديم للصلاحيات الأساسية
+            logger.error(f"خطأ في جلب صلاحيات النظام الجديد: {e}")
+            # نستخدم النظام القديم كـ fallback
+            permissions = self._get_user_permissions_old(user_id)
+        
+        # 3. إذا كانت الصلاحيات فارغة أو النظام الجديد لم يعط نتائج، نستخدم النظام القديم
+        if not permissions:
+            permissions = self._get_user_permissions_old(user_id)
+        
+        # 4. تخزين في الكاش
+        self._permissions_cache[user_id] = (time.time(), permissions)
+        logger.debug(f"تم تخزين صلاحيات المستخدم {user_id} في الكاش ({len(permissions)} صلاحية)")
         
         return permissions
+    
+    def clear_cache(self, user_id: int | None = None):
+        """مسح الكاش إما لمستخدم محدد أو الكل"""
+        if user_id is None:
+            self._permissions_cache.clear()
+            logger.debug("تم مسح كل الكاش")
+        elif user_id in self._permissions_cache:
+            del self._permissions_cache[user_id]
+            logger.debug(f"تم مسح الكاش للمستخدم {user_id}")
     
     def get_all_permissions(self) -> List[Dict[str, Any]]:
         """الحصول على جميع الصلاحيات في الكتالوج"""
@@ -239,6 +343,9 @@ class PermissionEngine:
                     RETURNING id
                 """, (role, permission_key, is_allowed))
                 
+                # مسح الكاش لأن الصلاحيات تغيرت
+                self.clear_cache()
+                
                 return cursor.fetchone() is not None
         except Exception as e:
             logger.error(f"خطأ في تحديث صلاحية الدور: {e}")
@@ -256,6 +363,9 @@ class PermissionEngine:
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING id
                 """, (user_id, permission_key, is_allowed))
+                
+                # مسح كاش المستخدم المحدد
+                self.clear_cache(user_id)
                 
                 return cursor.fetchone() is not None
         except Exception as e:

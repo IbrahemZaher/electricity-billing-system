@@ -1,10 +1,12 @@
 # auth/authentication.py
 from database.connection import db
-import hashlib
+import bcrypt
+import hashlib  # لإضافة الدعم المرحلي لـ SHA256
 import jwt
 from datetime import datetime, timedelta
 import logging
 from config.settings import SECRET_KEY
+from auth.session import Session  # إضافة استيراد Session
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +15,27 @@ class Authentication:
         self.secret_key = SECRET_KEY
     
     def hash_password(self, password):
-        """تشفير كلمة المرور"""
-        return hashlib.sha256(password.encode()).hexdigest()
+        """تشفير كلمة المرور باستخدام bcrypt"""
+        return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     
     def verify_password(self, password, hashed_password):
-        """التحقق من كلمة المرور"""
-        return self.hash_password(password) == hashed_password
+        """التحقق من كلمة المرور - يدعم bcrypt و SHA256 (ترحيل)"""
+        # المحاولة الأولى: التحقق باستخدام bcrypt
+        try:
+            if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                return True, 'bcrypt'  # نجاح باستخدام bcrypt
+        except (ValueError, Exception):
+            pass
+        
+        # المحاولة الثانية: التحقق باستخدام SHA256 (للهاشات القديمة)
+        try:
+            sha256_hash = hashlib.sha256(password.encode()).hexdigest()
+            if sha256_hash == hashed_password:
+                return True, 'sha256'  # نجاح باستخدام SHA256
+        except Exception:
+            pass
+        
+        return False, None
     
     def create_token(self, user_id, username, role):
         """إنشاء توكن للمستخدم"""
@@ -28,7 +45,11 @@ class Authentication:
             'role': role,
             'exp': datetime.utcnow() + timedelta(hours=8)
         }
-        return jwt.encode(payload, self.secret_key, algorithm='HS256')
+        token = jwt.encode(payload, self.secret_key, algorithm='HS256')
+        # التأكد من أن التوكن هو str
+        if isinstance(token, bytes):
+            token = token.decode('utf-8')
+        return token
     
     def verify_token(self, token):
         """التحقق من التوكن"""
@@ -58,13 +79,26 @@ class Authentication:
                 if not user['is_active']:
                     return {'error': 'الحساب غير مفعل'}
                 
-                if self.verify_password(password, user['password_hash']):
+                # التحقق من كلمة المرور (تدعم bcrypt و SHA256)
+                is_valid, hash_type = self.verify_password(password, user['password_hash'])
+                
+                if is_valid:
                     # تحديث وقت آخر دخول
                     cursor.execute("""
                         UPDATE users 
                         SET updated_at = CURRENT_TIMESTAMP 
                         WHERE id = %s
                     """, (user['id'],))
+                    
+                    # إذا كان الهاش من نوع SHA256، نرقيّه إلى bcrypt
+                    if hash_type == 'sha256':
+                        new_hash = self.hash_password(password)
+                        cursor.execute("""
+                            UPDATE users 
+                            SET password_hash = %s 
+                            WHERE id = %s
+                        """, (new_hash, user['id']))
+                        logger.info(f"تم ترقية هاش كلمة المرور للمستخدم {username} من SHA256 إلى bcrypt")
                     
                     # إنشاء التوكن
                     token = self.create_token(
@@ -73,6 +107,21 @@ class Authentication:
                         user['role']
                     )
                     
+                    # إنشاء user_payload واستدعاء Session.login
+                    user_payload = {
+                        'id': user['id'],
+                        'username': user['username'],
+                        'role': user['role'],
+                        'full_name': user.get('full_name'),
+                        'permissions': user.get('permissions', {}),
+                        'token': token
+                    }
+                    
+                    # استدعاء Session.login (كـ instance method)
+                    session_obj = Session()
+                    session_obj.login(user_payload)
+                    
+                    # إرجاع نفس الـ dict كما في الكود الحالي
                     return {
                         'id': user['id'],
                         'username': user['username'],
@@ -98,7 +147,7 @@ class Authentication:
                 if cursor.fetchone():
                     return {'error': 'اسم المستخدم موجود بالفعل'}
                 
-                # تشفير كلمة المرور
+                # تشفير كلمة المرور باستخدام bcrypt
                 hashed_password = self.hash_password(user_data['password'])
                 
                 # إضافة المستخدم
