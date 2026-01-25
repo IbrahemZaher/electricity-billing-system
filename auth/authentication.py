@@ -1,12 +1,17 @@
 # auth/authentication.py
-from database.connection import db
 import bcrypt
-import hashlib  # لإضافة الدعم المرحلي لـ SHA256
+import hashlib
 import jwt
 from datetime import datetime, timedelta
 import logging
 from config.settings import SECRET_KEY
-from auth.session import Session  # إضافة استيراد Session
+from auth.session import Session
+from auth.permissions import require_permission
+import os
+from db import transaction, get_cursor
+from database.connection import db
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +28,7 @@ class Authentication:
         # المحاولة الأولى: التحقق باستخدام bcrypt
         try:
             if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
-                return True, 'bcrypt'  # نجاح باستخدام bcrypt
+                return True, 'bcrypt'
         except (ValueError, Exception):
             pass
         
@@ -31,7 +36,7 @@ class Authentication:
         try:
             sha256_hash = hashlib.sha256(password.encode()).hexdigest()
             if sha256_hash == hashed_password:
-                return True, 'sha256'  # نجاح باستخدام SHA256
+                return True, 'sha256'
         except Exception:
             pass
         
@@ -46,7 +51,6 @@ class Authentication:
             'exp': datetime.utcnow() + timedelta(hours=8)
         }
         token = jwt.encode(payload, self.secret_key, algorithm='HS256')
-        # التأكد من أن التوكن هو str
         if isinstance(token, bytes):
             token = token.decode('utf-8')
         return token
@@ -61,136 +65,201 @@ class Authentication:
         except jwt.InvalidTokenError:
             return None
     
-    def login(self, username, password):
-        """تسجيل الدخول"""
+
+
+# داخل auth/authentication.py — تعديل login
+    def login(self, username, password, db_connection=None):
+        db_obj = db_connection if db_connection is not None else db
         try:
-            with db.get_cursor() as cursor:
+            with db_obj.get_cursor() as cursor:
+                # تحقق إن كان العمود موجودًا قبل بناء الاستعلام
                 cursor.execute("""
-                    SELECT id, username, password_hash, full_name, role, permissions, is_active
-                    FROM users 
-                    WHERE username = %s
-                """, (username,))
-                
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = %s AND column_name = %s
+                """, ('users', 'email'))
+                has_email = cursor.fetchone() is not None
+
+                if has_email:
+                    cursor.execute("""
+                        SELECT id, username, password_hash, full_name, role, permissions, is_active, email
+                        FROM users
+                        WHERE username = %s
+                    """, (username,))
+                else:
+                    cursor.execute("""
+                        SELECT id, username, password_hash, full_name, role, permissions, is_active
+                        FROM users
+                        WHERE username = %s
+                    """, (username,))
+
                 user = cursor.fetchone()
-                
+                # بقية المنطق كما كان — استخدم user.get('email') بحذر (قد يكون None)
+            
+
                 if not user:
-                    return {'error': 'اسم المستخدم أو كلمة المرور غير صحيحة'}
-                
-                if not user['is_active']:
-                    return {'error': 'الحساب غير مفعل'}
-                
-                # التحقق من كلمة المرور (تدعم bcrypt و SHA256)
+                    return {'success': False, 'error': 'اسم المستخدم أو كلمة المرور غير صحيحة'}
+
+                if not user.get('is_active'):
+                    return {'success': False, 'error': 'الحساب غير مفعل'}
+
                 is_valid, hash_type = self.verify_password(password, user['password_hash'])
-                
-                if is_valid:
-                    # تحديث وقت آخر دخول
+
+                if not is_valid:
+                    return {'success': False, 'error': 'اسم المستخدم أو كلمة المرور غير صحيحة'}
+
+                # تحديث وقت آخر دخول
+                cursor.execute("""
+                    UPDATE users 
+                    SET updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = %s
+                """, (user['id'],))
+
+                # ترقية هاش من sha256 إلى bcrypt إن لزم
+                if hash_type == 'sha256':
+                    new_hash = self.hash_password(password)
                     cursor.execute("""
                         UPDATE users 
-                        SET updated_at = CURRENT_TIMESTAMP 
+                        SET password_hash = %s 
                         WHERE id = %s
-                    """, (user['id'],))
-                    
-                    # إذا كان الهاش من نوع SHA256، نرقيّه إلى bcrypt
-                    if hash_type == 'sha256':
-                        new_hash = self.hash_password(password)
-                        cursor.execute("""
-                            UPDATE users 
-                            SET password_hash = %s 
-                            WHERE id = %s
-                        """, (new_hash, user['id']))
-                        logger.info(f"تم ترقية هاش كلمة المرور للمستخدم {username} من SHA256 إلى bcrypt")
-                    
-                    # إنشاء التوكن
-                    token = self.create_token(
-                        user['id'], 
-                        user['username'], 
-                        user['role']
-                    )
-                    
-                    # إنشاء user_payload واستدعاء Session.login
-                    user_payload = {
-                        'id': user['id'],
-                        'username': user['username'],
-                        'role': user['role'],
-                        'full_name': user.get('full_name'),
-                        'permissions': user.get('permissions', {}),
-                        'token': token
-                    }
-                    
-                    # استدعاء Session.login (كـ instance method)
-                    session_obj = Session()
-                    session_obj.login(user_payload)
-                    
-                    # إرجاع نفس الـ dict كما في الكود الحالي
-                    return {
-                        'id': user['id'],
-                        'username': user['username'],
-                        'full_name': user['full_name'],
-                        'role': user['role'],
-                        'permissions': user['permissions'],
-                        'token': token
-                    }
-                else:
-                    return {'error': 'اسم المستخدم أو كلمة المرور غير صحيحة'}
-                    
-        except Exception as e:
-            logger.error(f"خطأ في تسجيل الدخول: {e}")
-            return {'error': 'حدث خطأ أثناء تسجيل الدخول'}
+                    """, (new_hash, user['id']))
+                    logger.info(f"تم ترقية هاش كلمة المرور للمستخدم {username} من SHA256 إلى bcrypt")
 
-    def register_user(self, user_data):
-        """تسجيل مستخدم جديد"""
-        try:
-            with db.get_cursor() as cursor:
-                # التحقق من عدم وجود المستخدم
-                cursor.execute("SELECT id FROM users WHERE username = %s", 
-                             (user_data['username'],))
-                if cursor.fetchone():
-                    return {'error': 'اسم المستخدم موجود بالفعل'}
-                
-                # تشفير كلمة المرور باستخدام bcrypt
-                hashed_password = self.hash_password(user_data['password'])
-                
-                # إضافة المستخدم
-                cursor.execute("""
-                    INSERT INTO users 
-                    (username, password_hash, full_name, role, permissions)
-                    VALUES (%s, %s, %s, %s, %s)
-                    RETURNING id
-                """, (
-                    user_data['username'],
-                    hashed_password,
-                    user_data['full_name'],
-                    user_data.get('role', 'accountant'),
-                    user_data.get('permissions', {})
-                ))
-                
-                user_id = cursor.fetchone()['id']
-                
-                # تسجيل النشاط
-                self.log_activity(
-                    user_id,
-                    'register',
-                    f'تم تسجيل مستخدم جديد: {user_data["full_name"]}'
-                )
-                
-                return {'success': True, 'user_id': user_id}
-                
+                token = self.create_token(user['id'], user['username'], user['role'])
+
+                user_payload = {
+                    'id': user['id'],
+                    'username': user['username'],
+                    'role': user['role'],
+                    'full_name': user.get('full_name'),
+                    'email': user.get('email'),
+                    'permissions': user.get('permissions', {}),
+                    'token': token
+                }
+
+                Session.login(user_payload)
+
+                return {
+                    'success': True,
+                    'user': {
+                        'id': user['id'],
+                        'username': user['username'],
+                        'full_name': user.get('full_name'),
+                        'email': user.get('email'),
+                        'role': user.get('role'),
+                        'permissions': user.get('permissions', {})
+                    },
+                    'token': token
+                }
+
         except Exception as e:
-            logger.error(f"خطأ في تسجيل المستخدم: {e}")
-            return {'error': str(e)}
+            logger.exception(f"خطأ في تسجيل الدخول: {e}")
+            return {'success': False, 'error': 'حدث خطأ أثناء تسجيل الدخول'}
     
-    def log_activity(self, user_id, action_type, description, ip_address=None, user_agent=None):
-        """تسجيل نشاط المستخدم"""
+    #@require_permission('system.manage_users')
+
+    def register_user(self, user_data, db_connection=None, performed_by=None):
+        """
+        تسجيل مستخدم جديد.
+        سلوك الأمان:
+        - في التشغيل العادي: يجب أن يكون هناك performed_by أو الجلسة الحالية تملك الصلاحية.
+        - أثناء الإعداد (setup): يمكن تفعيل ALLOW_SETUP_USER_CREATION=true للسماح بإنشاء المستخدم الأولي.
+        """
+        # 1) حالة الإعداد (setup) — مفعل يدوياً عبر متغير بيئة
+        allow_setup = os.getenv('ALLOW_SETUP_USER_CREATION', 'false').lower() == 'true'
+
+        if performed_by is None and not allow_setup:
+            # لا يوجد من قام بالعملية ولا السماح بالإعداد -> اطلب صلاحية الجلسة الحالية
+            # هذا سيُطرَح كـ PermissionError إن لم يُسجّل مستخدم أو لم يكن يملك الصلاحية
+            try:
+                require_permission('system.manage_users')
+            except Exception as exc:
+                # أعد صياغة الخطأ لتوضيح السبب في سجل التشغيل
+                logger.error("محاولة إنشاء مستخدم بدون صلاحية أو خلال إعداد غير مسموح", exc_info=True)
+                raise
+
+        # 2) الآن ننفذ الإنشاء داخل معاملة آمنة
         try:
-            with db.get_cursor() as cursor:
+            # إذا تم تمرير db_connection (مثلاً كـ wrapper)، استخدمه، وإلا استخدم helper العام
+            if db_connection:
+                with db_connection.get_cursor() as cursor:
+                    cursor.execute("""
+                        INSERT INTO users (username, password_hash, full_name, role, permissions, email, is_active, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        RETURNING id
+                    """, (
+                        user_data['username'],
+                        self.hash_password(user_data['password']),
+                        user_data.get('full_name', ''),
+                        user_data.get('role', 'accountant'),
+                        json.dumps(user_data.get('permissions', {})),
+                        user_data.get('email'),
+                        user_data.get('is_active', True)
+                    ))
+                    result = cursor.fetchone()
+                    user_id = result['id'] if result else None
+            else:
+                # استخدم transaction helper العام
+                with transaction() as cursor:
+                    cursor.execute("""
+                        INSERT INTO users (username, password_hash, full_name, role, permissions, email, is_active, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        RETURNING id
+                    """, (
+                        user_data['username'],
+                        self.hash_password(user_data['password']),
+                        user_data.get('full_name', ''),
+                        user_data.get('role', 'accountant'),
+                        json.dumps(user_data.get('permissions', {})),
+                        user_data.get('email'),
+                        user_data.get('is_active', True)
+                    ))
+                    result = cursor.fetchone()
+                    user_id = result['id'] if result else None
+
+            # تسجيل النشاط إن كان performed_by موجوداً
+            if performed_by:
+                try:
+                    self.log_activity(
+                        performed_by,
+                        'register',
+                        f'تم تسجيل مستخدم جديد: {user_data.get("full_name", user_data["username"])}',
+                        db_connection
+                    )
+                except Exception:
+                    logger.exception("فشل تسجيل النشاط بعد إنشاء المستخدم")
+
+            return {'success': True, 'user_id': user_id}
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'unique' in error_msg or 'duplicate' in error_msg:
+                if 'username' in error_msg:
+                    return {'success': False, 'error': 'اسم المستخدم مستخدم بالفعل'}
+                elif 'email' in error_msg:
+                    return {'success': False, 'error': 'البريد الإلكتروني مستخدم بالفعل'}
+            logger.error(f"خطأ في تسجيل المستخدم: {e}", exc_info=True)
+            return {'success': False, 'error': 'حدث خطأ في إنشاء المستخدم'}
+    
+    def log_activity(self, user_id, action, description, db_connection, 
+                     ip_address=None, request_id=None, before_snapshot=None, after_snapshot=None):
+        """تسجيل نشاط المستخدم مع معلومات إضافية"""
+        try:
+            with db_connection.get_cursor() as cursor:
                 cursor.execute("""
                     INSERT INTO activity_logs 
-                    (user_id, action_type, description, ip_address, user_agent)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (user_id, action_type, description, ip_address, user_agent))
-                
+                    (user_id, action, description, ip_address, request_id, before_snapshot, after_snapshot, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """, (
+                    user_id,
+                    action,
+                    description,
+                    ip_address,
+                    request_id,
+                    before_snapshot,
+                    after_snapshot
+                ))
         except Exception as e:
-            logger.error(f"خطأ في تسجيل النشاط: {e}")
+            logger.error(f"خطأ في تسجيل النشاط: {e}", exc_info=True)
     
     def check_permission(self, user, permission):
         """التحقق من صلاحية المستخدم"""

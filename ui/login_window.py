@@ -95,6 +95,7 @@ class LoginWindow:
         # ربط زر Enter بتسجيل الدخول
         self.password_entry.bind('<Return>', lambda e: self.authenticate())
     
+    # في دالة authenticate في login_window.py
     def authenticate(self):
         """المصادقة"""
         username = self.username_entry.get().strip()
@@ -105,19 +106,22 @@ class LoginWindow:
             return
         
         # استدعاء دالة تسجيل الدخول من auth
-        user = auth.login(username, password)
+        result = auth.login(username, password)
 
-        if user and 'error' not in user:
+        if result and result.get('success'):
             # إغلاق نافذة تسجيل الدخول
             self.window.destroy()
 
-            # استيراد MainWindow بعد إغلاق نافذة تسجيل الدخول لتجنب الاستيراد الدائري
+            # استيراد MainWindow بعد إغلاق نافذة تسجيل الدخول
             from ui.main_window import MainWindow
-            main_window = MainWindow(user)
+            
+            # تمرير بيانات المستخدم فقط (result['user'])
+            main_window = MainWindow(result['user'])
             main_window.run()
         else:
-            messagebox.showerror("خطأ", user['error'] if user and 'error' in user else "اسم المستخدم أو كلمة المرور غير صحيحة")
-    
+            error_msg = result.get('error', 'اسم المستخدم أو كلمة المرور غير صحيحة')
+            messagebox.showerror("خطأ", error_msg)
+
     def run(self):
         """تشغيل النافذة"""
         self.window.mainloop()

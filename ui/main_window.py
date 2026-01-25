@@ -83,19 +83,24 @@ class MainWindow:
         # معلومات المستخدم
         user_frame = ttk.Frame(header_frame, style='Header.TFrame')
         user_frame.pack(side='right', padx=20)
-        
+
+        full_name = self.user_data.get('full_name')
+        if not full_name:
+            full_name = self.user_data.get('username', 'المستخدم')
+        role = self.user_data.get('role', '')
+
         user_label = ttk.Label(user_frame,
-                              text=f"👤 {self.user_data['full_name']} - {self.user_data['role']}",
-                              style='Title.TLabel',
-                              font=('Arial', 11))
+                            text=f"👤 {full_name} - {role}",
+                            style='Title.TLabel',
+                            font=('Arial', 11))
         user_label.pack()
-        
+
         time_label = ttk.Label(user_frame,
-                              text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                              style='Title.TLabel',
-                              font=('Arial', 10))
+                            text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            style='Title.TLabel',
+                            font=('Arial', 10))
         time_label.pack()
-    
+
     def create_content_area(self):
         """إنشاء منطقة المحتوى"""
         # الشريط الجانبي
@@ -274,7 +279,7 @@ class MainWindow:
         except ImportError:
             try:
                 # إذا فشل، حاول استيراد users_ui
-                from ui.users_ui import UsersUI
+                from ui.user_management_ui import UsersUI
                 users_ui = UsersUI(self.content_frame)
                 logger.info("تم تحميل واجهة المستخدمين من users_ui")
             except ImportError as e:
