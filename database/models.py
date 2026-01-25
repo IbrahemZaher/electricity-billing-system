@@ -237,6 +237,7 @@ class Models:
                 role VARCHAR(20) NOT NULL DEFAULT 'accountant',
                 permissions JSONB DEFAULT '{}',
                 is_active BOOLEAN DEFAULT TRUE,
+                email VARCHAR(255),              
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -455,6 +456,7 @@ class Models:
             # تحديث جدول سجل الزبائن
             self.update_customer_history_table()
             # إنشاء فهارس إضافية لجدول التاريخ بعد التحديث
+            self.update_users_table()  # ← أضف هذا السطر
             self.create_history_indexes()
             # تصحيح القيم النصية في الأعمدة الرقمية
             self.fix_customer_history_numeric_values()
@@ -693,8 +695,31 @@ class Models:
         except Exception as e:
             logger.error(f"خطأ في تصحيح القيم الرقمية في جدول customer_history: {e}")
             # لا نرفع الخطأ حتى لا يمنع تشغيل التطبيق        
-                    
+    def update_users_table(self):
+        """تحديث جدول المستخدمين بإضافة الأعمدة المفقودة"""
+        try:
+            with db.get_cursor() as cursor:
+                # التحقق من وجود عمود email وإضافته إذا لم يكن موجوداً
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' 
+                    AND column_name = 'email'
+                """)
                 
+                if not cursor.fetchone():
+                    # إضافة العمود إذا لم يكن موجوداً
+                    cursor.execute("""
+                        ALTER TABLE users 
+                        ADD COLUMN email VARCHAR(255)
+                    """)
+                    logger.info("تم إضافة العمود email إلى جدول users")
+                else:
+                    logger.info("العمود email موجود بالفعل في جدول users")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحديث جدول users: {e}")               
+                    
                         
 # تأكد أن هذا السطر موجود في النهاية
 models = Models()

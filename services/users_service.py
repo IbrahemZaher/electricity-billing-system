@@ -1,7 +1,7 @@
 # services/users_service.py
 from auth.permissions import require_permission
-from db import transaction
-from permission_engine import permission_engine
+from database.connection import db  # استيراد db من هنا
+from auth.permission_engine import permission_engine
 import logging
 
 logger = logging.getLogger(__name__)
@@ -10,7 +10,7 @@ class UserService:
     @staticmethod
     def update_user(user_id, update_data):
         require_permission('system.manage_users')
-        with transaction() as cursor:
+        with db.get_cursor() as cursor:
             cursor.execute("""
                 UPDATE users 
                 SET username=%s, full_name=%s, role=%s, email=%s, updated_at=CURRENT_TIMESTAMP
@@ -33,7 +33,7 @@ class UserService:
         if user_id == auth.current_user_id:
             raise ValueError("لا يمكنك تعطيل حسابك بنفسك")
 
-        with transaction() as cursor:
+        with db.get_cursor() as cursor:
             cursor.execute("SELECT role, is_active FROM users WHERE id = %s", (user_id,))
             user = cursor.fetchone()
             if user and user['role'] == 'admin' and user['is_active']:

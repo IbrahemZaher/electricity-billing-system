@@ -4,14 +4,13 @@ import hashlib
 import jwt
 from datetime import datetime, timedelta
 import logging
+import json  # أضف هذا الاستيراد
 from config.settings import SECRET_KEY
 from auth.session import Session
 from auth.permissions import require_permission
 import os
-from db import transaction, get_cursor
-from database.connection import db
-
-
+# إزالة: from db import transaction, get_cursor
+from database.connection import db  # استخدام db فقط من هنا
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +64,6 @@ class Authentication:
         except jwt.InvalidTokenError:
             return None
     
-
-
-# داخل auth/authentication.py — تعديل login
     def login(self, username, password, db_connection=None):
         db_obj = db_connection if db_connection is not None else db
         try:
@@ -93,8 +89,6 @@ class Authentication:
                     """, (username,))
 
                 user = cursor.fetchone()
-                # بقية المنطق كما كان — استخدم user.get('email') بحذر (قد يكون None)
-            
 
                 if not user:
                     return {'success': False, 'error': 'اسم المستخدم أو كلمة المرور غير صحيحة'}
@@ -155,66 +149,42 @@ class Authentication:
             logger.exception(f"خطأ في تسجيل الدخول: {e}")
             return {'success': False, 'error': 'حدث خطأ أثناء تسجيل الدخول'}
     
-    #@require_permission('system.manage_users')
-
     def register_user(self, user_data, db_connection=None, performed_by=None):
         """
         تسجيل مستخدم جديد.
-        سلوك الأمان:
-        - في التشغيل العادي: يجب أن يكون هناك performed_by أو الجلسة الحالية تملك الصلاحية.
-        - أثناء الإعداد (setup): يمكن تفعيل ALLOW_SETUP_USER_CREATION=true للسماح بإنشاء المستخدم الأولي.
         """
         # 1) حالة الإعداد (setup) — مفعل يدوياً عبر متغير بيئة
         allow_setup = os.getenv('ALLOW_SETUP_USER_CREATION', 'false').lower() == 'true'
 
         if performed_by is None and not allow_setup:
             # لا يوجد من قام بالعملية ولا السماح بالإعداد -> اطلب صلاحية الجلسة الحالية
-            # هذا سيُطرَح كـ PermissionError إن لم يُسجّل مستخدم أو لم يكن يملك الصلاحية
             try:
                 require_permission('system.manage_users')
             except Exception as exc:
-                # أعد صياغة الخطأ لتوضيح السبب في سجل التشغيل
                 logger.error("محاولة إنشاء مستخدم بدون صلاحية أو خلال إعداد غير مسموح", exc_info=True)
                 raise
 
         # 2) الآن ننفذ الإنشاء داخل معاملة آمنة
         try:
-            # إذا تم تمرير db_connection (مثلاً كـ wrapper)، استخدمه، وإلا استخدم helper العام
-            if db_connection:
-                with db_connection.get_cursor() as cursor:
-                    cursor.execute("""
-                        INSERT INTO users (username, password_hash, full_name, role, permissions, email, is_active, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        RETURNING id
-                    """, (
-                        user_data['username'],
-                        self.hash_password(user_data['password']),
-                        user_data.get('full_name', ''),
-                        user_data.get('role', 'accountant'),
-                        json.dumps(user_data.get('permissions', {})),
-                        user_data.get('email'),
-                        user_data.get('is_active', True)
-                    ))
-                    result = cursor.fetchone()
-                    user_id = result['id'] if result else None
-            else:
-                # استخدم transaction helper العام
-                with transaction() as cursor:
-                    cursor.execute("""
-                        INSERT INTO users (username, password_hash, full_name, role, permissions, email, is_active, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        RETURNING id
-                    """, (
-                        user_data['username'],
-                        self.hash_password(user_data['password']),
-                        user_data.get('full_name', ''),
-                        user_data.get('role', 'accountant'),
-                        json.dumps(user_data.get('permissions', {})),
-                        user_data.get('email'),
-                        user_data.get('is_active', True)
-                    ))
-                    result = cursor.fetchone()
-                    user_id = result['id'] if result else None
+            # استخدام db من database.connection بشكل مباشر
+            db_obj = db_connection if db_connection is not None else db
+            
+            with db_obj.get_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO users (username, password_hash, full_name, role, permissions, email, is_active, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    RETURNING id
+                """, (
+                    user_data['username'],
+                    self.hash_password(user_data['password']),
+                    user_data.get('full_name', ''),
+                    user_data.get('role', 'accountant'),
+                    json.dumps(user_data.get('permissions', {})),
+                    user_data.get('email'),
+                    user_data.get('is_active', True)
+                ))
+                result = cursor.fetchone()
+                user_id = result['id'] if result else None
 
             # تسجيل النشاط إن كان performed_by موجوداً
             if performed_by:
@@ -240,21 +210,23 @@ class Authentication:
             logger.error(f"خطأ في تسجيل المستخدم: {e}", exc_info=True)
             return {'success': False, 'error': 'حدث خطأ في إنشاء المستخدم'}
     
-    def log_activity(self, user_id, action, description, db_connection, 
+    def log_activity(self, user_id, action, description, db_connection=None, 
                      ip_address=None, request_id=None, before_snapshot=None, after_snapshot=None):
         """تسجيل نشاط المستخدم مع معلومات إضافية"""
         try:
-            with db_connection.get_cursor() as cursor:
+            # استخدام db من database.connection إذا لم يتم تمرير اتصال
+            db_obj = db_connection if db_connection is not None else db
+            
+            with db_obj.get_cursor() as cursor:
                 cursor.execute("""
                     INSERT INTO activity_logs 
-                    (user_id, action, description, ip_address, request_id, before_snapshot, after_snapshot, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    (user_id, action_type, description, ip_address, before_snapshot, after_snapshot, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 """, (
                     user_id,
                     action,
                     description,
                     ip_address,
-                    request_id,
                     before_snapshot,
                     after_snapshot
                 ))

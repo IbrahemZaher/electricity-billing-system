@@ -100,7 +100,7 @@ class UsersUI:
     def load_users(self):
         """تحميل قائمة المستخدمين من قاعدة البيانات"""
         try:
-            with get_cursor() as cursor:
+            with db.get_cursor() as cursor:  # تغيير هنا
                 cursor.execute("""
                     SELECT id, username, full_name, role, email, created_at, is_active
                     FROM users
@@ -202,7 +202,7 @@ class UsersUI:
             return
 
         try:
-            with get_cursor() as cursor:
+            with db.get_cursor() as cursor:  # تغيير هنا
                 cursor.execute("""
                     SELECT id, username, full_name, role, email, created_at, is_active
                     FROM users 
@@ -315,7 +315,7 @@ class UsersUI:
 
             # التحقق من عدم تكرار اسم المستخدم أو البريد الإلكتروني (note: atomicity handled by register_user)
             try:
-                with get_cursor() as cursor:
+                with db.get_cursor() as cursor:  # تغيير هنا
                     cursor.execute("SELECT id FROM users WHERE username=%s OR email=%s",
                                    (username, email))
                     if cursor.fetchone():
@@ -372,7 +372,7 @@ class UsersUI:
 
         # جلب البيانات الحالية للمستخدم من قاعدة البيانات
         try:
-            with get_cursor() as cursor:
+            with db.get_cursor() as cursor:  # تغيير هنا
                 cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
                 current_user = cursor.fetchone()
         except Exception as e:
@@ -432,7 +432,7 @@ class UsersUI:
             }
 
             try:
-                with get_cursor() as cursor:
+                with db.get_cursor() as cursor:  # تغيير هنا
                     cursor.execute("""
                         UPDATE users SET username=%s, full_name=%s, role=%s, email=%s, 
                         updated_at=CURRENT_TIMESTAMP
@@ -509,7 +509,7 @@ class UsersUI:
 
         # التحقق من آخر إداري
         try:
-            with get_cursor() as cursor:
+            with db.get_cursor() as cursor:  # تغيير هنا
                 cursor.execute("SELECT role, is_active FROM users WHERE id = %s", (user_id,))
                 row = cursor.fetchone()
                 if row and row['role'] == 'admin' and row['is_active']:
@@ -528,7 +528,7 @@ class UsersUI:
 
         if confirm:
             try:
-                with get_cursor() as cursor:
+                with db.get_cursor() as cursor:  # تغيير هنا
                     cursor.execute("""
                         UPDATE users SET is_active = FALSE, updated_at=CURRENT_TIMESTAMP 
                         WHERE id = %s
@@ -587,7 +587,7 @@ class UsersUI:
         """تصدير قائمة المستخدمين إلى ملف CSV"""
         try:
             # جلب البيانات من قاعدة البيانات
-            with get_cursor() as cursor:
+            with db.get_cursor() as cursor:  # تغيير هنا
                 cursor.execute("""
                     SELECT id, username, full_name, role, email, created_at, is_active
                     FROM users
