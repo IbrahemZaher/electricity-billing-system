@@ -552,6 +552,7 @@ class Models:
             ('system.import_data', 'استيراد البيانات', 'system'),
             ('system.export_data', 'تصدير البيانات', 'system'),
             ('system.advanced_import', 'استيراد متقدم', 'system'),
+            ('system.advanced_export', 'تصدير متقدم', 'system'),
             ('system.view_archive', 'عرض الأرشيف', 'system'),
             
             # فئة الإعدادات

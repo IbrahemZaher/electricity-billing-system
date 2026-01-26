@@ -415,7 +415,7 @@ class InvoiceUI(tk.Frame):
     def create_new_invoice(self):
         """إنشاء فاتورة جديدة"""
         try:
-            require_permission(Permission.CREATE_BILLS)
+            require_permission('invoices.create')  # غير هذا السطر
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
@@ -430,7 +430,7 @@ class InvoiceUI(tk.Frame):
     def edit_invoice(self, invoice_id=None):
         """تعديل فاتورة موجودة"""
         try:
-            require_permission(Permission.EDIT_BILLS)
+            require_permission('invoices.edit')  # غير هذا السطر
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
@@ -453,7 +453,7 @@ class InvoiceUI(tk.Frame):
     def delete_invoice(self):
         """حذف فاتورة"""
         try:
-            require_permission(Permission.EDIT_BILLS)
+            require_permission('invoices.edit')  # غير هذا السطر
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
@@ -485,7 +485,7 @@ class InvoiceUI(tk.Frame):
     def print_invoice(self, invoice_id=None):
         """طباعة الفاتورة"""
         try:
-            require_permission(Permission.VIEW_REPORTS)
+            require_permission('reports.view')  # غير هذا السطر
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
@@ -507,7 +507,7 @@ class InvoiceUI(tk.Frame):
     def cancel_invoice(self, invoice_id):
         """إلغاء الفاتورة"""
         try:
-            require_permission(Permission.EDIT_BILLS)
+            require_permission('invoices.edit')  # غير هذا السطر
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return

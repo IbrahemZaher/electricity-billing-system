@@ -653,13 +653,11 @@ class MainWindow:
         menubar.add_cascade(label="ملف", menu=file_menu)
         file_menu.add_command(label="📥 مدير الاستيراد المتقدم", 
                             command=self.show_import_manager)
-        file_menu.add_command(label="📤 تصدير البيانات", 
-                            command=self.export_data)
-        file_menu.add_command(label="📥 استيراد البيانات", 
-                            command=self.import_data)
+        file_menu.add_command(label="📤 مدير التصدير المتقدم", 
+                            command=lambda: self.show_import_manager)
         file_menu.add_separator()
         file_menu.add_command(label="خروج", command=self.root.quit)
-        
+            
         # قائمة عرض
         view_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="عرض", menu=view_menu)

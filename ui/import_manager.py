@@ -5,6 +5,10 @@ import logging
 import os
 import threading
 from datetime import datetime
+# إضافة الاستيرادات الجديدة
+from modules.export_manager import ExportManager
+from auth.permissions import require_permission
+
 
 logger = logging.getLogger(__name__)
 
@@ -98,80 +102,6 @@ class ImportManagerUI:
         self.scrollable_frame.update_idletasks()
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
     
-    def create_import_tab(self, parent):
-        """إنشاء تبويب الاستيراد"""
-        # إطار داخلي مع سكرول بار
-        inner_canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
-        inner_scrollbar = ttk.Scrollbar(parent, orient="vertical", command=inner_canvas.yview)
-        inner_frame = tk.Frame(inner_canvas, bg='white')
-        
-        inner_canvas.configure(yscrollcommand=inner_scrollbar.set)
-        inner_canvas_window = inner_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
-        
-        def configure_inner_canvas(event):
-            inner_canvas.configure(scrollregion=inner_canvas.bbox("all"))
-            inner_canvas.itemconfig(inner_canvas_window, width=event.width)
-        
-        inner_frame.bind("<Configure>", configure_inner_canvas)
-        inner_canvas.bind("<Configure>", configure_inner_canvas)
-        
-        inner_scrollbar.pack(side="right", fill="y")
-        inner_canvas.pack(side="left", fill="both", expand=True)
-        
-        # قسم اختيار الملفات
-        file_frame = tk.LabelFrame(inner_frame, text="اختر ملفات Excel", 
-                                  bg='white', padx=15, pady=15)
-        file_frame.pack(fill='x', pady=10)
-        
-        tk.Label(file_frame, text="مجلد ملفات Excel:",
-                bg='white', font=('Arial', 11)).pack(anchor='w')
-        
-        self.folder_path = tk.StringVar()
-        
-        folder_entry = tk.Entry(file_frame, textvariable=self.folder_path,
-                               font=('Arial', 11), width=50)
-        folder_entry.pack(side='left', fill='x', expand=True, pady=5)
-        
-        tk.Button(file_frame, text="استعراض...",
-                 command=self.browse_folder,
-                 bg='#3498db', fg='white').pack(side='right', padx=5)
-        
-        # قسم خيارات الاستيراد
-        options_frame = tk.LabelFrame(inner_frame, text="خيارات الاستيراد",
-                                     bg='white', padx=15, pady=15)
-        options_frame.pack(fill='x', pady=10)
-        
-        # خيار حذف البيانات القديمة
-        self.delete_old_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(options_frame, text="حذف البيانات القديمة قبل الاستيراد",
-                      variable=self.delete_old_var,
-                      bg='white', font=('Arial', 11)).pack(anchor='w', pady=5)
-        
-        # خيار النسخ الاحتياطي التلقائي
-        self.auto_backup_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(options_frame, text="إنشاء نسخة احتياطية تلقائية",
-                      variable=self.auto_backup_var,
-                      bg='white', font=('Arial', 11)).pack(anchor='w', pady=5)
-        
-        # قسم الملفات المحددة
-        self.files_frame = tk.LabelFrame(inner_frame, text="الملفات المحددة",
-                                        bg='white', padx=15, pady=15)
-        self.files_frame.pack(fill='both', expand=True, pady=10)
-        
-        # زر بدء الاستيراد
-        start_button = tk.Button(inner_frame, text="🚀 بدء عملية الاستيراد",
-                               command=self.start_import,
-                               bg='#27ae60', fg='white',
-                               font=('Arial', 12, 'bold'),
-                               padx=30, pady=10)
-        start_button.pack(pady=20)
-        
-        # إطار فارغ لضمان ظهور الزر
-        tk.Frame(inner_frame, height=20, bg='white').pack()
-        
-        # ربط حدث الماوس مع الإطار الداخلي
-        inner_canvas.bind_all("<MouseWheel>", 
-                            lambda e: inner_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
     
     def browse_folder(self):
         """استعراض مجلد الملفات"""
@@ -621,3 +551,208 @@ class ImportManagerUI:
         if messagebox.askyesno("تأكيد", "هل تريد مسح جميع السجلات؟"):
             self.log_text.delete(1.0, tk.END)
             self.log_text.insert(1.0, "📋 سجلات الاستيراد\n" + "="*40 + "\n\nلا توجد سجلات حالياً.")
+
+    def create_import_tab(self, parent):
+        """إنشاء تبويب الاستيراد والتصدير"""
+        # إطار داخلي مع سكرول بار
+        inner_canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
+        inner_scrollbar = ttk.Scrollbar(parent, orient="vertical", command=inner_canvas.yview)
+        inner_frame = tk.Frame(inner_canvas, bg='white')
+        
+        inner_canvas.configure(yscrollcommand=inner_scrollbar.set)
+        inner_canvas_window = inner_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+        
+        def configure_inner_canvas(event):
+            inner_canvas.configure(scrollregion=inner_canvas.bbox("all"))
+            inner_canvas.itemconfig(inner_canvas_window, width=event.width)
+        
+        inner_frame.bind("<Configure>", configure_inner_canvas)
+        inner_canvas.bind("<Configure>", configure_inner_canvas)
+        
+        inner_scrollbar.pack(side="right", fill="y")
+        inner_canvas.pack(side="left", fill="both", expand=True)
+        
+        # شريط الأدوات
+        toolbar = tk.Frame(inner_frame, bg='white')
+        toolbar.pack(fill='x', pady=(0, 10))
+        
+        # أزرار التحكم
+        tk.Button(toolbar, text="📁 استعراض مجلد",
+                 command=self.browse_folder,
+                 bg='#3498db', fg='white',
+                 font=('Arial', 10)).pack(side='left', padx=5)
+        
+        # زر التصدير المتقدم - الجديد
+        tk.Button(toolbar, text="📤 التصدير المتقدم",
+                 command=self.start_advanced_export,
+                 bg='#2980b9', fg='white',
+                 font=('Arial', 10, 'bold'),
+                 padx=15, pady=5, cursor='hand2').pack(side='left', padx=5)
+        
+        # قسم اختيار الملفات
+        file_frame = tk.LabelFrame(inner_frame, text="اختر ملفات Excel", 
+                                  bg='white', padx=15, pady=15)
+        file_frame.pack(fill='x', pady=10)
+        
+        tk.Label(file_frame, text="مجلد ملفات Excel:",
+                bg='white', font=('Arial', 11)).pack(anchor='w')
+        
+        self.folder_path = tk.StringVar()
+        
+        folder_entry = tk.Entry(file_frame, textvariable=self.folder_path,
+                               font=('Arial', 11), width=50)
+        folder_entry.pack(side='left', fill='x', expand=True, pady=5)
+        
+        # قسم خيارات الاستيراد
+        options_frame = tk.LabelFrame(inner_frame, text="خيارات الاستيراد",
+                                     bg='white', padx=15, pady=15)
+        options_frame.pack(fill='x', pady=10)
+        
+        # خيار حذف البيانات القديمة
+        self.delete_old_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(options_frame, text="حذف البيانات القديمة قبل الاستيراد",
+                      variable=self.delete_old_var,
+                      bg='white', font=('Arial', 11)).pack(anchor='w', pady=5)
+        
+        # خيار النسخ الاحتياطي التلقائي
+        self.auto_backup_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(options_frame, text="إنشاء نسخة احتياطية تلقائية",
+                      variable=self.auto_backup_var,
+                      bg='white', font=('Arial', 11)).pack(anchor='w', pady=5)
+        
+        # قسم الملفات المحددة
+        self.files_frame = tk.LabelFrame(inner_frame, text="الملفات المحددة",
+                                        bg='white', padx=15, pady=15)
+        self.files_frame.pack(fill='both', expand=True, pady=10)
+        
+        # إطار أزرار الاستيراد والتصدير
+        buttons_frame = tk.Frame(inner_frame, bg='white')
+        buttons_frame.pack(pady=20)
+        
+        # زر التصدير المتقدم
+        export_button = tk.Button(buttons_frame, text="📤 التصدير المتقدم",
+                                command=self.start_advanced_export,
+                                bg='#2980b9', fg='white',
+                                font=('Arial', 12, 'bold'),
+                                padx=30, pady=10)
+        export_button.pack(side='left', padx=10)
+        
+        # زر بدء الاستيراد
+        start_button = tk.Button(buttons_frame, text="🚀 بدء عملية الاستيراد",
+                               command=self.start_import,
+                               bg='#27ae60', fg='white',
+                               font=('Arial', 12, 'bold'),
+                               padx=30, pady=10)
+        start_button.pack(side='left', padx=10)
+        
+        # إطار فارغ لضمان ظهور الزر
+        tk.Frame(inner_frame, height=20, bg='white').pack()
+        
+        # ربط حدث الماوس مع الإطار الداخلي
+        inner_canvas.bind_all("<MouseWheel>", 
+                            lambda e: inner_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+    
+    def start_advanced_export(self):
+        """بدء عملية التصدير المتقدم (مجلد لكل القطاعات)"""
+        try:
+            # التحقق من الصلاحية
+            from auth.permissions import require_permission
+            require_permission('system.advanced_export')
+            
+            # اختيار مجلد الحفظ
+            output_dir = filedialog.askdirectory(
+                title="اختر مجلداً لحفظ ملفات التصدير"
+            )
+            if not output_dir:
+                return
+            
+            # تعطيل زر التصدير أثناء العملية
+            if hasattr(self, 'export_button'):
+                self.export_button.config(state='disabled')
+            
+            # إنشاء نافذة التقدم
+            self.create_progress_window()
+            
+            def progress_callback(percent: int, message: str):
+                """تحديث شريط التقدم."""
+                self.update_progress(message, percent)
+            
+            def _export_thread():
+                """تنفيذ التصدير في thread منفصل."""
+                try:
+                    # إنشاء مدير التصدير
+                    mgr = ExportManager(output_dir, overwrite=True)
+                    
+                    # تنفيذ التصدير مع تحديث التقدم
+                    result = mgr.export_customers_by_sector(
+                        progress_callback=progress_callback
+                    )
+                    
+                    # تحديث الواجهة بعد الانتهاء
+                    self.parent.after(0, lambda: _handle_export_result(result))
+                    
+                except Exception as e:
+                    logger.exception("خطأ في thread التصدير")
+                    self.parent.after(0, lambda: _handle_export_error(str(e)))
+            
+            def _handle_export_result(result: dict):
+                """معالجة نتيجة التصدير."""
+                # إعادة تمكين الزر
+                if hasattr(self, 'export_button'):
+                    self.export_button.config(state='normal')
+                
+                if result.get('success'):
+                    self.update_progress("✅ تم التصدير بنجاح", 100)
+                    
+                    # عرض النتائج
+                    files_count = result.get('file_count', 0)
+                    export_dir = result.get('export_dir', output_dir)
+                    
+                    # عرض تفاصيل الملفات
+                    files_list = result.get('files', [])
+                    files_preview = ""
+                    if files_list:
+                        # عرض أول 3 ملفات فقط
+                        for i, filepath in enumerate(files_list[:3]):
+                            filename = os.path.basename(filepath)
+                            files_preview += f"{i+1}. {filename}\n"
+                        
+                        if len(files_list) > 3:
+                            files_preview += f"... و{len(files_list)-3} ملفات أخرى\n"
+                    
+                    message = (
+                        f"✅ تم إنشاء {files_count} ملف بنجاح\n\n"
+                        f"المجلد: {export_dir}\n\n"
+                        f"{files_preview}\n"
+                        "يمكنك الآن تعديل الملفات وإعادة استيرادها عبر 'مدير الاستيراد المتقدم'."
+                    )
+                    
+                    messagebox.showinfo("نجاح التصدير", message)
+                    
+                    # إغلاق نافذة التقدم بعد 2 ثانية
+                    self.parent.after(2000, self.close_progress_success)
+                    
+                else:
+                    error_msg = result.get('message', 'حدث خطأ غير معروف')
+                    self.update_progress("❌ فشل التصدير", 0)
+                    messagebox.showerror("خطأ في التصدير", error_msg)
+                    self.parent.after(2000, self.close_progress)
+            
+            def _handle_export_error(error_msg: str):
+                """معالجة الأخطاء."""
+                if hasattr(self, 'export_button'):
+                    self.export_button.config(state='normal')
+                
+                self.update_progress("❌ فشل التصدير", 0)
+                messagebox.showerror("خطأ", f"فشل التصدير: {error_msg}")
+                self.parent.after(2000, self.close_progress)
+            
+            # بدء thread التصدير
+            thread = threading.Thread(target=_export_thread, daemon=True)
+            thread.start()
+            
+        except PermissionError as pe:
+            messagebox.showerror("صلاحيات", str(pe))
+        except Exception as e:
+            logger.exception("خطأ في بدء التصدير")
+            messagebox.showerror("خطأ", f"فشل بدء التصدير: {str(e)}")

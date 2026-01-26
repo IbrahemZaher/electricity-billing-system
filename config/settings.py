@@ -27,7 +27,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here-change-in-production'
 # إعدادات النظام
 APP_NAME = 'مولدة الريان - نظام إدارة الفواتير'
 COMPANY_NAME = 'شركة الريان للطاقة الكهربائية'
-VERSION = '2.0.0'
+VERSION = '3.0.0'
 
 # إعدادات الطباعة
 PRINTER_CONFIG = {
@@ -42,6 +42,7 @@ DEFAULT_PERMISSIONS = {
     'admin': {
         'all': True,
         'manage_import': True,
+        'system.advanced_export': True,
         'delete_all_customers': True    },
     'manager': {
         'view_customers': True,
@@ -56,6 +57,7 @@ DEFAULT_PERMISSIONS = {
         'export_data': True,
         'manage_users': False,
         'view_activity_log': True,
+        'system.advanced_export': True,
         'manage_import': True  # ← أضف هذا السطر
     },
     'accountant': {
