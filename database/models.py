@@ -1,4 +1,4 @@
-# database/models.py
+# database2/models.py
 from database.connection import db
 from datetime import datetime
 import logging
