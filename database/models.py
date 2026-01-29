@@ -524,6 +524,7 @@ class Models:
             ('customers.manage_sectors', 'إدارة قطاعات الزبائن', 'customers'),
             ('customers.reimport', 'حذف وإعادة الاستيراد', 'customers'),
             ('customers.export', 'تصدير بيانات الزبائن', 'customers'),
+            ('customers.import_visas', 'استيراد تأشيرات الزبائن', 'customers'),
             
             # فئة الفواتير
             ('invoices.view', 'عرض الفواتير', 'invoices'),

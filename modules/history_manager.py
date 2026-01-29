@@ -434,3 +434,69 @@ class HistoryManager:
         except Exception as e:
             logger.error(f"خطأ في جلب ملخص السجل: {e}")
             return {'success': False, 'error': str(e)}
+
+    def process_visa_import(self, customer_id: int, visa_amount: float, 
+                           notes: str = '', user_id: int = None) -> Dict:
+        """معالجة تأشيرة مستوردة من ملف Excel"""
+        
+        try:
+            with db.get_cursor() as cursor:
+                # 1. جلب بيانات الزبون الحالية
+                cursor.execute('''
+                    SELECT current_balance, visa_balance
+                    FROM customers 
+                    WHERE id = %s
+                    FOR UPDATE
+                ''', (customer_id,))
+                
+                customer = cursor.fetchone()
+                if not customer:
+                    return {'success': False, 'error': 'الزبون غير موجود'}
+                
+                old_balance = float(customer['current_balance'] or 0)
+                old_visa = float(customer['visa_balance'] or 0)
+                
+                # 2. حساب القيم الجديدة
+                new_balance = old_balance + visa_amount
+                new_visa = old_visa + visa_amount
+                
+                # 3. تحديث بيانات الزبون
+                cursor.execute('''
+                    UPDATE customers 
+                    SET current_balance = %s,
+                        visa_balance = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                ''', (new_balance, new_visa, customer_id))
+                
+                # 4. تسجيل العملية في السجل التاريخي
+                history_result = self.log_transaction(
+                    customer_id=customer_id,
+                    transaction_type='weekly_visa',
+                    old_value=old_visa,
+                    new_value=new_visa,
+                    amount=visa_amount,
+                    current_balance_after=new_balance,
+                    notes=f"استيراد تأشيرة من ملف Excel: {visa_amount:,.0f} | {notes}",
+                    created_by=user_id
+                )
+                
+                if not history_result['success']:
+                    cursor.execute("ROLLBACK")
+                    return history_result
+                
+                return {
+                    'success': True,
+                    'customer_id': customer_id,
+                    'old_balance': old_balance,
+                    'new_balance': new_balance,
+                    'old_visa': old_visa,
+                    'new_visa': new_visa,
+                    'amount': visa_amount,
+                    'transaction_id': history_result.get('transaction_id'),
+                    'message': f'تم استيراد تأشيرة: {visa_amount:,.0f}'
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في معالجة تأشيرة مستوردة: {e}")
+            return {'success': False, 'error': str(e)}

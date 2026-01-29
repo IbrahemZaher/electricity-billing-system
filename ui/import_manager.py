@@ -756,3 +756,152 @@ class ImportManagerUI:
         except Exception as e:
             logger.exception("خطأ في بدء التصدير")
             messagebox.showerror("خطأ", f"فشل بدء التصدير: {str(e)}")
+
+    def create_visa_import_tab(self, parent):
+        """إنشاء تبويب استيراد التأشيرات"""
+        # إطار داخلي مع سكرول بار
+        inner_canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
+        inner_scrollbar = ttk.Scrollbar(parent, orient="vertical", command=inner_canvas.yview)
+        inner_frame = tk.Frame(inner_canvas, bg='white')
+        
+        inner_canvas.configure(yscrollcommand=inner_scrollbar.set)
+        inner_canvas_window = inner_canvas.create_window((0, 0), window=inner_frame, anchor="nw")
+        
+        def configure_inner_canvas(event):
+            inner_canvas.configure(scrollregion=inner_canvas.bbox("all"))
+            inner_canvas.itemconfig(inner_canvas_window, width=event.width)
+        
+        inner_frame.bind("<Configure>", configure_inner_canvas)
+        inner_canvas.bind("<Configure>", configure_inner_canvas)
+        
+        inner_scrollbar.pack(side="right", fill="y")
+        inner_canvas.pack(side="left", fill="both", expand=True)
+        
+        # عنوان التبويب
+        title = tk.Label(inner_frame, text="📋 استيراد تأشيرات الزبائن", 
+                        font=('Arial', 16, 'bold'), bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        # إطار التعليمات
+        instructions = tk.LabelFrame(inner_frame, text="تعليمات الاستيراد", 
+                                    bg='white', padx=15, pady=15)
+        instructions.pack(fill='x', padx=10, pady=10)
+        
+        instructions_text = """📝 يرجى إعداد ملف Excel يحتوي على الأعمدة التالية (العربية):
+        
+        1. علبة أو مسلسل: رقم العلبة أو المسلسل للزبون
+        2. تنزيل تأشيرة: مبلغ التأشيرة (رقم)
+        
+        ⚠️ ملاحظات مهمة:
+        • اسم الملف يجب أن يكون اسم القطاع (مثال: بيدر.xlsx)
+        • يمكن استخدام رقم العلبة أو المسلسل أو اسم الزبون لتحديده
+        • سيتم إضافة التأشيرة إلى رصيد الزبون الحالي
+        • سيتم تسجيل العملية في السجل التاريخي لكل زبون
+        """
+        
+        tk.Label(instructions, text=instructions_text, 
+                bg='white', font=('Arial', 10), justify='left').pack()
+        
+        # قسم اختيار الملف
+        file_frame = tk.LabelFrame(inner_frame, text="اختر ملف Excel", 
+                                  bg='white', padx=15, pady=15)
+        file_frame.pack(fill='x', padx=10, pady=10)
+        
+        self.visa_file_path = tk.StringVar()
+        
+        tk.Label(file_frame, text="ملف Excel:", 
+                bg='white', font=('Arial', 11)).pack(anchor='w')
+        
+        file_entry = tk.Entry(file_frame, textvariable=self.visa_file_path,
+                             font=('Arial', 11), width=50)
+        file_entry.pack(side='left', fill='x', expand=True, pady=5)
+        
+        tk.Button(file_frame, text="📁 استعراض", 
+                 command=self.browse_visa_file,
+                 bg='#3498db', fg='white',
+                 font=('Arial', 10)).pack(side='right', padx=5)
+        
+        # قسم خيارات الاستيراد
+        options_frame = tk.LabelFrame(inner_frame, text="خيارات الاستيراد", 
+                                     bg='white', padx=15, pady=15)
+        options_frame.pack(fill='x', padx=10, pady=10)
+        
+        # أعمدة مخصصة (بالعربية)
+        tk.Label(options_frame, text="أسماء الأعمدة في الملف:", 
+                bg='white', font=('Arial', 11, 'bold')).pack(anchor='w')
+        
+        columns_frame = tk.Frame(options_frame, bg='white')  # ✅ تم إصلاح الخطأ هنا
+        columns_frame.pack(fill='x', pady=10)
+        
+        tk.Label(columns_frame, text="عمود العلبة/المسلسل:", bg='white').grid(row=0, column=0, padx=5)
+        self.identifier_column = tk.StringVar(value='علبة')
+        tk.Entry(columns_frame, textvariable=self.identifier_column, width=15).grid(row=0, column=1, padx=5)
+        
+        tk.Label(columns_frame, text="عمود المبلغ:", bg='white').grid(row=0, column=2, padx=5)
+        self.amount_column = tk.StringVar(value='تنزيل تأشيرة')
+        tk.Entry(columns_frame, textvariable=self.amount_column, width=15).grid(row=0, column=3, padx=5)
+        
+        # زر تنزيل النموذج
+        tk.Button(options_frame, text="📥 تنزيل ملف نموذجي", 
+                 command=self.download_visa_template,
+                 bg='#9b59b6', fg='white',
+                 font=('Arial', 10)).pack(pady=10)
+        
+        # أزرار التحكم
+        buttons_frame = tk.Frame(inner_frame, bg='white')
+        buttons_frame.pack(pady=20)
+        
+        tk.Button(buttons_frame, text="🚀 بدء استيراد التأشيرات", 
+                 command=self.start_visa_import,
+                 bg='#27ae60', fg='white',
+                 font=('Arial', 12, 'bold'),
+                 padx=30, pady=10).pack(side='left', padx=10)
+        
+        # منطقة النتائج
+        self.visa_results_text = tk.Text(inner_frame, height=15, 
+                                        font=('Courier', 10), wrap='word')
+        self.visa_results_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # إطار فارغ لضمان الظهور
+        tk.Frame(inner_frame, height=20, bg='white').pack()
+
+    def execute_visa_import(self, file_path):
+        """تنفيذ استيراد التأشيرات"""
+        try:
+            from modules.visa_importer import VisaImporter
+            
+            # إنشاء المستورد
+            importer = VisaImporter(user_id=self.user_data.get('id', 1))
+            
+            # تحديث شريط التقدم
+            self.update_progress("جاري قراءة ملف Excel...", 10)
+            
+            # استيراد البيانات مع الأعمدة المحددة
+            result = importer.import_from_excel(
+                file_path=file_path,
+                identifier_column=self.identifier_column.get() if hasattr(self, 'identifier_column') else None,
+                amount_column=self.amount_column.get() if hasattr(self, 'amount_column') else None
+            )
+            
+            if result['success']:
+                self.update_progress("✅ تم استيراد التأشيرات بنجاح", 100)
+                
+                # عرض النتائج
+                self.visa_results_text.delete(1.0, tk.END)
+                self.visa_results_text.insert(1.0, result['report'])
+                
+                # إغلاق نافذة التقدم بعد 2 ثانية
+                self.parent.after(2000, self.close_progress_success)
+                
+                messagebox.showinfo("نجاح", result['message'])
+                
+            else:
+                self.update_progress(f"❌ فشل الاستيراد: {result['message']}", 0)
+                self.parent.after(2000, lambda: messagebox.showerror("خطأ", result['message']))
+                self.close_progress()
+                
+        except Exception as e:
+            logger.error(f"خطأ في استيراد التأشيرات: {e}")
+            self.update_progress(f"❌ خطأ في الاستيراد: {str(e)}", 0)
+            self.parent.after(2000, lambda: messagebox.showerror("خطأ", f"فشل الاستيراد: {str(e)}"))
+            self.close_progress()

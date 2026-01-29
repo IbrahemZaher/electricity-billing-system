@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Optional
 from auth.permissions import has_permission, require_permission
+import threading  # ← أضف هذا السطر
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,10 @@ class CustomerUI(tk.Frame):
     
             # ui/customer_ui.py - إضافة زر جديد في create_toolbar
     # تحديث دالة create_toolbar:
+
     def create_toolbar(self):
-        """إنشاء شريط الأدوات العلوي"""
-        toolbar = tk.Frame(self, bg='#2c3e50', height=60)
+        """إنشاء شريط الأدوات العلوي مع إمكانية التمرير"""
+        toolbar = tk.Frame(self, bg='#2c3e50', height=70)
         toolbar.pack(fill='x', padx=0, pady=0)
         toolbar.pack_propagate(False)
         
@@ -71,37 +73,172 @@ class CustomerUI(tk.Frame):
                             bg='#2c3e50', fg='white')
         title_label.pack(side='left', padx=20)
         
-        buttons_frame = tk.Frame(toolbar, bg='#2c3e50')
-        buttons_frame.pack(side='right', padx=20)
+        # إطار داخلي قابل للتمرير
+        toolbar_container = tk.Frame(toolbar, bg='#2c3e50')
+        toolbar_container.pack(side='right', fill='both', expand=True, padx=(0, 10))
+        
+        # Canvas مع شريط تمرير
+        canvas = tk.Canvas(toolbar_container, bg='#2c3e50', highlightthickness=0, height=70)
+        scrollbar = ttk.Scrollbar(toolbar_container, orient='horizontal', command=canvas.xview)
+        
+        canvas.configure(xscrollcommand=scrollbar.set)
+        canvas.pack(side='top', fill='x')
+        scrollbar.pack(side='bottom', fill='x')
+        
+        # إطار للأزرار داخل Canvas
+        buttons_frame = tk.Frame(canvas, bg='#2c3e50')
+        canvas_window = canvas.create_window((0, 0), window=buttons_frame, anchor='nw')
         
         # استخدام الصلاحيات بدلاً من التحقق المباشر
         buttons = [
-            ("➕ إضافة زبون جديد", self.add_customer, "#27ae60", 'customers.add'),
-            ("✏️ تعديل المحدد", self.edit_customer, "#3498db", 'customers.edit'),
-            ("🗑️ حذف المحدد", self.delete_customer, "#e74c3c", 'customers.delete'),
-            ("🔄 تحديث القائمة", self.refresh_customers, "#95a5a6", 'customers.view'),
-            ("📋 عرض التفاصيل", self.show_customer_details, "#9b59b6", 'customers.view_details'),
-            ("📜 السجل التاريخي", self.show_customer_history, "#8e44ad", 'customers.view_history'),
-            ("🗑️🔥 حذف وإعادة الاستيراد", self.delete_and_reimport, "#e74c3c", 'customers.reimport'),
-            ("🗑️ حذف قطاع", self.delete_sector_customers, "#c0392b", 'customers.manage_sectors')
+            ("➕ إضافة", self.add_customer, "#27ae60", 'customers.add'),
+            ("✏️ تعديل", self.edit_customer, "#3498db", 'customers.edit'),
+            ("🗑️ حذف", self.delete_customer, "#e74c3c", 'customers.delete'),
+            ("🔄 تحديث", self.refresh_customers, "#95a5a6", 'customers.view'),
+            ("📋 تفاصيل", self.show_customer_details, "#9b59b6", 'customers.view_details'),
+            ("📜 سجل", self.show_customer_history, "#8e44ad", 'customers.view_history'),
+            ("💰 تأشيرات", self.import_visas, "#f39c12", 'customers.import_visas'),
+            ("🗑️🔥 إعادة", self.delete_and_reimport, "#e74c3c", 'customers.reimport'),
+            ("🗑️ قطاع", self.delete_sector_customers, "#c0392b", 'customers.manage_sectors')
         ]
         
         for text, command, color, permission in buttons:
             if has_permission(permission):
                 btn = tk.Button(buttons_frame, text=text, command=command,
                             bg=color, fg='white',
-                            font=('Arial', 10),
-                            padx=12, pady=6, cursor='hand2')
-                btn.pack(side='left', padx=5)
+                            font=('Arial', 9),  # حجم خط أصغر
+                            padx=10, pady=4, cursor='hand2')
+                btn.pack(side='left', padx=3)
             else:
                 # زر معطل
                 btn = tk.Button(buttons_frame, text=text,
                             state='disabled',
                             bg='#95a5a6', fg='white',
-                            font=('Arial', 10),
-                            padx=12, pady=6)
-                btn.pack(side='left', padx=5)
+                            font=('Arial', 9),
+                            padx=10, pady=4)
+                btn.pack(side='left', padx=3)
+        
+        # تحديث حجم Canvas
+        def configure_canvas(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfig(canvas_window, width=max(buttons_frame.winfo_reqwidth(), canvas.winfo_width()))
+        
+        buttons_frame.bind("<Configure>", configure_canvas)
+        canvas.bind("<Configure>", configure_canvas)
 
+    def import_visas(self):
+        """فتح نافذة استيراد تأشيرات"""
+        try:
+            require_permission('customers.import_visas')
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+        
+        # نافذة اختيار الملف
+        from tkinter import filedialog
+        file_path = filedialog.askopenfilename(
+            title="اختر ملف Excel للتأشيرات",
+            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+        )
+        
+        if not file_path:
+            return
+        
+        # نافذة اختيار الأعمدة
+        column_dialog = tk.Toplevel(self)
+        column_dialog.title("تحديد الأعمدة")
+        column_dialog.geometry("400x200")
+        
+        tk.Label(column_dialog, text="اختر أسماء الأعمدة في الملف:", 
+                font=('Arial', 12, 'bold')).pack(pady=10)
+        
+        # اختيار عمود المعرف
+        tk.Label(column_dialog, text="عمود العلبة/المسلسل:").pack()
+        identifier_var = tk.StringVar(value='علبة')
+        identifier_combo = ttk.Combobox(column_dialog, textvariable=identifier_var,
+                                    values=['علبة', 'مسلسل', 'اسم الزبون'])
+        identifier_combo.pack(pady=5)
+        
+        # اختيار عمود المبلغ
+        tk.Label(column_dialog, text="عمود مبلغ التأشيرة:").pack()
+        amount_var = tk.StringVar(value='تنزيل تأشيرة')
+        amount_combo = ttk.Combobox(column_dialog, textvariable=amount_var,
+                                values=['تنزيل تأشيرة', 'الرصيد'])
+        amount_combo.pack(pady=5)
+        
+        def confirm_import():
+            column_dialog.destroy()
+            
+            # إنشاء نافذة التقدم
+            progress_window = tk.Toplevel(self)
+            progress_window.title("جاري استيراد التأشيرات...")
+            progress_window.geometry("400x200")
+            
+            progress_label = tk.Label(progress_window, 
+                                    text="جاري استيراد التأشيرات من الملف...",
+                                    font=('Arial', 12))
+            progress_label.pack(pady=20)
+            
+            progress_bar = ttk.Progressbar(progress_window, 
+                                        mode='indeterminate',
+                                        length=300)
+            progress_bar.pack(pady=10)
+            progress_bar.start()
+            
+            def _import_thread():
+                """تنفيذ الاستيراد في thread منفصل"""
+                try:
+                    # استيراد التأشيرات
+                    from modules.visa_importer import VisaImporter
+                    importer = VisaImporter(user_id=self.user_data.get('id', 1))
+                    
+                    result = importer.import_from_excel(
+                        file_path=file_path,
+                        identifier_column=identifier_var.get(),
+                        amount_column=amount_var.get()
+                    )
+                    
+                    progress_bar.stop()
+                    progress_window.destroy()
+                    
+                    if result['success']:
+                        # عرض النتائج
+                        result_text = result['report']
+                        
+                        # نافذة النتائج
+                        result_window = tk.Toplevel(self)
+                        result_window.title("نتائج استيراد التأشيرات")
+                        result_window.geometry("600x500")
+                        
+                        text_widget = tk.Text(result_window, wrap='word')
+                        scrollbar = ttk.Scrollbar(result_window, command=text_widget.yview)
+                        text_widget.config(yscrollcommand=scrollbar.set)
+                        
+                        text_widget.pack(side='left', fill='both', expand=True)
+                        scrollbar.pack(side='right', fill='y')
+                        
+                        text_widget.insert(1.0, result_text)
+                        text_widget.config(state='disabled')
+                        
+                        # تحديث قائمة الزبائن
+                        self.refresh_customers()
+                        
+                    else:
+                        messagebox.showerror("خطأ", result['message'])
+                        
+                except Exception as e:
+                    progress_bar.stop()
+                    progress_window.destroy()
+                    messagebox.showerror("خطأ", f"فشل استيراد التأشيرات: {str(e)}")
+            
+            # بدء thread الاستيراد
+            thread = threading.Thread(target=_import_thread, daemon=True)
+            thread.start()
+        
+        tk.Button(column_dialog, text="بدء الاستيراد", 
+                command=confirm_import,
+                bg='#27ae60', fg='white').pack(pady=20)
+                
     # إضافة دوال جديدة في customer_ui.py
     def delete_and_reimport(self):
         """حذف جميع الزبائن وإعادة الاستيراد"""
