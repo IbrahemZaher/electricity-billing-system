@@ -126,119 +126,39 @@ class CustomerUI(tk.Frame):
         buttons_frame.bind("<Configure>", configure_canvas)
         canvas.bind("<Configure>", configure_canvas)
 
+    # ui/customer_ui.py - تحديث دالة import_visas فقط
     def import_visas(self):
-        """فتح نافذة استيراد تأشيرات"""
+        """فتح محرر التأشيرات الجديد"""
         try:
             require_permission('customers.import_visas')
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
         
-        # نافذة اختيار الملف
-        from tkinter import filedialog
-        file_path = filedialog.askopenfilename(
-            title="اختر ملف Excel للتأشيرات",
-            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
-        )
-        
-        if not file_path:
-            return
-        
-        # نافذة اختيار الأعمدة
-        column_dialog = tk.Toplevel(self)
-        column_dialog.title("تحديد الأعمدة")
-        column_dialog.geometry("400x200")
-        
-        tk.Label(column_dialog, text="اختر أسماء الأعمدة في الملف:", 
-                font=('Arial', 12, 'bold')).pack(pady=10)
-        
-        # اختيار عمود المعرف
-        tk.Label(column_dialog, text="عمود العلبة/المسلسل:").pack()
-        identifier_var = tk.StringVar(value='علبة')
-        identifier_combo = ttk.Combobox(column_dialog, textvariable=identifier_var,
-                                    values=['علبة', 'مسلسل', 'اسم الزبون'])
-        identifier_combo.pack(pady=5)
-        
-        # اختيار عمود المبلغ
-        tk.Label(column_dialog, text="عمود مبلغ التأشيرة:").pack()
-        amount_var = tk.StringVar(value='تنزيل تأشيرة')
-        amount_combo = ttk.Combobox(column_dialog, textvariable=amount_var,
-                                values=['تنزيل تأشيرة', 'الرصيد'])
-        amount_combo.pack(pady=5)
-        
-        def confirm_import():
-            column_dialog.destroy()
+        try:
+            # استيراد محرر التأشيرات وفتحه مباشرة
+            from modules.visa_importer import VisaEditor
             
-            # إنشاء نافذة التقدم
-            progress_window = tk.Toplevel(self)
-            progress_window.title("جاري استيراد التأشيرات...")
-            progress_window.geometry("400x200")
+            # الحصول على النافذة الرئيسية
+            root_window = self.winfo_toplevel()
             
-            progress_label = tk.Label(progress_window, 
-                                    text="جاري استيراد التأشيرات من الملف...",
-                                    font=('Arial', 12))
-            progress_label.pack(pady=20)
+            # فتح محرر التأشيرات
+            editor = VisaEditor(root_window, user_id=self.user_data.get('id', 1))
             
-            progress_bar = ttk.Progressbar(progress_window, 
-                                        mode='indeterminate',
-                                        length=300)
-            progress_bar.pack(pady=10)
-            progress_bar.start()
+            logger.info(f"تم فتح محرر التأشيرات للمستخدم {self.user_data.get('id', 1)}")
             
-            def _import_thread():
-                """تنفيذ الاستيراد في thread منفصل"""
-                try:
-                    # استيراد التأشيرات
-                    from modules.visa_importer import VisaImporter
-                    importer = VisaImporter(user_id=self.user_data.get('id', 1))
-                    
-                    result = importer.import_from_excel(
-                        file_path=file_path,
-                        identifier_column=identifier_var.get(),
-                        amount_column=amount_var.get()
-                    )
-                    
-                    progress_bar.stop()
-                    progress_window.destroy()
-                    
-                    if result['success']:
-                        # عرض النتائج
-                        result_text = result['report']
-                        
-                        # نافذة النتائج
-                        result_window = tk.Toplevel(self)
-                        result_window.title("نتائج استيراد التأشيرات")
-                        result_window.geometry("600x500")
-                        
-                        text_widget = tk.Text(result_window, wrap='word')
-                        scrollbar = ttk.Scrollbar(result_window, command=text_widget.yview)
-                        text_widget.config(yscrollcommand=scrollbar.set)
-                        
-                        text_widget.pack(side='left', fill='both', expand=True)
-                        scrollbar.pack(side='right', fill='y')
-                        
-                        text_widget.insert(1.0, result_text)
-                        text_widget.config(state='disabled')
-                        
-                        # تحديث قائمة الزبائن
-                        self.refresh_customers()
-                        
-                    else:
-                        messagebox.showerror("خطأ", result['message'])
-                        
-                except Exception as e:
-                    progress_bar.stop()
-                    progress_window.destroy()
-                    messagebox.showerror("خطأ", f"فشل استيراد التأشيرات: {str(e)}")
+        except ImportError as e:
+            logger.error(f"خطأ في تحميل محرر التأشيرات: {e}")
+            messagebox.showerror("خطأ", 
+                f"❌ لا يمكن تحميل محرر التأشيرات\n\n"
+                f"السبب: {str(e)}\n\n"
+                f"تأكد من وجود ملف: modules/visa_editor.py"
+            )
+        except Exception as e:
+            logger.error(f"خطأ في فتح محرر التأشيرات: {e}")
+            messagebox.showerror("خطأ", f"❌ فشل فتح محرر التأشيرات: {str(e)}")
             
-            # بدء thread الاستيراد
-            thread = threading.Thread(target=_import_thread, daemon=True)
-            thread.start()
-        
-        tk.Button(column_dialog, text="بدء الاستيراد", 
-                command=confirm_import,
-                bg='#27ae60', fg='white').pack(pady=20)
-                
+                            
     # إضافة دوال جديدة في customer_ui.py
     def delete_and_reimport(self):
         """حذف جميع الزبائن وإعادة الاستيراد"""

@@ -70,6 +70,7 @@ class ExportManager:
     
     # أسماء الأعمدة كما يتوقعها ExcelMigration
     COLUMN_MAPPING = {
+        'customer_id': 'id',
         'box_number': 'علبة',
         'serial_number': 'مسلسل',
         'name': 'اسم الزبون',
@@ -137,7 +138,20 @@ class ExportManager:
                 
                 total_sectors = len(sectors)
                 exported_files = []
-                arabic_columns = list(self.COLUMN_MAPPING.values())
+                
+                # ترتيب الأعمدة مع وضع المعرف أولاً
+                column_order = [
+                    'id',
+                    'علبة',
+                    'مسلسل',
+                    'اسم الزبون',
+                    'رقم واتس الزبون',
+                    'الرصيد',
+                    'نهاية جديدة',
+                    'تنزيل تأشيرة',
+                    'سحب المشترك',
+                    'ملاحظات'
+                ]
                 
                 for idx, sector in enumerate(sectors, 1):
                     # التصحيح: استخدام المفاتيح النصية بدلاً من الفهرس الرقمي
@@ -153,6 +167,7 @@ class ExportManager:
                     # جلب الزبائن للقطاع
                     cursor.execute("""
                         SELECT 
+                            id,
                             box_number, serial_number, name, phone_number,
                             current_balance, last_counter_reading, 
                             visa_balance, withdrawal_amount, notes
@@ -163,11 +178,14 @@ class ExportManager:
                     
                     customers = cursor.fetchall()
                     
-                    # تحضير البيانات
+                    # تحضير البيانات مع إضافة المعرف
                     data = []
                     for cust in customers:
-                        # التصحيح: استخدام المفاتيح النصية بدلاً من الفهرس الرقمي
+                        # إضافة المعرف أولاً - التأكد من أنه عدد صحيح
+                        customer_id = str(int(cust['id'])) if cust['id'] else '0'
+                        
                         data.append({
+                            'id': customer_id,
                             'علبة': safe_str(cust['box_number']),
                             'مسلسل': safe_str(cust['serial_number']),
                             'اسم الزبون': safe_str(cust['name']),
@@ -177,10 +195,9 @@ class ExportManager:
                             'تنزيل تأشيرة': safe_str(cust['visa_balance']),
                             'سحب المشترك': safe_str(cust['withdrawal_amount']),
                             'ملاحظات': safe_str(cust['notes'])
-                        })
-                    
-                    # إنشاء DataFrame
-                    df = pd.DataFrame(data, columns=arabic_columns)
+                        })                    
+                    # إنشاء DataFrame مع الترتيب الصحيح للأعمدة
+                    df = pd.DataFrame(data, columns=column_order)
                     
                     # إنشاء اسم الملف
                     filename = self._get_safe_filename(sector_code)

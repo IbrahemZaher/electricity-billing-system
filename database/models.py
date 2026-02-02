@@ -3,7 +3,6 @@ from database.connection import db
 from datetime import datetime
 import logging
 
-
 logger = logging.getLogger(__name__)
 
 class Models:
@@ -57,6 +56,8 @@ class Models:
                     ('balance_after', 'DECIMAL(15, 2)'),
                     ('current_balance_before', 'DECIMAL(15, 2)'),
                     ('current_balance_after', 'DECIMAL(15, 2)'),
+                    ('old_balance', 'DECIMAL(15, 2)'),
+                    ('new_balance', 'DECIMAL(15, 2)'),
                     ('kilowatt_amount', 'DECIMAL(10, 2)'),
                     ('free_kilowatt', 'DECIMAL(10, 2) DEFAULT 0'),
                     ('price_per_kilo', 'DECIMAL(10, 2)'),
@@ -128,35 +129,15 @@ class Models:
                 columns_info = cursor.fetchall()
                 logger.info(f"معلومات أعمدة customer_history: {columns_info}")
                 
-                # تحديث القيم النصية إلى رقمية
+                # تحديث القيم NULL فقط إلى 0 (بدون استخدام المشغل النمطي !~)
                 cursor.execute("""
                     UPDATE customer_history 
                     SET 
-                        old_value = CASE 
-                            WHEN old_value IS NULL THEN 0
-                            WHEN old_value ~ '^[0-9]+(\\.[0-9]+)?$' THEN CAST(old_value AS DECIMAL(15, 2))
-                            ELSE 0 
-                        END,
-                        new_value = CASE 
-                            WHEN new_value IS NULL THEN 0
-                            WHEN new_value ~ '^[0-9]+(\\.[0-9]+)?$' THEN CAST(new_value AS DECIMAL(15, 2))
-                            ELSE 0 
-                        END,
-                        amount = CASE 
-                            WHEN amount IS NULL THEN 0
-                            WHEN amount ~ '^[0-9]+(\\.[0-9]+)?$' THEN CAST(amount AS DECIMAL(15, 2))
-                            ELSE 0 
-                        END,
-                        current_balance_after = CASE 
-                            WHEN current_balance_after IS NULL THEN 0
-                            WHEN current_balance_after ~ '^[0-9]+(\\.[0-9]+)?$' THEN CAST(current_balance_after AS DECIMAL(15, 2))
-                            ELSE 0 
-                        END
+                        old_value = COALESCE(old_value, 0),
+                        new_value = COALESCE(new_value, 0),
+                        amount = COALESCE(amount, 0),
+                        current_balance_after = COALESCE(current_balance_after, 0)
                     WHERE 
-                        old_value !~ '^[0-9]+(\\.[0-9]+)?$' OR 
-                        new_value !~ '^[0-9]+(\\.[0-9]+)?$' OR 
-                        amount !~ '^[0-9]+(\\.[0-9]+)?$' OR 
-                        current_balance_after !~ '^[0-9]+(\\.[0-9]+)?$' OR
                         old_value IS NULL OR
                         new_value IS NULL OR
                         amount IS NULL OR
@@ -169,29 +150,6 @@ class Models:
                 else:
                     logger.info("لم تكن هناك حاجة لتحديث القيم الرقمية في جدول customer_history")
                 
-                # تغيير نوع البيانات للأعمدة إذا كانت لا تزال نصية
-                cursor.execute("""
-                    SELECT column_name, data_type 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'customer_history' 
-                    AND column_name IN ('old_value', 'new_value', 'amount', 'current_balance_after')
-                    AND data_type != 'numeric'
-                """)
-                
-                text_columns = cursor.fetchall()
-                for column in text_columns:
-                    column_name = column['column_name']
-                    logger.info(f"تغيير نوع العمود {column_name} من {column['data_type']} إلى numeric")
-                    
-                    # تغيير نوع العمود إلى numeric
-                    cursor.execute(f"""
-                        ALTER TABLE customer_history 
-                        ALTER COLUMN {column_name} TYPE DECIMAL(15, 2)
-                        USING {column_name}::DECIMAL(15, 2)
-                    """)
-                    
-                    logger.info(f"تم تغيير نوع العمود {column_name} إلى DECIMAL(15, 2)")
-                    
         except Exception as e:
             logger.error(f"خطأ في تصحيح القيم الرقمية في جدول customer_history: {e}")
 
@@ -379,6 +337,8 @@ class Models:
                 balance_after DECIMAL(15, 2),
                 current_balance_before DECIMAL(15, 2),
                 current_balance_after DECIMAL(15, 2),
+                old_balance DECIMAL(15, 2),  
+                new_balance DECIMAL(15, 2),  
                 
                 -- معلومات الفاتورة
                 kilowatt_amount DECIMAL(10, 2),
@@ -456,7 +416,7 @@ class Models:
             # تحديث جدول سجل الزبائن
             self.update_customer_history_table()
             # إنشاء فهارس إضافية لجدول التاريخ بعد التحديث
-            self.update_users_table()  # ← أضف هذا السطر
+            self.update_users_table()
             self.create_history_indexes()
             # تصحيح القيم النصية في الأعمدة الرقمية
             self.fix_customer_history_numeric_values()
@@ -470,7 +430,7 @@ class Models:
                     "CREATE INDEX IF NOT EXISTS idx_customer_history_action_type ON customer_history(action_type);",
                     "CREATE INDEX IF NOT EXISTS idx_customer_history_transaction_type ON customer_history(transaction_type);",
                     "CREATE INDEX IF NOT EXISTS idx_customer_history_performed_at ON customer_history(performed_at DESC);",
-                    "CREATE INDEX IF NOT EXISTS idx_customer_history_created_at ON customer_history(created_at DESC);",  # أضفت فهرس لـ created_at
+                    "CREATE INDEX IF NOT EXISTS idx_customer_history_created_at ON customer_history(created_at DESC);",
                     "CREATE INDEX IF NOT EXISTS idx_customer_history_created_by ON customer_history(created_by);",
                     "CREATE INDEX IF NOT EXISTS idx_customer_history_invoice_number ON customer_history(invoice_number);",
                     "CREATE INDEX IF NOT EXISTS idx_customer_history_amount ON customer_history(amount);",
@@ -510,7 +470,6 @@ class Models:
             VALUES ('admin', 'scrypt:32768:8:1$wFnfT6hB9u3xKXqg$afb5fb045f9afab01e2036b5b7b7d4c6c9c6b2e7e6f7a8b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3', 'المسؤول العام', 'admin', '{"all": true}')
             ON CONFLICT (username) DO NOTHING
         """)
-                # في دالة seed_initial_data()، بعد إضافة المستخدم الإداري:
 
         # إضافة الصلاحيات إلى الكتالوج
         permissions_data = [
@@ -628,75 +587,7 @@ class Models:
                 VALUES (%s, %s, %s)
                 ON CONFLICT (key) DO NOTHING
             """, (key, value, description))
-                
-        # database/models.py - تحديث دالة fix_customer_history_numeric_values فقط
 
-    def fix_customer_history_numeric_values(self):
-        """تصحيح القيم النصية في الأعمدة الرقمية في جدول customer_history"""
-        try:
-            with db.get_cursor() as cursor:
-                # التحقق من نوع البيانات في الأعمدة
-                cursor.execute("""
-                    SELECT column_name, data_type 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'customer_history' 
-                    AND column_name IN ('old_value', 'new_value', 'amount', 'current_balance_after')
-                """)
-                
-                columns_info = cursor.fetchall()
-                logger.info(f"معلومات أعمدة customer_history: {columns_info}")
-                
-                # تحديث القيم النصية إلى رقمية للأعمدة التي لا تزال نصية فقط
-                for column in columns_info:
-                    column_name = column['column_name']
-                    data_type = column['data_type']
-                    
-                    if data_type == 'text':
-                        logger.info(f"معالجة العمود النصي: {column_name}")
-                        
-                        # تحويل القيم النصية إلى رقمية
-                        cursor.execute(f"""
-                            UPDATE customer_history 
-                            SET {column_name} = CASE 
-                                WHEN {column_name} IS NULL THEN 0
-                                WHEN {column_name} ~ '^[0-9]+(\\.[0-9]+)?$' THEN CAST({column_name} AS DECIMAL(15, 2))
-                                ELSE 0 
-                            END
-                            WHERE {column_name} IS NULL 
-                            OR {column_name} !~ '^[0-9]+(\\.[0-9]+)?$'
-                            OR {column_name} = ''
-                        """)
-                        
-                        # تغيير نوع العمود إلى numeric
-                        try:
-                            cursor.execute(f"""
-                                ALTER TABLE customer_history 
-                                ALTER COLUMN {column_name} TYPE DECIMAL(15, 2)
-                                USING {column_name}::DECIMAL(15, 2)
-                            """)
-                            logger.info(f"تم تغيير نوع العمود {column_name} من text إلى DECIMAL(15, 2)")
-                        except Exception as alter_error:
-                            logger.warning(f"لا يمكن تغيير نوع العمود {column_name}: {alter_error}")
-                    
-                    elif data_type == 'numeric':
-                        logger.info(f"العمود {column_name} بالفعل من نوع numeric، لا حاجة للتحديث")
-                    
-                    # التعامل مع القيم الفارغة في الأعمدة الرقمية
-                    cursor.execute(f"""
-                        UPDATE customer_history 
-                        SET {column_name} = 0
-                        WHERE {column_name} IS NULL
-                    """)
-                    
-                    rows_updated = cursor.rowcount
-                    if rows_updated > 0:
-                        logger.info(f"تم تحديث {rows_updated} قيمة فارغة في العمود {column_name}")
-                
-                logger.info("تم الانتهاء من تصحيح القيم الرقمية في جدول customer_history")
-                
-        except Exception as e:
-            logger.error(f"خطأ في تصحيح القيم الرقمية في جدول customer_history: {e}")
-            # لا نرفع الخطأ حتى لا يمنع تشغيل التطبيق        
     def update_users_table(self):
         """تحديث جدول المستخدمين بإضافة الأعمدة المفقودة"""
         try:
@@ -720,8 +611,7 @@ class Models:
                     logger.info("العمود email موجود بالفعل في جدول users")
                 
         except Exception as e:
-            logger.error(f"خطأ في تحديث جدول users: {e}")               
-                    
-                        
+            logger.error(f"خطأ في تحديث جدول users: {e}")
+
 # تأكد أن هذا السطر موجود في النهاية
 models = Models()
