@@ -2,18 +2,21 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
+from database.connection import db
 
 logger = logging.getLogger(__name__)
 
 class CustomerForm:
-    """نموذج إضافة وتعديل الزبون"""
+    """نموذج إضافة وتعديل الزبون مع دعم العدادات الهرمية"""
     
-    def __init__(self, parent, title, sectors, customer_data=None):
+    def __init__(self, parent, title, sectors, customer_data=None, user_id=None):
         self.parent = parent
         self.title = title
         self.sectors = sectors
         self.customer_data = customer_data
+        self.user_id = user_id
         self.result = None
+        self.parent_meter_candidates = []  # لتخزين المرشحين للعلبة الأم
         
         self.create_dialog()
         self.create_widgets()
@@ -26,7 +29,7 @@ class CustomerForm:
         """إنشاء النافذة المنبثقة"""
         self.dialog = tk.Toplevel(self.parent)
         self.dialog.title(self.title)
-        self.dialog.geometry("500x650")
+        self.dialog.geometry("550x750")  # زيادة الارتفاع لاستيعاب الحقول الجديدة
         self.dialog.resizable(False, False)
         self.dialog.configure(bg='#f5f7fa')
         
@@ -36,7 +39,7 @@ class CustomerForm:
         height = self.dialog.winfo_height()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'500x650+{x}+{y}')
+        self.dialog.geometry(f'550x750+{x}+{y}')
         
         # ربط زر الإغلاق
         self.dialog.protocol("WM_DELETE_WINDOW", self.cancel)
@@ -80,6 +83,8 @@ class CustomerForm:
         # تعريف الحقول
         fields = [
             ('sector', 'القطاع *', 'combobox', {'values': [s['name'] for s in self.sectors]}),
+            ('meter_type', 'نوع العداد *', 'combobox', {'values': ['زبون', 'رئيسية', 'علبة توزيع', 'مولدة']}),
+            ('parent_meter_id', 'العلبة الأم', 'combobox', {'values': [], 'state': 'readonly'}),
             ('name', 'اسم الزبون *', 'entry', {}),
             ('box_number', 'رقم العلبة', 'entry', {}),
             ('serial_number', 'المسلسل', 'entry', {}),
@@ -92,6 +97,7 @@ class CustomerForm:
         ]
         
         self.field_vars = {}
+        self.field_widgets = {}
         
         for i, (field_name, label, field_type, options) in enumerate(fields):
             # تسمية الحقل
@@ -116,6 +122,13 @@ class CustomerForm:
                 combo['values'] = options.get('values', [])
                 combo.grid(row=i, column=1, sticky='ew', padx=5, pady=8)
                 self.field_vars[field_name] = var
+                self.field_widgets[field_name] = combo
+                
+                # ربط الأحداث
+                if field_name == 'meter_type':
+                    combo.bind('<<ComboboxSelected>>', self.on_meter_type_changed)
+                elif field_name == 'sector':
+                    combo.bind('<<ComboboxSelected>>', self.on_sector_changed)
                 
             elif field_type == 'textarea':
                 text_frame = tk.Frame(fields_frame, bg='white', relief='sunken', borderwidth=1)
@@ -139,6 +152,78 @@ class CustomerForm:
         # تعبئة وإظهار
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
+    
+    def on_meter_type_changed(self, event=None):
+        """عند تغيير نوع العداد"""
+        meter_type = self.field_vars['meter_type'].get()
+        sector_name = self.field_vars['sector'].get()
+        
+        if sector_name:
+            self.load_parent_meter_candidates(meter_type, sector_name)
+            
+            # التحكم في إمكانية اختيار العلبة الأم
+            parent_combo = self.field_widgets['parent_meter_id']
+            if meter_type == 'مولدة':
+                parent_combo.set('')  # مسح القيمة
+                parent_combo['state'] = 'disabled'
+            else:
+                parent_combo['state'] = 'readonly'
+    
+    def on_sector_changed(self, event=None):
+        """عند تغيير القطاع"""
+        meter_type = self.field_vars['meter_type'].get()
+        sector_name = self.field_vars['sector'].get()
+        
+        if meter_type and sector_name:
+            self.load_parent_meter_candidates(meter_type, sector_name)
+    
+    def load_parent_meter_candidates(self, meter_type, sector_name):
+        """تحميل قائمة المرشحين للعلبة الأم"""
+        # الحصول على معرف القطاع
+        sector_id = None
+        for sector in self.sectors:
+            if sector['name'] == sector_name:
+                sector_id = sector['id']
+                break
+        
+        if not sector_id:
+            return
+        
+        try:
+            with db.get_cursor() as cursor:
+                # تحديد أنواع العلبة الأم المسموح بها بناءً على نوع العداد
+                allowed_parent_types = []
+                if meter_type == 'علبة توزيع':
+                    allowed_parent_types = ['مولدة']
+                elif meter_type == 'رئيسية':
+                    allowed_parent_types = ['علبة توزيع']
+                elif meter_type == 'زبون':
+                    allowed_parent_types = ['رئيسية', 'علبة توزيع', 'مولدة']
+                else:  # مولدة - لا تحتاج إلى علبة أم
+                    self.field_widgets['parent_meter_id']['values'] = []
+                    return
+                
+                cursor.execute("""
+                    SELECT id, name, box_number, meter_type 
+                    FROM customers 
+                    WHERE sector_id = %s 
+                      AND meter_type = ANY(%s)
+                      AND is_active = TRUE
+                    ORDER BY meter_type, name
+                """, (sector_id, allowed_parent_types))
+                
+                candidates = cursor.fetchall()
+                self.parent_meter_candidates = candidates
+                
+                # تحديث قائمة Combobox للعلبة الأم
+                combo = self.field_widgets['parent_meter_id']
+                combo['values'] = [f"{c['box_number']} - {c['name']} ({c['meter_type']})" for c in candidates]
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحميل مرشحي العلبة الأم: {e}")
+            self.parent_meter_candidates = []
+            combo = self.field_widgets['parent_meter_id']
+            combo['values'] = []
     
     def create_buttons(self, parent):
         """إنشاء أزرار التحكم"""
@@ -164,6 +249,8 @@ class CustomerForm:
     def load_customer_data(self):
         """تحميل بيانات الزبون في حالة التعديل"""
         if not self.customer_data:
+            # تعيين القيمة الافتراضية لنوع العداد
+            self.field_vars['meter_type'].set('زبون')
             return
         
         # تعبئة الحقول ببيانات الزبون
@@ -175,6 +262,35 @@ class CustomerForm:
             elif isinstance(widget, tk.Text):
                 widget.delete('1.0', 'end')
                 widget.insert('1.0', str(value))
+        
+        # بعد تحميل البيانات، نقوم بتحميل قائمة العلبة الأم
+        meter_type = self.customer_data.get('meter_type', 'زبون')
+        sector_name = self.customer_data.get('sector_name', '')
+        if not sector_name:
+            # إذا لم يكن هناك sector_name في customer_data، نبحث عن القطاع باستخدام sector_id
+            sector_id = self.customer_data.get('sector_id')
+            if sector_id:
+                for sector in self.sectors:
+                    if sector['id'] == sector_id:
+                        sector_name = sector['name']
+                        break
+        
+        if sector_name:
+            self.field_vars['sector'].set(sector_name)
+            self.field_vars['meter_type'].set(meter_type)
+            
+            # تحميل قائمة المرشحين للعلبة الأم
+            self.load_parent_meter_candidates(meter_type, sector_name)
+            
+            # تحديد العلبة الأم في القائمة
+            parent_id = self.customer_data.get('parent_meter_id')
+            if parent_id:
+                # البحث عن العلبة الأم في المرشحين
+                for candidate in self.parent_meter_candidates:
+                    if candidate['id'] == parent_id:
+                        display_text = f"{candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
+                        self.field_vars['parent_meter_id'].set(display_text)
+                        break
     
     def validate(self):
         """التحقق من صحة البيانات"""
@@ -183,9 +299,20 @@ class CustomerForm:
             messagebox.showerror("خطأ", "الرجاء اختيار القطاع")
             return False
         
+        if not self.field_vars['meter_type'].get():
+            messagebox.showerror("خطأ", "نوع العداد مطلوب")
+            return False
+        
         if not self.field_vars['name'].get().strip():
             messagebox.showerror("خطأ", "اسم الزبون مطلوب")
             return False
+        
+        # التحقق من العلبة الأم بناءً على نوع العداد
+        meter_type = self.field_vars['meter_type'].get()
+        if meter_type in ['علبة توزيع', 'رئيسية', 'زبون']:
+            if not self.field_vars['parent_meter_id'].get():
+                messagebox.showerror("خطأ", f"يجب اختيار العلبة الأم لنوع العداد '{meter_type}'")
+                return False
         
         # التحقق من القيم الرقمية
         numeric_fields = ['current_balance', 'last_counter_reading', 
@@ -221,6 +348,16 @@ class CustomerForm:
                 messagebox.showerror("خطأ", "القطاع المحدد غير صالح")
                 return
             
+            # تحويل العلبة الأم إلى ID
+            parent_meter_id = None
+            parent_display = self.field_vars['parent_meter_id'].get()
+            if parent_display:
+                for candidate in self.parent_meter_candidates:
+                    candidate_display = f"{candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
+                    if candidate_display == parent_display:
+                        parent_meter_id = candidate['id']
+                        break
+            
             # تجميع البيانات
             self.result = {
                 'sector_id': sector_id,
@@ -232,7 +369,11 @@ class CustomerForm:
                 'last_counter_reading': float(self.field_vars['last_counter_reading'].get() or 0),
                 'visa_balance': float(self.field_vars['visa_balance'].get() or 0),
                 'withdrawal_amount': float(self.field_vars['withdrawal_amount'].get() or 0),
-                'notes': self.field_vars['notes'].get('1.0', 'end-1c').strip()
+                'notes': self.field_vars['notes'].get('1.0', 'end-1c').strip(),
+                'is_active': True,
+                'meter_type': self.field_vars['meter_type'].get(),
+                'parent_meter_id': parent_meter_id,
+                'user_id': self.user_id or 1
             }
             
             self.dialog.destroy()

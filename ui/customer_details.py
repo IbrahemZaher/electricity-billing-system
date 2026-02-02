@@ -7,7 +7,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class CustomerDetails:
-    """عرض تفاصيل الزبون"""
+    """عرض تفاصيل الزبون مع دعم العدادات الهرمية"""
     
     def __init__(self, parent, customer_data):
         self.parent = parent
@@ -22,7 +22,7 @@ class CustomerDetails:
         """إنشاء النافذة المنبثقة"""
         self.dialog = tk.Toplevel(self.parent)
         self.dialog.title(f"تفاصيل الزبون - {self.customer_data['name']}")
-        self.dialog.geometry("700x600")
+        self.dialog.geometry("750x650")
         self.dialog.resizable(True, True)
         self.dialog.configure(bg='#f5f7fa')
         
@@ -32,7 +32,7 @@ class CustomerDetails:
         height = self.dialog.winfo_height()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'700x600+{x}+{y}')
+        self.dialog.geometry(f'750x650+{x}+{y}')
     
     def create_widgets(self):
         """إنشاء عناصر العرض"""
@@ -66,11 +66,16 @@ class CustomerDetails:
         self.create_counter_info_tab(counter_tab)
         notebook.add(counter_tab, text='معلومات العداد')
         
+        # معلومات العلاقات الهرمية
+        hierarchy_tab = ttk.Frame(notebook)
+        self.create_hierarchy_info_tab(hierarchy_tab)
+        notebook.add(hierarchy_tab, text='العلاقات الهرمية')
+        
         # أزرار التحكم
         self.create_buttons()
     
     def create_basic_info_tab(self, parent):
-        """إنشاء تبويب المعلومات الأساسية"""
+        """إنشاء تبويب المعلومات الأساسية مع الحقول الجديدة"""
         # إطار مع تمرير
         canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient='vertical', command=canvas.yview)
@@ -82,9 +87,24 @@ class CustomerDetails:
         # تحديث منطقة التمرير
         content_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
         
-        # تعريف المعلومات الأساسية
+        # تعريف المعلومات الأساسية مع الحقول الجديدة
+        meter_type = self.customer_data.get('meter_type', 'زبون')
+        parent_name = self.customer_data.get('parent_name', '')
+        parent_box = self.customer_data.get('parent_box_number', '')
+        
+        if parent_name and parent_box:
+            parent_display = f"{parent_box} - {parent_name}"
+        elif parent_name:
+            parent_display = parent_name
+        elif parent_box:
+            parent_display = f"علبة {parent_box}"
+        else:
+            parent_display = 'لا يوجد'
+        
         basic_info = [
             ('اسم الزبون', self.customer_data.get('name', '')),
+            ('نوع العداد', meter_type),
+            ('العلبة الأم', parent_display),
             ('القطاع', self.customer_data.get('sector_name', 'غير محدد')),
             ('رقم العلبة', self.customer_data.get('box_number', '')),
             ('المسلسل', self.customer_data.get('serial_number', '')),
@@ -108,12 +128,21 @@ class CustomerDetails:
                           width=20, anchor='e')
             lbl.pack(side='left', padx=5)
             
-            # القيمة
-            val = tk.Label(row_frame, text=value or '---',
-                          font=('Arial', 11),
-                          bg='#f8f9fa', fg='#495057',
-                          relief='ridge', anchor='w',
-                          padx=10, pady=5)
+            # تحديد لون القيمة بناءً على نوع العداد
+            if label == 'نوع العداد':
+                color = self.get_meter_type_color(value)
+                val = tk.Label(row_frame, text=value or '---',
+                              font=('Arial', 11, 'bold'),
+                              bg='#f8f9fa', fg=color,
+                              relief='ridge', anchor='w',
+                              padx=10, pady=5)
+            else:
+                val = tk.Label(row_frame, text=value or '---',
+                              font=('Arial', 11),
+                              bg='#f8f9fa', fg='#495057',
+                              relief='ridge', anchor='w',
+                              padx=10, pady=5)
+            
             val.pack(side='left', fill='x', expand=True, padx=5)
         
         # الملاحظات
@@ -139,6 +168,16 @@ class CustomerDetails:
         # تعبئة وإظهار
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
+    
+    def get_meter_type_color(self, meter_type):
+        """الحصول على لون يمثل نوع العداد"""
+        colors = {
+            'مولدة': '#8e44ad',      # بنفسجي
+            'علبة توزيع': '#3498db',  # أزرق
+            'رئيسية': '#2ecc71',      # أخضر
+            'زبون': '#e74c3c'         # أحمر
+        }
+        return colors.get(meter_type, '#495057')
     
     def create_financial_info_tab(self, parent):
         """إنشاء تبويب المعلومات المالية"""
@@ -185,21 +224,42 @@ class CustomerDetails:
         advice_frame = tk.Frame(content_frame, bg='white')
         advice_frame.pack(fill='x', padx=20, pady=30)
         
-        if balance < 0:
-            advice_text = "⚠️ هذا الزبون لديه رصيد سالب. يرجى متابعته للسداد."
-            advice_color = '#e74c3c'
-        elif balance > 100000:
-            advice_text = "✓ رصيد ممتاز. يمكن منحه مزايا إضافية."
-            advice_color = '#27ae60'
-        else:
-            advice_text = "✓ الرصيد ضمن المعدل الطبيعي."
+        meter_type = self.customer_data.get('meter_type', 'زبون')
+        if meter_type == 'مولدة':
+            advice_text = "⚡ مولدة رئيسية - عداد توزيع عام"
+            advice_color = '#8e44ad'
+        elif meter_type == 'علبة توزيع':
+            advice_text = "🔌 علبة توزيع - متوسطة المدى"
             advice_color = '#3498db'
+        elif meter_type == 'رئيسية':
+            advice_text = "🏠 عداد رئيسي - تغذية مبنى"
+            advice_color = '#2ecc71'
+        else:
+            advice_text = "👤 عداد زبون - استهلاك نهائي"
+            advice_color = '#e74c3c'
         
-        advice_label = tk.Label(advice_frame, text=advice_text,
-                               font=('Arial', 11, 'italic'),
+        meter_type_label = tk.Label(advice_frame, text=advice_text,
+                               font=('Arial', 12, 'bold'),
                                bg='white', fg=advice_color,
                                wraplength=400)
-        advice_label.pack()
+        meter_type_label.pack(pady=(0, 10))
+        
+        # نصائح إضافية بناءً على نوع العداد والرصيد
+        if meter_type in ['مولدة', 'علبة توزيع', 'رئيسية'] and balance < 0:
+            extra_advice = f"⚠️ تنبيه: {meter_type} لديه رصيد سالب. قد يؤثر على العدادات التابعة له."
+            extra_color = '#e74c3c'
+        elif balance > 100000:
+            extra_advice = "✓ رصيد ممتاز. يمكن منحه مزايا إضافية."
+            extra_color = '#27ae60'
+        else:
+            extra_advice = "✓ الرصيد ضمن المعدل الطبيعي."
+            extra_color = '#3498db'
+        
+        extra_label = tk.Label(advice_frame, text=extra_advice,
+                               font=('Arial', 11, 'italic'),
+                               bg='white', fg=extra_color,
+                               wraplength=400)
+        extra_label.pack()
         
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
@@ -253,6 +313,128 @@ class CustomerDetails:
         
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
+    
+    def create_hierarchy_info_tab(self, parent):
+        """إنشاء تبويب العلاقات الهرمية"""
+        canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient='vertical', command=canvas.yview)
+        content_frame = tk.Frame(canvas, bg='white')
+        
+        canvas.create_window((0, 0), window=content_frame, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        content_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        
+        # عنوان التبويب
+        title_frame = tk.Frame(content_frame, bg='white')
+        title_frame.pack(fill='x', padx=20, pady=20)
+        
+        title_label = tk.Label(title_frame, 
+                              text="العلاقات الهرمية للعداد",
+                              font=('Arial', 14, 'bold'),
+                              bg='white', fg='#2c3e50')
+        title_label.pack()
+        
+        # معلومات العلاقات
+        meter_type = self.customer_data.get('meter_type', 'زبون')
+        parent_info = self.customer_data.get('parent_name', '')
+        parent_box = self.customer_data.get('parent_box_number', '')
+        
+        hierarchy_info = [
+            ('المستوى الهرمي', self.get_hierarchy_level(meter_type)),
+            ('العلبة الأم', f"{parent_box} - {parent_info}" if parent_info else 'لا يوجد'),
+            ('نوع العلبة الأم', self.customer_data.get('parent_meter_type', '')),
+            ('القطاع', self.customer_data.get('sector_name', 'غير محدد'))
+        ]
+        
+        for i, (label, value) in enumerate(hierarchy_info):
+            row_frame = tk.Frame(content_frame, bg='white')
+            row_frame.pack(fill='x', padx=20, pady=12)
+            
+            lbl = tk.Label(row_frame, text=label + ":",
+                          font=('Arial', 11, 'bold'),
+                          bg='white', fg='#2c3e50',
+                          width=20, anchor='e')
+            lbl.pack(side='left', padx=5)
+            
+            val = tk.Label(row_frame, text=value or '---',
+                          font=('Arial', 11),
+                          bg='#f8f9fa', fg='#495057',
+                          relief='ridge', anchor='w',
+                          padx=15, pady=8)
+            val.pack(side='left', fill='x', expand=True, padx=5)
+        
+        # رسم توضيحي للهرمية
+        diagram_frame = tk.Frame(content_frame, bg='white')
+        diagram_frame.pack(fill='x', padx=20, pady=30)
+        
+        diagram_label = tk.Label(diagram_frame, 
+                               text="⬇️ هيكل العلاقات الهرمية ⬇️",
+                               font=('Arial', 12, 'bold'),
+                               bg='white', fg='#2c3e50')
+        diagram_label.pack(pady=(0, 20))
+        
+        # رسم هرمي مبسط
+        levels = {
+            'مولدة': '⚡ [مولدة رئيسية]',
+            'علبة توزيع': '🔌 [علبة توزيع]',
+            'رئيسية': '🏠 [عداد رئيسي]',
+            'زبون': '👤 [عداد زبون]'
+        }
+        
+        current_level = levels.get(meter_type, '❓ [نوع غير معروف]')
+        
+        # عرض الهرمية
+        hierarchy_text = f"""
+        {current_level}
+        """
+        
+        if parent_info:
+            hierarchy_text += f"""
+            ⬆️
+            📦 {parent_box or 'غير معروف'} - {parent_info}
+            """
+        
+        diagram_text = tk.Label(diagram_frame, 
+                               text=hierarchy_text,
+                               font=('Arial', 11),
+                               bg='white', fg='#495057',
+                               justify='center')
+        diagram_text.pack()
+        
+        # معلومات إضافية
+        info_frame = tk.Frame(content_frame, bg='white')
+        info_frame.pack(fill='x', padx=20, pady=20)
+        
+        info_text = ""
+        if meter_type == 'مولدة':
+            info_text = "⚡ المولدة: المستوى الأعلى، تغذي علب التوزيع"
+        elif meter_type == 'علبة توزيع':
+            info_text = "🔌 علبة التوزيع: تتصل بالمولدة وتغذي العدادات الرئيسية"
+        elif meter_type == 'رئيسية':
+            info_text = "🏠 العداد الرئيسي: يتصل بعلبة التوزيع ويغذي عدادات الزبائن"
+        else:
+            info_text = "👤 عداد الزبون: المستوى النهائي، يقيس استهلاك الزبون المباشر"
+        
+        info_label = tk.Label(info_frame, 
+                             text=info_text,
+                             font=('Arial', 11, 'italic'),
+                             bg='white', fg='#7f8c8d',
+                             wraplength=400)
+        info_label.pack()
+        
+        canvas.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+    
+    def get_hierarchy_level(self, meter_type):
+        """الحصول على المستوى الهرمي بناءً على نوع العداد"""
+        levels = {
+            'مولدة': 'المستوى الأول (أعلى)',
+            'علبة توزيع': 'المستوى الثاني',
+            'رئيسية': 'المستوى الثالث',
+            'زبون': 'المستوى الرابع (أدنى)'
+        }
+        return levels.get(meter_type, 'غير محدد')
     
     def create_buttons(self):
         """إنشاء أزرار التحكم"""

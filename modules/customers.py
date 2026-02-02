@@ -6,22 +6,46 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 class CustomerManager:
-    """مدير عمليات الزبائن"""
+    """مدير عمليات الزبائن مع دعم العدادات الهرمية"""
         
     def __init__(self):
         self.table_name = "customers"
 
     def add_customer(self, customer_data: Dict) -> Dict:
-        """إضافة زبون جديد"""
+        """إضافة زبون جديد مع دعم العلاقات الهرمية"""
         try:
+            # التحقق من parent_meter_id إذا كان موجودًا
+            parent_meter_id = customer_data.get('parent_meter_id')
+            if parent_meter_id:
+                with db.get_cursor() as cursor:
+                    # التحقق من وجود العلبة الأم وأنها في نفس القطاع
+                    cursor.execute("""
+                        SELECT sector_id, meter_type FROM customers 
+                        WHERE id = %s AND is_active = TRUE
+                    """, (parent_meter_id,))
+                    parent = cursor.fetchone()
+                    
+                    if not parent:
+                        raise ValueError("العلبة الأم غير موجودة")
+                    
+                    if parent['sector_id'] != customer_data.get('sector_id'):
+                        raise ValueError("العلبة الأم يجب أن تكون في نفس القطاع")
+                    
+                    # التحقق من توافق أنواع العدادات
+                    meter_type = customer_data.get('meter_type', 'زبون')
+                    parent_meter_type = parent['meter_type']
+                    
+                    if not self._validate_meter_hierarchy(parent_meter_type, meter_type):
+                        raise ValueError(f"نوع العداد '{meter_type}' غير متوافق مع العلبة الأم من نوع '{parent_meter_type}'")
+            
             with db.get_cursor() as cursor:
                 cursor.execute("""
                     INSERT INTO customers 
                     (sector_id, box_number, serial_number, name, phone_number,
                     current_balance, last_counter_reading, visa_balance,
-                    withdrawal_amount, notes)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id, name, box_number, serial_number
+                    withdrawal_amount, notes, meter_type, parent_meter_id, is_active)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id, name, box_number, serial_number, meter_type, parent_meter_id
                 """, (
                     customer_data.get('sector_id'),
                     customer_data.get('box_number', ''),
@@ -32,7 +56,10 @@ class CustomerManager:
                     customer_data.get('last_counter_reading', 0),
                     customer_data.get('visa_balance', 0),
                     customer_data.get('withdrawal_amount', 0),
-                    customer_data.get('notes', '')
+                    customer_data.get('notes', ''),
+                    customer_data.get('meter_type', 'زبون'),
+                    parent_meter_id,
+                    customer_data.get('is_active', True)
                 ))
                 
                 result = cursor.fetchone()
@@ -55,11 +82,11 @@ class CustomerManager:
                         customer_data.get('current_balance', 0),
                         0,
                         customer_data.get('current_balance', 0),
-                        f"إضافة زبون جديد: {result['name']}",
+                        f"إضافة زبون جديد: {result['name']} (نوع: {customer_data.get('meter_type', 'زبون')}, علبة أم: {parent_meter_id if parent_meter_id else 'لا يوجد'})",
                         customer_data.get('user_id', 1)
                     ))
                 
-                logger.info(f"تم إضافة زبون جديد: {result['name']}")
+                logger.info(f"تم إضافة زبون جديد: {result['name']} - نوع: {result.get('meter_type', 'زبون')}")
                 return {
                     'success': True,
                     'customer_id': result['id'],
@@ -73,46 +100,93 @@ class CustomerManager:
                 'error': f"فشل إضافة الزبون: {str(e)}"
             }
 
+    def _validate_meter_hierarchy(self, parent_type: str, child_type: str) -> bool:
+        """التحقق من صحة الهرمية بين نوعي العدادات"""
+        hierarchy_rules = {
+            'مولدة': ['علبة توزيع'],  # المولدة يمكن أن يكون لها علب توزيع فقط
+            'علبة توزيع': ['رئيسية'],  # علبة التوزيع يمكن أن يكون لها عدادات رئيسية فقط
+            'رئيسية': ['زبون'],  # العداد الرئيسي يمكن أن يكون له زبائن فقط
+            'زبون': []  # الزبون لا يمكن أن يكون له أبناء
+        }
+        
+        allowed_children = hierarchy_rules.get(parent_type, [])
+        return child_type in allowed_children
+
     def get_customer(self, customer_id: int) -> Optional[Dict]:
-        """الحصول على بيانات زبون"""
+        """الحصول على بيانات زبون مع العلاقات الهرمية"""
         try:
             with db.get_cursor() as cursor:
                 cursor.execute("""
-                    SELECT c.*, s.name as sector_name
+                    SELECT c.*, 
+                           s.name as sector_name,
+                           p.name as parent_name,
+                           p.box_number as parent_box_number,
+                           p.meter_type as parent_meter_type
                     FROM customers c
                     LEFT JOIN sectors s ON c.sector_id = s.id
+                    LEFT JOIN customers p ON c.parent_meter_id = p.id
                     WHERE c.id = %s
                 """, (customer_id,))
                 
                 customer = cursor.fetchone()
-                return dict(customer) if customer else None
+                if not customer:
+                    return None
+                
+                customer_dict = dict(customer)
+                
+                # جلب الأبناء إذا كان هناك أبناء
+                if customer_dict['meter_type'] in ['مولدة', 'علبة توزيع', 'رئيسية']:
+                    cursor.execute("""
+                        SELECT id, name, box_number, meter_type, current_balance
+                        FROM customers 
+                        WHERE parent_meter_id = %s AND is_active = TRUE
+                        ORDER BY meter_type, name
+                    """, (customer_id,))
+                    
+                    children = cursor.fetchall()
+                    customer_dict['children'] = [dict(child) for child in children]
+                    customer_dict['children_count'] = len(children)
+                
+                return customer_dict
                 
         except Exception as e:
             logger.error(f"خطأ في جلب بيانات الزبون: {e}")
             return None
 
     def search_customers(self, search_term: str = "", sector_id: int = None) -> List[Dict]:
-        """بحث الزبائن"""
+        """بحث الزبائن مع العلاقات الهرمية"""
         try:
             with db.get_cursor() as cursor:
                 query = """
-                    SELECT c.*, s.name as sector_name
+                    SELECT c.*, 
+                           s.name as sector_name,
+                           p.name as parent_name,
+                           p.box_number as parent_box_number,
+                           p.meter_type as parent_meter_type
                     FROM customers c
                     LEFT JOIN sectors s ON c.sector_id = s.id
+                    LEFT JOIN customers p ON c.parent_meter_id = p.id
                     WHERE c.is_active = TRUE
                 """
                 params = []
                 
                 if search_term:
-                    query += " AND (c.name ILIKE %s OR c.box_number ILIKE %s OR c.phone_number ILIKE %s)"
-                    params.extend([f"%{search_term}%"] * 3)
+                    query += " AND (c.name ILIKE %s OR c.box_number ILIKE %s OR c.phone_number ILIKE %s OR c.meter_type ILIKE %s)"
+                    params.extend([f"%{search_term}%"] * 4)
                 
                 if sector_id:
                     query += " AND c.sector_id = %s"
                     params.append(sector_id)
                 
-                query += " ORDER BY c.name"
-                
+                query += """ ORDER BY 
+                    CASE c.meter_type 
+                        WHEN 'مولدة' THEN 1
+                        WHEN 'علبة توزيع' THEN 2
+                        WHEN 'رئيسية' THEN 3
+                        WHEN 'زبون' THEN 4
+                    END,
+                    c.parent_meter_id NULLS FIRST,
+                    c.name"""
                 cursor.execute(query, params)
                 customers = cursor.fetchall()
                 
@@ -123,8 +197,41 @@ class CustomerManager:
             return []
 
     def update_customer(self, customer_id: int, update_data: Dict) -> Dict:
-        """تحديث بيانات زبون مع تسجيل التاريخ"""
+        """تحديث بيانات زبون مع التحقق من العلاقات الهرمية"""
         try:
+            # التحقق من parent_meter_id إذا كان موجودًا
+            parent_meter_id = update_data.get('parent_meter_id')
+            if parent_meter_id and parent_meter_id != 'None' and str(parent_meter_id).strip():
+                with db.get_cursor() as cursor:
+                    # التحقق من وجود العلبة الأم وأنها في نفس القطاع
+                    cursor.execute("""
+                        SELECT sector_id, meter_type FROM customers 
+                        WHERE id = %s AND is_active = TRUE
+                    """, (parent_meter_id,))
+                    parent = cursor.fetchone()
+                    
+                    if not parent:
+                        raise ValueError("العلبة الأم غير موجودة")
+                    
+                    # جلب sector_id الحالي للزبون
+                    cursor.execute("""
+                        SELECT sector_id, meter_type FROM customers WHERE id = %s
+                    """, (customer_id,))
+                    current = cursor.fetchone()
+                    
+                    if parent['sector_id'] != (update_data.get('sector_id') or (current['sector_id'] if current else None)):
+                        raise ValueError("العلبة الأم يجب أن تكون في نفس القطاع")
+                    
+                    # التحقق من توافق أنواع العدادات
+                    meter_type = update_data.get('meter_type') or (current['meter_type'] if current else 'زبون')
+                    parent_meter_type = parent['meter_type']
+                    
+                    if not self._validate_meter_hierarchy(parent_meter_type, meter_type):
+                        raise ValueError(f"نوع العداد '{meter_type}' غير متوافق مع العلبة الأم من نوع '{parent_meter_type}'")
+            else:
+                # إذا كان parent_meter_id فارغًا أو "None" أو ""، نضبطه على None
+                parent_meter_id = None
+            
             with db.get_cursor() as cursor:
                 # 1. جلب البيانات القديمة أولاً
                 cursor.execute("""
@@ -133,7 +240,8 @@ class CustomerManager:
                         c.visa_balance, c.withdrawal_amount,
                         c.last_counter_reading, c.notes,
                         c.sector_id, c.box_number, c.serial_number,
-                        c.telegram_username, c.is_active
+                        c.telegram_username, c.is_active, c.meter_type,
+                        c.parent_meter_id
                     FROM customers c 
                     WHERE id = %s
                 """, (customer_id,))
@@ -159,7 +267,9 @@ class CustomerManager:
                     'visa_balance': update_data.get('visa_balance'),
                     'withdrawal_amount': update_data.get('withdrawal_amount'),
                     'notes': update_data.get('notes'),
-                    'is_active': update_data.get('is_active')
+                    'is_active': update_data.get('is_active'),
+                    'meter_type': update_data.get('meter_type'),
+                    'parent_meter_id': parent_meter_id
                 }
                 
                 for field, value in fields_to_update.items():
@@ -191,7 +301,7 @@ class CustomerManager:
                     UPDATE customers 
                     SET {', '.join(set_clauses)}
                     WHERE id = %s
-                    RETURNING id, name
+                    RETURNING id, name, meter_type, parent_meter_id
                 """
                 
                 cursor.execute(query, params)
@@ -212,7 +322,7 @@ class CustomerManager:
                 # 4. تسجيل التعديل في السجل التاريخي
                 self._log_customer_update(customer_id, old_data, update_data)
                 
-                logger.info(f"تم تحديث الزبون: {updated_customer['name']}")
+                logger.info(f"تم تحديث الزبون: {updated_customer['name']} - نوع: {updated_customer.get('meter_type')}")
                 return {
                     'success': True,
                     'message': f"تم تحديث بيانات الزبون {updated_customer['name']} بنجاح"
@@ -272,23 +382,34 @@ class CustomerManager:
             changes = []
             
             # مقارنة الحقول وتحديد التغيرات
-            for field in ['name', 'phone_number', 'notes', 'box_number', 'serial_number']:
+            field_names = {
+                'name': 'الاسم',
+                'phone_number': 'رقم الهاتف',
+                'notes': 'ملاحظات',
+                'box_number': 'رقم العلبة',
+                'serial_number': 'رقم المسلسل',
+                'meter_type': 'نوع العداد',
+                'parent_meter_id': 'العلبة الأم'
+            }
+            
+            for field in ['name', 'phone_number', 'notes', 'box_number', 'serial_number', 'meter_type']:
                 old_val = old_data.get(field, '')
                 new_val = new_data.get(field, '')
                 
                 if str(old_val).strip() != str(new_val).strip():
-                    field_names = {
-                        'name': 'الاسم',
-                        'phone_number': 'رقم الهاتف',
-                        'notes': 'ملاحظات',
-                        'box_number': 'رقم العلبة',
-                        'serial_number': 'رقم المسلسل'
-                    }
-                    
                     old_display = old_val if old_val else '(فارغ)'
                     new_display = new_val if new_val else '(فارغ)'
                     
                     changes.append(f"{field_names.get(field, field)}: {old_display} → {new_display}")
+            
+            # تسجيل تغيير parent_meter_id بشكل خاص
+            old_parent = old_data.get('parent_meter_id')
+            new_parent = new_data.get('parent_meter_id')
+            
+            if str(old_parent) != str(new_parent):
+                old_parent_display = old_parent if old_parent else '(فارغ)'
+                new_parent_display = new_parent if new_parent else '(فارغ)'
+                changes.append(f"{field_names.get('parent_meter_id', 'العلبة الأم')}: {old_parent_display} → {new_parent_display}")
             
             if changes:
                 with db.get_cursor() as cursor:
@@ -310,17 +431,34 @@ class CustomerManager:
             logger.error(f"خطأ في تسجيل تحديث الزبون: {e}")
 
     def delete_customer(self, customer_id: int, soft_delete: bool = True) -> Dict:
-        """حذف الزبون (حذف ناعم أو فعلي)"""
+        """حذف الزبون مع التحقق من العلاقات الهرمية"""
         try:
             with db.get_cursor() as cursor:
                 # جلب بيانات الزبون قبل الحذف
-                cursor.execute("SELECT name FROM customers WHERE id = %s", (customer_id,))
+                cursor.execute("SELECT name, meter_type, parent_meter_id FROM customers WHERE id = %s", (customer_id,))
                 customer = cursor.fetchone()
                 
                 if not customer:
                     return {'success': False, 'error': 'الزبون غير موجود'}
                 
                 customer_name = customer['name']
+                meter_type = customer['meter_type']
+                parent_meter_id = customer['parent_meter_id']
+                
+                # التحقق من وجود أبناء قبل الحذف
+                if meter_type in ['مولدة', 'علبة توزيع', 'رئيسية']:
+                    cursor.execute("""
+                        SELECT COUNT(*) as child_count 
+                        FROM customers 
+                        WHERE parent_meter_id = %s AND is_active = TRUE
+                    """, (customer_id,))
+                    
+                    child_result = cursor.fetchone()
+                    if child_result and child_result['child_count'] > 0:
+                        return {
+                            'success': False,
+                            'error': f"لا يمكن حذف {meter_type} '{customer_name}' لأنه يحتوي على {child_result['child_count']} عداد تابع. قم بحذف أو نقل العدادات التابعة أولاً."
+                        }
                 
                 if soft_delete:
                     # حذف ناعم
@@ -351,11 +489,11 @@ class CustomerManager:
                         customer_id,
                         'delete_customer',
                         'soft_delete' if soft_delete else 'hard_delete',
-                        f"حذف الزبون: {customer_name} ({'ناعم' if soft_delete else 'فعلي'})",
+                        f"حذف الزبون: {customer_name} ({'ناعم' if soft_delete else 'فعلي'}) - نوع: {meter_type}",
                         1  # user_id افتراضي
                     ))
                     
-                    logger.info(f"تم حذف الزبون: {customer_name}")
+                    logger.info(f"تم حذف الزبون: {customer_name} - نوع: {meter_type}")
                     return {
                         'success': True,
                         'message': f"تم حذف الزبون {customer_name} بنجاح"
@@ -374,7 +512,7 @@ class CustomerManager:
             }
 
     def get_customer_statistics(self) -> Dict:
-        """الحصول على إحصائيات الزبائن"""
+        """الحصول على إحصائيات الزبائن مع تقسيم حسب نوع العداد"""
         try:
             with db.get_cursor() as cursor:
                 # إجمالي الزبائن
@@ -405,13 +543,34 @@ class CustomerManager:
                 """)
                 zero_balance = cursor.fetchone()['count']
                 
+                # إحصائيات حسب نوع العداد
+                cursor.execute("""
+                    SELECT 
+                        meter_type,
+                        COUNT(*) as count,
+                        SUM(current_balance) as total_balance
+                    FROM customers 
+                    WHERE is_active = TRUE
+                    GROUP BY meter_type
+                    ORDER BY 
+                        CASE meter_type 
+                            WHEN 'مولدة' THEN 1
+                            WHEN 'علبة توزيع' THEN 2
+                            WHEN 'رئيسية' THEN 3
+                            WHEN 'زبون' THEN 4
+                        END
+                """)
+                
+                meter_type_stats = cursor.fetchall()
+                
                 return {
                     'total_customers': total_customers,
                     'negative_balance': negative_balance,
                     'positive_balance': positive_balance,
                     'zero_balance': zero_balance,
                     'negative_percentage': round((negative_balance / total_customers * 100), 2) if total_customers > 0 else 0,
-                    'positive_percentage': round((positive_balance / total_customers * 100), 2) if total_customers > 0 else 0
+                    'positive_percentage': round((positive_balance / total_customers * 100), 2) if total_customers > 0 else 0,
+                    'meter_type_stats': [dict(row) for row in meter_type_stats]
                 }
                 
         except Exception as e:
@@ -419,12 +578,17 @@ class CustomerManager:
             return {}
 
     def get_customers_by_sector(self) -> Dict:
-        """الحصول على توزيع الزبائن حسب القطاع"""
+        """الحصول على توزيع الزبائن حسب القطاع مع أنواع العدادات"""
         try:
             with db.get_cursor() as cursor:
                 cursor.execute("""
-                    SELECT s.name as sector_name, COUNT(c.id) as customer_count,
-                        SUM(c.current_balance) as total_balance
+                    SELECT s.name as sector_name, 
+                           COUNT(c.id) as customer_count,
+                           SUM(c.current_balance) as total_balance,
+                           COUNT(CASE WHEN c.meter_type = 'مولدة' THEN 1 END) as generator_count,
+                           COUNT(CASE WHEN c.meter_type = 'علبة توزيع' THEN 1 END) as distribution_count,
+                           COUNT(CASE WHEN c.meter_type = 'رئيسية' THEN 1 END) as main_count,
+                           COUNT(CASE WHEN c.meter_type = 'زبون' THEN 1 END) as customer_count_type
                     FROM sectors s
                     LEFT JOIN customers c ON s.id = c.sector_id AND c.is_active = TRUE
                     GROUP BY s.id, s.name
@@ -442,7 +606,7 @@ class CustomerManager:
             return {'sectors': [], 'total': 0}
 
     def delete_all_customers(self, confirm=True) -> Dict:
-        """حذف جميع الزبائن (يستخدم مع الحذر)"""
+        """حذف جميع الزبائن"""
         try:
             with db.get_cursor() as cursor:
                 # الحصول على عدد الزبائن قبل الحذف
@@ -458,7 +622,7 @@ class CustomerManager:
                 
                 # تسجيل جميع الزبائن المحذوفة في السجل التاريخي
                 cursor.execute("""
-                    SELECT id, name FROM customers
+                    SELECT id, name, meter_type FROM customers
                 """)
                 all_customers = cursor.fetchall()
                 
@@ -472,12 +636,12 @@ class CustomerManager:
                         customer['id'],
                         'delete_customer',
                         'bulk_delete',
-                        f"حذف جماعي - الزبون: {customer['name']}",
+                        f"حذف جماعي - الزبون: {customer['name']} (نوع: {customer['meter_type']})",
                         1  # user_id افتراضي
                     ))
                 
                 # حذف جميع الزبائن
-                cursor.execute("DELETE FROM customers RETURNING id, name")
+                cursor.execute("DELETE FROM customers RETURNING id, name, meter_type")
                 deleted_customers = cursor.fetchall()
                 
                 logger.info(f"تم حذف {len(deleted_customers)} زبون")
@@ -510,9 +674,24 @@ class CustomerManager:
                 
                 # الحصول على زبائن القطاع قبل الحذف
                 cursor.execute("""
-                    SELECT id, name FROM customers WHERE sector_id = %s
+                    SELECT id, name, meter_type FROM customers WHERE sector_id = %s
                 """, (sector_id,))
                 sector_customers = cursor.fetchall()
+                
+                # التحقق من وجود علاقات هرمية بين القطاعات المختلفة
+                for customer in sector_customers:
+                    cursor.execute("""
+                        SELECT COUNT(*) as child_count 
+                        FROM customers 
+                        WHERE parent_meter_id = %s AND sector_id != %s
+                    """, (customer['id'], sector_id))
+                    
+                    child_result = cursor.fetchone()
+                    if child_result and child_result['child_count'] > 0:
+                        return {
+                            'success': False,
+                            'error': f"لا يمكن حذف قطاع {sector['name']} لأن الزبون {customer['name']} له {child_result['child_count']} عداد تابع في قطاعات أخرى."
+                        }
                 
                 # تسجيل الحذف في السجل التاريخي لكل زبون
                 for customer in sector_customers:
@@ -525,7 +704,7 @@ class CustomerManager:
                         customer['id'],
                         'delete_customer',
                         'sector_delete',
-                        f"حذف قطاعي - القطاع: {sector['name']} - الزبون: {customer['name']}",
+                        f"حذف قطاعي - القطاع: {sector['name']} - الزبون: {customer['name']} (نوع: {customer['meter_type']})",
                         1  # user_id افتراضي
                     ))
                 
@@ -533,7 +712,7 @@ class CustomerManager:
                 cursor.execute("""
                     DELETE FROM customers 
                     WHERE sector_id = %s 
-                    RETURNING id, name
+                    RETURNING id, name, meter_type
                 """, (sector_id,))
                 
                 deleted_customers = cursor.fetchall()
@@ -553,3 +732,56 @@ class CustomerManager:
                 'success': False,
                 'error': f"فشل حذف زبائن القطاع: {str(e)}"
             }
+    
+    def get_meter_hierarchy(self, customer_id: int) -> Dict:
+        """الحصول على الشجرة الهرمية للعداد"""
+        try:
+            with db.get_cursor() as cursor:
+                # جلب الزبون الرئيسي
+                cursor.execute("""
+                    SELECT c.*, s.name as sector_name
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.id = %s
+                """, (customer_id,))
+                
+                customer = cursor.fetchone()
+                if not customer:
+                    return None
+                
+                hierarchy = {
+                    'customer': dict(customer),
+                    'parent': None,
+                    'children': []
+                }
+                
+                # جلب العلبة الأم إذا وجدت
+                if customer['parent_meter_id']:
+                    cursor.execute("""
+                        SELECT c.*, s.name as sector_name
+                        FROM customers c
+                        LEFT JOIN sectors s ON c.sector_id = s.id
+                        WHERE c.id = %s
+                    """, (customer['parent_meter_id'],))
+                    
+                    parent = cursor.fetchone()
+                    if parent:
+                        hierarchy['parent'] = dict(parent)
+                
+                # جلب الأبناء إذا كان هناك أبناء
+                cursor.execute("""
+                    SELECT c.*, s.name as sector_name
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.parent_meter_id = %s AND c.is_active = TRUE
+                    ORDER BY c.meter_type, c.name
+                """, (customer_id,))
+                
+                children = cursor.fetchall()
+                hierarchy['children'] = [dict(child) for child in children]
+                
+                return hierarchy
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب الشجرة الهرمية: {e}")
+            return None

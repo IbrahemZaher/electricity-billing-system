@@ -1,3 +1,4 @@
+# database/migrations.py
 import pandas as pd
 import logging
 from database.connection import db
@@ -86,6 +87,37 @@ class ExcelMigration:
         except Exception as e:
             logger.error(f"خطأ في ترحيل القطاعات: {e}")
     
+    def _resolve_parent_id(self, sector_id, parent_box_number=None, parent_serial=None):
+        """محاولة إيجاد parent_meter_id اعتمادًا على رقم العلبة أو المسلسل في نفس القطاع"""
+        if not sector_id or (not parent_box_number and not parent_serial):
+            return None
+
+        try:
+            with db.get_cursor() as cursor:
+                if parent_box_number and str(parent_box_number).strip():
+                    cursor.execute("""
+                        SELECT id FROM customers
+                        WHERE sector_id = %s AND box_number = %s AND is_active = TRUE
+                        LIMIT 1
+                    """, (sector_id, str(parent_box_number).strip()))
+                    row = cursor.fetchone()
+                    if row:
+                        return row['id']
+
+                if parent_serial and str(parent_serial).strip():
+                    cursor.execute("""
+                        SELECT id FROM customers
+                        WHERE sector_id = %s AND serial_number = %s AND is_active = TRUE
+                        LIMIT 1
+                    """, (sector_id, str(parent_serial).strip()))
+                    row = cursor.fetchone()
+                    if row:
+                        return row['id']
+        except Exception as e:
+            logger.error(f"خطأ في البحث عن العلبة الأم: {e}")
+        
+        return None
+
     def migrate_customers_from_file(self, file_path, sector_name, sector_map):
         """ترحيل الزبائن من ملف قطاع"""
         customer_count = 0
@@ -110,6 +142,14 @@ class ExcelMigration:
                     name = str(row.get('اسم الزبون', '')).strip() if pd.notna(row.get('اسم الزبون', '')) else ''
                     phone_number = str(row.get('رقم واتس الزبون', '')).strip() if pd.notna(row.get('رقم واتس الزبون', '')) else ''
                     
+                    # قراءة نوع العداد (إن وجد)
+                    meter_type_raw = str(row.get('نوع العداد', '')).strip() if pd.notna(row.get('نوع العداد', '')) else ''
+                    meter_type = meter_type_raw if meter_type_raw else 'زبون'
+                    
+                    # قراءة العلبة الأم (إن وجدت)
+                    parent_box_number = str(row.get('العلبة الأم', '')).strip() if pd.notna(row.get('العلبة الأم', '')) else ''
+                    parent_serial_number = str(row.get('المسلسل الأم', '')).strip() if pd.notna(row.get('المسلسل الأم', '')) else ''
+                    
                     # تحويل القيم الرقمية بشكل آمن
                     def safe_float(value, default=0):
                         try:
@@ -118,6 +158,15 @@ class ExcelMigration:
                             return float(value)
                         except:
                             return default
+                    
+                    # البحث عن العلبة الأم
+                    parent_meter_id = None
+                    if parent_box_number or parent_serial_number:
+                        parent_meter_id = self._resolve_parent_id(
+                            sector_id, 
+                            parent_box_number=parent_box_number, 
+                            parent_serial=parent_serial_number
+                        )
                     
                     # إنشاء بيانات الزبون
                     customer_data = {
@@ -131,7 +180,9 @@ class ExcelMigration:
                         'visa_balance': safe_float(row.get('تنزيل تأشيرة', 0)),
                         'withdrawal_amount': safe_float(row.get('سحب المشترك', 0)),
                         'notes': f"تم الاستيراد من {sector_name} في {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                        'is_active': True
+                        'is_active': True,
+                        'meter_type': meter_type,
+                        'parent_meter_id': parent_meter_id
                     }
                     
                     # حذف المسافات الزائدة من الأسماء
@@ -146,6 +197,7 @@ class ExcelMigration:
                     logger.error(f"خطأ في صف {index}: {e}")
                     continue
             
+            logger.info(f"تم ترحيل {customer_count} زبون من قطاع {sector_name}")
             return customer_count
             
         except Exception as e:
@@ -178,6 +230,8 @@ class ExcelMigration:
                             withdrawal_amount = %s,
                             notes = %s,
                             is_active = %s,
+                            meter_type = %s,
+                            parent_meter_id = %s,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = %s
                     """, (
@@ -190,9 +244,11 @@ class ExcelMigration:
                         customer_data['withdrawal_amount'],
                         customer_data['notes'],
                         customer_data['is_active'],
+                        customer_data.get('meter_type', 'زبون'),
+                        customer_data.get('parent_meter_id'),
                         existing_customer['id']
                     ))
-                    logger.debug(f"تم تحديث الزبون: {customer_data['name']}")
+                    logger.debug(f"تم تحديث الزبون: {customer_data['name']} - نوع: {customer_data.get('meter_type', 'زبون')}")
                     return True
                 else:
                     # إضافة زبون جديد
@@ -200,8 +256,10 @@ class ExcelMigration:
                         INSERT INTO customers 
                         (sector_id, box_number, serial_number, name, phone_number,
                          current_balance, last_counter_reading, visa_balance,
-                         withdrawal_amount, notes, is_active, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                         withdrawal_amount, notes, is_active, meter_type, parent_meter_id,
+                         created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         RETURNING id
                     """, (
                         customer_data['sector_id'],
@@ -214,11 +272,13 @@ class ExcelMigration:
                         customer_data['visa_balance'],
                         customer_data['withdrawal_amount'],
                         customer_data['notes'],
-                        customer_data['is_active']
+                        customer_data['is_active'],
+                        customer_data.get('meter_type', 'زبون'),
+                        customer_data.get('parent_meter_id')
                     ))
                     
                     result = cursor.fetchone()
-                    logger.debug(f"تم إضافة الزبون الجديد: {customer_data['name']} (ID: {result['id']})")
+                    logger.debug(f"تم إضافة الزبون الجديد: {customer_data['name']} (ID: {result['id']}) - نوع: {customer_data.get('meter_type', 'زبون')}")
                     return True
                         
         except Exception as e:

@@ -420,6 +420,8 @@ class Models:
             self.create_history_indexes()
             # تصحيح القيم النصية في الأعمدة الرقمية
             self.fix_customer_history_numeric_values()
+            # تحديث أعمدة العدادات الهرمية
+            self.update_meter_columns()
 
     def create_history_indexes(self):
         """إنشاء فهارس لجدول التاريخ"""
@@ -612,6 +614,47 @@ class Models:
                 
         except Exception as e:
             logger.error(f"خطأ في تحديث جدول users: {e}")
+
+    def update_meter_columns(self):
+        """تحديث جدول الزبائن بإضافة أعمدة العدادات الهرمية"""
+        try:
+            with db.get_cursor() as cursor:
+                # إضافة عمود نوع العداد
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'customers' 
+                    AND column_name = 'meter_type'
+                """)
+                
+                if not cursor.fetchone():
+                    cursor.execute("""
+                        ALTER TABLE customers 
+                        ADD COLUMN meter_type VARCHAR(30) DEFAULT 'زبون'
+                    """)
+                    logger.info("تم إضافة العمود meter_type إلى جدول customers")
+                else:
+                    logger.info("العمود meter_type موجود بالفعل في جدول customers")
+                
+                # إضافة عمود العلبة الأم
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'customers' 
+                    AND column_name = 'parent_meter_id'
+                """)
+                
+                if not cursor.fetchone():
+                    cursor.execute("""
+                        ALTER TABLE customers 
+                        ADD COLUMN parent_meter_id INTEGER REFERENCES customers(id)
+                    """)
+                    logger.info("تم إضافة العمود parent_meter_id إلى جدول customers")
+                else:
+                    logger.info("العمود parent_meter_id موجود بالفعل في جدول customers")
+                    
+        except Exception as e:
+            logger.error(f"خطأ في تحديث أعمدة العدادات: {e}")
 
 # تأكد أن هذا السطر موجود في النهاية
 models = Models()
