@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 
 # ==================== واجهة التطبيق ====================
 
-def has_permission(permission_key: str) -> bool:
+def has_permission(permission_key: str, auto_refresh: bool = True) -> bool:
     """
     التحقق من صلاحية المستخدم الحالي
     
     Args:
         permission_key: مفتاح الصلاحية (مثل 'customers.view')
+        auto_refresh: تحديث الجلسة تلقائيًا من قاعدة البيانات
         
     Returns:
         bool: True إذا كان لديه الصلاحية
@@ -27,11 +28,17 @@ def has_permission(permission_key: str) -> bool:
         logger.warning("المستخدم غير مسجل دخول")
         return False
     
+    # تحديث الجلسة من قاعدة البيانات
+    if auto_refresh:
+        Session.refresh_user_data()
+    
     user_id = Session.current_user['id']
-    user_role = Session.get_role()  # تمرير الدور لتجنب استعلام إضافي
+    user_role = Session.get_role()
+    
+    # استخدام المحرك للتحقق
     result = permission_engine.has_permission(user_id, permission_key, user_role)
     
-    logger.debug(f"التحقق من الصلاحية: {permission_key} للمستخدم {user_id} => {result}")
+    logger.debug(f"التحقق من الصلاحية: {permission_key} للمستخدم {user_id} ({user_role}) => {result}")
     return result
 
 def require_permission(permission_key: str):
@@ -47,13 +54,18 @@ def require_permission(permission_key: str):
 
 # ==================== أدوات المساعدة ====================
 
-def get_current_user_permissions() -> Dict[str, bool]:
+def get_current_user_permissions(refresh: bool = True) -> Dict[str, bool]:
     """الحصول على جميع صلاحيات المستخدم الحالي"""
     if not Session.is_authenticated():
         return {}
     
+    # تحديث الصلاحيات من قاعدة البيانات
+    if refresh:
+        Session.refresh_permissions()
+    
     user_id = Session.current_user['id']
     return permission_engine.get_user_permissions(user_id)
+
 
 def get_all_permissions() -> List[Dict[str, Any]]:
     """الحصول على جميع الصلاحيات في النظام"""

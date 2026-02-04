@@ -218,21 +218,44 @@ class Authentication:
             db_obj = db_connection if db_connection is not None else db
             
             with db_obj.get_cursor() as cursor:
+                # التحقق من وجود الأعمدة أولاً
                 cursor.execute("""
-                    INSERT INTO activity_logs 
-                    (user_id, action_type, description, ip_address, before_snapshot, after_snapshot, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                """, (
-                    user_id,
-                    action,
-                    description,
-                    ip_address,
-                    before_snapshot,
-                    after_snapshot
-                ))
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'activity_logs'
+                """)
+                
+                columns = [row['column_name'] for row in cursor.fetchall()]
+                
+                if 'before_snapshot' in columns and 'after_snapshot' in columns:
+                    cursor.execute("""
+                        INSERT INTO activity_logs 
+                        (user_id, action_type, description, ip_address, before_snapshot, after_snapshot, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """, (
+                        user_id,
+                        action,
+                        description,
+                        ip_address,
+                        before_snapshot,
+                        after_snapshot
+                    ))
+                else:
+                    # استخدام الاستعلام البسيط
+                    cursor.execute("""
+                        INSERT INTO activity_logs 
+                        (user_id, action_type, description, ip_address, created_at)
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """, (
+                        user_id,
+                        action,
+                        description,
+                        ip_address
+                    ))
         except Exception as e:
             logger.error(f"خطأ في تسجيل النشاط: {e}", exc_info=True)
-    
+            
+                
     def check_permission(self, user, permission):
         """التحقق من صلاحية المستخدم"""
         if user['role'] == 'admin':

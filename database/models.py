@@ -1,4 +1,3 @@
-# database/models.py
 from database.connection import db
 from datetime import datetime
 import logging
@@ -354,6 +353,7 @@ class Models:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  
             )
             """,
+            
             # جدول كتالوج الصلاحيات
             """
             CREATE TABLE IF NOT EXISTS permissions_catalog (
@@ -399,19 +399,27 @@ class Models:
                 # إنشاء جميع الجداول
                 for sql in tables_sql:
                     cursor.execute(sql)
-                logger.info("تم إنشاء جميع الجداول بنجاح")
                 
-                # إضافة البيانات الأساسية
-                self.seed_initial_data(cursor)
+                logger.info("✅ تم إنشاء جميع الجداول بنجاح")
+                
+                # ⭐⭐⭐ التحقق من وجود البيانات قبل إضافتها ⭐⭐⭐
+                cursor.execute("SELECT COUNT(*) as count FROM role_permissions")
+                existing_data = cursor.fetchone()['count']
+                
+                # إضافة البيانات الأساسية فقط إذا لم تكن موجودة
+                if existing_data == 0:
+                    self.seed_initial_data(cursor)
+                else:
+                    logger.info(f"✅ تخطي إضافة البيانات الأولية، يوجد {existing_data} سجل بالفعل")
                 
                 # إنشاء الفهارس
                 self.create_indexes(cursor)
                 
         except Exception as e:
-            logger.error(f"خطأ في إنشاء الجداول: {e}")
+            logger.error(f"❌ خطأ في إنشاء الجداول: {e}")
             raise
         finally:
-            # تحديث جدول الفواتير بإضافة الأعمدة المفقودة (للتوافق مع الإصدارات القديمة)
+            # تحديث جدول الفواتير بإضافة الأعمدة المفقودة
             self.update_invoices_table()
             # تحديث جدول سجل الزبائن
             self.update_customer_history_table()
@@ -449,6 +457,15 @@ class Models:
 
     def seed_initial_data(self, cursor):
         """إضافة البيانات الأولية"""
+        
+        # التحقق مما إذا كانت البيانات الأولية قد أضيفت من قبل
+        cursor.execute("SELECT COUNT(*) as count FROM role_permissions")
+        existing_permissions = cursor.fetchone()['count']
+        
+        if existing_permissions > 0:
+            logger.info(f"✅ تخطي إضافة البيانات الأولية، يوجد {existing_permissions} صلاحية حالياً")
+            return
+        
         # إضافة القطاعات الأساسية
         sectors = [
             ("بيدر", "BAIDAR"),
@@ -461,7 +478,7 @@ class Models:
         
         for name, code in sectors:
             cursor.execute("""
-                INSERT INTO sectors (name, code) 
+                INSERT INTO sectors (name, code)
                 VALUES (%s, %s)
                 ON CONFLICT (name) DO NOTHING
             """, (name, code))
@@ -469,64 +486,38 @@ class Models:
         # إضافة المستخدم الإداري الافتراضي
         cursor.execute("""
             INSERT INTO users (username, password_hash, full_name, role, permissions)
-            VALUES ('admin', 'scrypt:32768:8:1$wFnfT6hB9u3xKXqg$afb5fb045f9afab01e2036b5b7b7d4c6c9c6b2e7e6f7a8b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3', 'المسؤول العام', 'admin', '{"all": true}')
+            VALUES ('admin',
+            'scrypt:32768:8:1$wFnfT6hB9u3xKXqg$afb5fb045f9afab01e2036b5b7b7d4c6c9c6b2e7e6f7a8b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3',
+            'المسؤول العام', 'admin', '{"all": true}')
             ON CONFLICT (username) DO NOTHING
         """)
-
+        
         # إضافة الصلاحيات إلى الكتالوج
         permissions_data = [
-            # فئة الزبائن
-            ('customers.view', 'عرض الزبائن', 'customers'),
-            ('customers.add', 'إضافة زبون جديد', 'customers'),
-            ('customers.edit', 'تعديل الزبائن', 'customers'),
-            ('customers.delete', 'حذف الزبائن', 'customers'),
-            ('customers.view_details', 'عرض تفاصيل الزبون', 'customers'),
-            ('customers.view_history', 'عرض السجل التاريخي', 'customers'),
-            ('customers.manage_sectors', 'إدارة قطاعات الزبائن', 'customers'),
-            ('customers.reimport', 'حذف وإعادة الاستيراد', 'customers'),
-            ('customers.export', 'تصدير بيانات الزبائن', 'customers'),
-            ('customers.import_visas', 'استيراد تأشيرات الزبائن', 'customers'),
-            
-            # فئة الفواتير
-            ('invoices.view', 'عرض الفواتير', 'invoices'),
-            ('invoices.create', 'إنشاء فواتير جديدة', 'invoices'),
-            ('invoices.edit', 'تعديل الفواتير', 'invoices'),
-            ('invoices.delete', 'حذف الفواتير', 'invoices'),
-            ('invoices.cancel', 'إلغاء الفواتير', 'invoices'),
-            ('invoices.print', 'طباعة الفواتير', 'invoices'),
-            ('invoices.print_without_balance', 'طباعة بدون رصيد', 'invoices'),
-            ('invoices.fast_process', 'معالجة سريعة', 'invoices'),
-            ('invoices.view_daily_summary', 'عرض ملخص اليوم', 'invoices'),
-            
-            # فئة التقارير
-            ('reports.view', 'عرض التقارير', 'reports'),
-            ('reports.dashboard', 'لوحة التحكم', 'reports'),
-            ('reports.customers', 'تقارير الزبائن', 'reports'),
-            ('reports.balance', 'تقارير الرصيد', 'reports'),
-            ('reports.sales', 'تقارير المبيعات', 'reports'),
-            ('reports.sectors', 'تقارير القطاعات', 'reports'),
-            ('reports.export', 'تصدير التقارير', 'reports'),
-            
-            # فئة النظام
-            ('system.manage_users', 'إدارة المستخدمين', 'system'),
-            ('system.view_activity_log', 'عرض سجل النشاط', 'system'),
-            ('system.manage_backup', 'إدارة النسخ الاحتياطي', 'system'),
-            ('system.import_data', 'استيراد البيانات', 'system'),
-            ('system.export_data', 'تصدير البيانات', 'system'),
-            ('system.advanced_import', 'استيراد متقدم', 'system'),
-            ('system.advanced_export', 'تصدير متقدم', 'system'),
-            ('system.view_archive', 'عرض الأرشيف', 'system'),
-            
-            # فئة الإعدادات
-            ('settings.manage', 'إدارة الإعدادات', 'settings'),
-            ('settings.manage_permissions', 'إدارة الصلاحيات', 'settings'),
-            ('settings.printer', 'إعدادات الطابعة', 'settings'),
-            
-            # فئة المحاسبة
-            ('accounting.access', 'الدخول لوحدة المحاسبة', 'accounting'),
-            ('accounting.fast_operations', 'عمليات محاسبية سريعة', 'accounting'),
+            ("customers.view", "عرض الزبائن", "customers"),
+            ("customers.add", "إضافة زبون", "customers"),
+            ("customers.edit", "تعديل زبون", "customers"),
+            ("customers.delete", "حذف زبون", "customers"),
+            ("customers.view_details", "عرض تفاصيل الزبون", "customers"),
+            ("invoices.view", "عرض الفواتير", "invoices"),
+            ("invoices.create", "إنشاء فاتورة", "invoices"),
+            ("invoices.edit", "تعديل فاتورة", "invoices"),
+            ("invoices.delete", "حذف فاتورة", "invoices"),
+            ("invoices.print", "طباعة فاتورة", "invoices"),
+            ("reports.view", "عرض التقارير", "reports"),
+            ("reports.dashboard", "لوحة التحكم", "reports"),
+            ("reports.customers", "تقارير الزبائن", "reports"),
+            ("reports.balance", "تقارير الرصيد", "reports"),
+            ("reports.sales", "تقارير المبيعات", "reports"),
+            ("system.import_data", "استيراد بيانات", "system"),
+            ("system.export_data", "تصدير بيانات", "system"),
+            ("accounting.access", "الوصول للمحاسبة", "accounting"),
+            ("accounting.fast_operations", "العمليات السريعة", "accounting"),
+            ("users.manage", "إدارة المستخدمين", "users"),
+            ("settings.manage", "إدارة الإعدادات", "settings"),
+            ("backup.manage", "إدارة النسخ الاحتياطي", "backup")
         ]
-
+        
         for permission_key, name, category in permissions_data:
             cursor.execute("""
                 INSERT INTO permissions_catalog (permission_key, name, category)
@@ -536,38 +527,40 @@ class Models:
                     category = EXCLUDED.category,
                     is_active = TRUE
             """, (permission_key, name, category))
-
+        
         # إضافة صلاحيات الأدوار الافتراضية
-        role_permissions = {
-            'admin': ['*.*'],  # جميع الصلاحيات
+        if existing_permissions == 0:
+            logger.info("إضافة الصلاحيات الافتراضية لأول مرة")
+            role_permissions = {
+                'admin': ['*.*'],
+                
+                'accountant': [
+                    'customers.view', 'customers.add', 'customers.edit', 'customers.delete',
+                    'customers.view_details', 'invoices.view', 'invoices.create', 'invoices.edit',
+                    'invoices.delete', 'invoices.print', 'reports.view', 'reports.dashboard',
+                    'reports.customers', 'reports.balance', 'reports.sales', 'system.import_data',
+                    'system.export_data'
+                ],
+                
+                'cashier': [
+                    'customers.view', 'invoices.view', 'invoices.create', 'invoices.print',
+                    'accounting.access', 'accounting.fast_operations'
+                ],
+                
+                'viewer': [
+                    'customers.view', 'reports.view'
+                ]
+            }
             
-            'accountant': [
-                'customers.view', 'customers.add', 'customers.edit', 'customers.delete', 
-                'customers.view_details', 'invoices.view', 'invoices.create', 'invoices.edit',
-                'invoices.delete', 'invoices.print', 'reports.view', 'reports.dashboard',
-                'reports.customers', 'reports.balance', 'reports.sales', 'system.import_data',
-                'system.export_data'
-            ],
-            
-            'cashier': [
-                'customers.view', 'invoices.view', 'invoices.create', 'invoices.print',
-                'accounting.access', 'accounting.fast_operations'
-            ],
-            
-            'viewer': [
-                'customers.view', 'reports.view'
-            ]
-        }
-
-        for role, permissions in role_permissions.items():
-            for permission_key in permissions:
-                cursor.execute("""
-                    INSERT INTO role_permissions (role, permission_key, is_allowed)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (role, permission_key) DO UPDATE
-                    SET is_allowed = EXCLUDED.is_allowed,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (role, permission_key, True))
+            for role, permissions in role_permissions.items():
+                for permission_key in permissions:
+                    cursor.execute("""
+                        INSERT INTO role_permissions (role, permission_key, is_allowed)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (role, permission_key) DO UPDATE
+                        SET is_allowed = EXCLUDED.is_allowed,
+                            updated_at = CURRENT_TIMESTAMP
+                    """, (role, permission_key, True))
         
         # إضافة الإعدادات الافتراضية
         settings = [

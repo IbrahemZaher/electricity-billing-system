@@ -1,3 +1,0 @@
-id,username,password_hash,full_name,role,permissions,is_active,created_at,updated_at,email
-188,a,$2b$12$2v6bJ5PgIT2ZSMso2VZ5bOj5oeMMEoXGly9KP6VYiecrmwvnSi7Ve,a,accountant,{},True,2026-01-25 20:43:40.571790,2026-02-01 12:35:14.375592,a
-1,admin,$2b$12$awtHK9EY3JEx4jXlvwfnf.vsS2aNbbs8U9w7OJXaNHKUZJipk0VZy,المسؤول العام,admin,{'all': True},True,2025-12-20 08:29:49.429456,2026-02-01 12:39:42.867378,

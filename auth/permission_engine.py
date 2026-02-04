@@ -1,4 +1,3 @@
-# auth/permission_engine.py
 """
 المحرك المركزي لإدارة الصلاحيات
 يعمل بنظام هجين:
@@ -21,6 +20,47 @@ class PermissionEngine:
         self._permissions_cache = {}  # user_id -> (timestamp, permissions_dict)
         self._cache_ttl = 30  # seconds
         
+        # تأكد من هيكل الجدول عند بداية التشغيل
+        self._ensure_permissions_table_structure()
+    
+    def _ensure_permissions_table_structure(self):
+        """تأكد من هيكل جدول role_permissions"""
+        try:
+            with self.db.get_cursor() as cursor:
+                # 1. تحقق من وجود الجدول
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_name = 'role_permissions'
+                    )
+                """)
+                
+                if not cursor.fetchone()['exists']:
+                    logger.warning("❌ جدول role_permissions غير موجود!")
+                    return
+                
+                # 2. تحقق من وجود القيد الفريد
+                cursor.execute("""
+                    SELECT con.conname, con.contype
+                    FROM pg_constraint con
+                    JOIN pg_class rel ON rel.oid = con.conrelid
+                    WHERE rel.relname = 'role_permissions'
+                    AND con.contype = 'u'
+                    AND array_length(con.conkey, 1) = 2
+                    AND con.conkey::text LIKE '%1,2%'  -- الأعمدة role و permission_key
+                """)
+                
+                constraints = cursor.fetchall()
+                
+                if not constraints:
+                    logger.warning("⚠️ لا يوجد قيد فريد على (role, permission_key).")
+                    logger.warning("⚠️ هذا قد يسبب مشاكل في حفظ التعديلات.")
+                else:
+                    logger.info(f"✅ يوجد قيد فريد: {constraints[0]['conname']}")
+                    
+        except Exception as e:
+            logger.error(f"❌ خطأ في التحقق من هيكل الجدول: {e}")
+    
     def has_permission(self, user_id: int, permission_key: str, user_role: str | None = None) -> bool:
         """
         التحقق من صلاحية المستخدم
@@ -47,7 +87,7 @@ class PermissionEngine:
                     logger.debug(f"المستخدم {user_id} في الكاش هو admin، لديه كل الصلاحيات")
                     return True
                 user_role = cached_role
-            
+        
         # 3. إذا لم يكن الدور في الكاش، نجلب من قاعدة البيانات
         if user_role is None:
             try:
@@ -71,7 +111,7 @@ class PermissionEngine:
         
         # 6. أخيراً: النظام القديم (للتوافق)
         return self._check_old_system(user_id, permission_key, user_role)
-
+    
     def _check_new_system(self, user_id: int, permission_key: str, user_role: str | None) -> Optional[bool]:
         """
         التحقق من النظام الجديد (الجداول)
@@ -84,49 +124,63 @@ class PermissionEngine:
                 # التحقق من وجود الجداول أولاً
                 cursor.execute("""
                     SELECT EXISTS (
-                        SELECT 1 FROM information_schema.tables 
+                        SELECT 1 FROM information_schema.tables
                         WHERE table_name = 'permissions_catalog'
                     )
                 """)
                 
                 if not cursor.fetchone()['exists']:
                     logger.debug("الجداول الجديدة غير موجودة بعد")
-                    return None  # الجداول غير موجودة
+                    return None
                 
                 # الاستعلام الرئيسي: يجمع الصلاحيات من الأدوار والتجاوزات
                 cursor.execute("""
                     WITH user_role AS (
                         SELECT role FROM users WHERE id = %s
                     ),
-                    all_permissions AS (
-                        -- صلاحية *.* (جميع الصلاحيات)
-                        SELECT 
-                            CASE 
-                                WHEN rp.permission_key = '*.*' THEN TRUE
-                                ELSE COALESCE(up.is_allowed, rp.is_allowed)
-                            END as has_permission
-                        FROM user_role ur
-                        LEFT JOIN role_permissions rp ON ur.role = rp.role 
-                            AND (rp.permission_key = %s OR rp.permission_key = '*.*')
-                        LEFT JOIN user_permissions up ON up.user_id = %s 
-                            AND up.permission_key = %s
+                    role_perms AS (
+                        -- صلاحيات الدور (بما فيها *.*)
+                        SELECT permission_key, is_allowed
+                        FROM role_permissions
+                        WHERE role = (SELECT role FROM users WHERE id = %s)
+                        AND (permission_key = %s OR permission_key = '*.*')
+                    ),
+                    user_perms AS (
+                        -- صلاحيات المستخدم المباشرة
+                        SELECT permission_key, is_allowed
+                        FROM user_permissions
+                        WHERE user_id = %s AND permission_key = %s
                     )
-                    SELECT 
-                        CASE 
-                            WHEN COUNT(*) = 0 THEN FALSE
-                            WHEN BOOL_OR(has_permission) THEN TRUE
+                    SELECT
+                        CASE
+                            -- أولاً: إذا كان هناك *.* مفعل للدور، يمنح كل الصلاحيات
+                            WHEN EXISTS (SELECT 1 FROM role_perms WHERE permission_key = '*.*' AND is_allowed = TRUE) THEN TRUE
+                            -- ثانياً: إذا كان هناك *.* معطل للدور، يمنع كل الصلاحيات
+                            WHEN EXISTS (SELECT 1 FROM role_perms WHERE permission_key = '*.*' AND is_allowed = FALSE) THEN FALSE
+                            -- ثالثاً: صلاحية المستخدم المباشرة (تجاوز)
+                            WHEN EXISTS (SELECT 1 FROM user_perms) THEN (
+                                SELECT is_allowed FROM user_perms LIMIT 1
+                            )
+                            -- رابعاً: صلاحية الدور المحددة
+                            WHEN EXISTS (SELECT 1 FROM role_perms WHERE permission_key = %s) THEN (
+                                SELECT is_allowed FROM role_perms WHERE permission_key = %s LIMIT 1
+                            )
+                            -- أخيراً: لا توجد صلاحية
                             ELSE FALSE
                         END as final_permission
-                    FROM all_permissions
-                """, (user_id, permission_key, user_id, permission_key))
+                """, (user_id, user_id, permission_key, user_id, permission_key, permission_key, permission_key))
                 
                 result = cursor.fetchone()
-                return result['final_permission'] if result else False
+                final_result = result['final_permission'] if result else False
                 
+                # تسجيل النتيجة للتحقق
+                logger.debug(f"النظام الجديد - صلاحية {permission_key} للمستخدم {user_id}: {final_result}")
+                return final_result
+                    
         except Exception as e:
             logger.error(f"خطأ في النظام الجديد: {e}", exc_info=True)
-            return None  # حدث خطأ، نرجع للنظام القديم
-    
+            return None
+                    
     def _check_old_system(self, user_id: int, permission_key: str, user_role: str | None) -> bool:
         """
         النظام القديم (للتوافق المؤقت)
@@ -141,8 +195,8 @@ class PermissionEngine:
                 # جلب بيانات المستخدم (إذا لم نكن نعرف الدور بالفعل)
                 if user_role is None:
                     cursor.execute("""
-                        SELECT role, permissions 
-                        FROM users 
+                        SELECT role, permissions
+                        FROM users
                         WHERE id = %s
                     """, (user_id,))
                     user = cursor.fetchone()
@@ -262,21 +316,22 @@ class PermissionEngine:
         permissions = {}
         
         try:
-            # 2. أولاً: النظام الجديد
+            # 2. النظام الجديد مع التصحيح
             with self.db.get_cursor() as cursor:
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         pc.permission_key,
-                        CASE 
+                        CASE
                             WHEN ur.role = 'admin' THEN TRUE
-                            WHEN rp.permission_key = '*.*' THEN TRUE
+                            WHEN rp.permission_key = '*.*' AND rp.is_allowed = TRUE THEN TRUE
+                            WHEN rp.permission_key = '*.*' AND rp.is_allowed = FALSE THEN FALSE
                             ELSE COALESCE(up.is_allowed, rp.is_allowed, FALSE)
                         END as has_permission
                     FROM permissions_catalog pc
                     CROSS JOIN (SELECT role FROM users WHERE id = %s) ur
-                    LEFT JOIN role_permissions rp ON ur.role = rp.role 
+                    LEFT JOIN role_permissions rp ON ur.role = rp.role
                         AND (rp.permission_key = pc.permission_key OR rp.permission_key = '*.*')
-                    LEFT JOIN user_permissions up ON up.user_id = %s 
+                    LEFT JOIN user_permissions up ON up.user_id = %s
                         AND up.permission_key = pc.permission_key
                     WHERE pc.is_active = TRUE
                     ORDER BY pc.category, pc.permission_key
@@ -316,6 +371,58 @@ class PermissionEngine:
             del self._permissions_cache[user_id]
             logger.debug(f"تم مسح الكاش للمستخدم {user_id}")
     
+    def get_role_permissions_timestamp(self, role: str) -> int:
+        """الحصول على آخر وقت تحديث لصلاحيات دور معين"""
+        try:
+            with self.db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT MAX(updated_at) as last_update
+                    FROM role_permissions
+                    WHERE role = %s
+                """, (role,))
+                
+                result = cursor.fetchone()
+                if result and result['last_update']:
+                    return int(result['last_update'].timestamp())
+                return 0
+        except Exception as e:
+            logger.error(f"خطأ في جلب وقت تحديث صلاحيات الدور: {e}")
+            return 0
+    
+    def get_role_permissions_version(self, role: str) -> int:
+        """الحصول على إصدار صلاحيات الدور (للكشف عن التغييرات)"""
+        try:
+            with self.db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT MAX(id) as max_id, COUNT(*) as perm_count
+                    FROM role_permissions
+                    WHERE role = %s
+                """, (role,))
+                
+                result = cursor.fetchone()
+                return (result['max_id'] or 0) + (result['perm_count'] or 0)
+        except Exception as e:
+            logger.error(f"خطأ في جلب إصدار صلاحيات الدور: {e}")
+            return 0
+    
+    def invalidate_role_cache(self, role: str):
+        """إبطال كاش جميع المستخدمين الذين لديهم دور معين"""
+        try:
+            with self.db.get_cursor() as cursor:
+                # جلب جميع مستخدمي هذا الدور
+                cursor.execute("SELECT id FROM users WHERE role = %s", (role,))
+                users = cursor.fetchall()
+                
+                # مسح كاش كل مستخدم
+                for user in users:
+                    self.clear_cache(user['id'])
+                
+                logger.info(f"🗑️ تم إبطال كاش {len(users)} مستخدم للدور {role}")
+                return len(users)
+        except Exception as e:
+            logger.error(f"خطأ في إبطال كاش الدور: {e}")
+            return 0
+    
     def get_all_permissions(self) -> List[Dict[str, Any]]:
         """الحصول على جميع الصلاحيات في الكتالوج"""
         try:
@@ -329,28 +436,59 @@ class PermissionEngine:
         except Exception as e:
             logger.error(f"خطأ في جلب جميع الصلاحيات: {e}")
             return []
-    
+        
     def update_role_permission(self, role: str, permission_key: str, is_allowed: bool) -> bool:
-        """تحديث صلاحية دور"""
+        """تحديث صلاحية دور مع تحديث الجلسات - طريقة مضمونة 100%"""
         try:
             with self.db.get_cursor() as cursor:
+                # 1. تسجيل محاولة التحديث
+                logger.info(f"🚀 بدء تحديث: {role}.{permission_key} = {is_allowed}")
+                
+                # 2. استعلام بسيط جداً: حذف القديم وأدخل الجديد
+                # هذا يحل مشكلة عدم وجود قيد فريد
                 cursor.execute("""
-                    INSERT INTO role_permissions (role, permission_key, is_allowed)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (role, permission_key) DO UPDATE
-                    SET is_allowed = EXCLUDED.is_allowed,
-                        updated_at = CURRENT_TIMESTAMP
-                    RETURNING id
+                    -- أولاً: حذف أي صفوف قديمة
+                    DELETE FROM role_permissions 
+                    WHERE role = %s AND permission_key = %s
+                """, (role, permission_key))
+                
+                # 3. إدراج الصف الجديد
+                cursor.execute("""
+                    INSERT INTO role_permissions (role, permission_key, is_allowed, created_at, updated_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    RETURNING id, is_allowed, updated_at
                 """, (role, permission_key, is_allowed))
                 
-                # مسح الكاش لأن الصلاحيات تغيرت
-                self.clear_cache()
+                result = cursor.fetchone()
                 
-                return cursor.fetchone() is not None
+                if result:
+                    logger.info(f"✅ تم الحفظ بنجاح! ID: {result['id']}, القيمة: {result['is_allowed']}")
+                    
+                    # 4. التحقق المباشر من قاعدة البيانات
+                    cursor.execute("""
+                        SELECT COUNT(*) as count FROM role_permissions 
+                        WHERE role = %s AND permission_key = %s AND is_allowed = %s
+                    """, (role, permission_key, is_allowed))
+                    
+                    verify = cursor.fetchone()
+                    logger.info(f"🔍 التحقق: يوجد {verify['count']} صف مطابق في قاعدة البيانات")
+                    
+                    # 5. مسح الكاش
+                    self.clear_cache()
+                    affected_users = self.invalidate_role_cache(role)
+                    
+                    # 6. تسجيل النجاح
+                    logger.info(f"🎉 تم تحديث صلاحية {permission_key} للدور {role} إلى {is_allowed}")
+                    return True
+                else:
+                    logger.error("❌ فشل الإدراج - لم يتم إرجاع أي نتيجة")
+                    return False
+                    
         except Exception as e:
-            logger.error(f"خطأ في تحديث صلاحية الدور: {e}")
+            logger.error(f"💥 خطأ في تحديث صلاحية الدور: {e}", exc_info=True)
             return False
-    
+            
+                
     def update_user_permission(self, user_id: int, permission_key: str, is_allowed: bool) -> bool:
         """تحديث صلاحية مستخدم (تجاوز)"""
         try:
@@ -371,6 +509,61 @@ class PermissionEngine:
         except Exception as e:
             logger.error(f"خطأ في تحديث صلاحية المستخدم: {e}")
             return False
+
+    def check_database_directly(self, role: str, permission_key: str):
+        """فحص مباشر لقاعدة البيانات - يعرض كل شيء"""
+        try:
+            with self.db.get_cursor() as cursor:
+                # 1. تحقق من جدول role_permissions
+                cursor.execute("""
+                    SELECT id, is_allowed, created_at, updated_at 
+                    FROM role_permissions 
+                    WHERE role = %s AND permission_key = %s
+                    ORDER BY updated_at DESC
+                """, (role, permission_key))
+                
+                role_perms = cursor.fetchall()
+                
+                # 2. تحقق من جدول permissions_catalog
+                cursor.execute("""
+                    SELECT permission_key, name, category 
+                    FROM permissions_catalog 
+                    WHERE permission_key = %s
+                """, (permission_key,))
+                
+                catalog_info = cursor.fetchone()
+                
+                # 3. عرض النتائج
+                print("\n" + "="*60)
+                print(f"🔍 فحص مباشر لقاعدة البيانات:")
+                print(f"   الدور: {role}")
+                print(f"   الصلاحية: {permission_key}")
+                print("="*60)
+                
+                if catalog_info:
+                    print(f"📋 معلومات من permissions_catalog:")
+                    print(f"   الاسم: {catalog_info['name']}")
+                    print(f"   الفئة: {catalog_info['category']}")
+                else:
+                    print("❌ هذه الصلاحية غير موجودة في permissions_catalog!")
+                
+                print(f"\n📊 سجلات في role_permissions: {len(role_perms)}")
+                
+                for i, perm in enumerate(role_perms, 1):
+                    status = "✅ مفعل" if perm['is_allowed'] else "❌ معطل"
+                    print(f"\n   السجل #{i}:")
+                    print(f"   ID: {perm['id']}")
+                    print(f"   الحالة: {status}")
+                    print(f"   أنشئ في: {perm['created_at']}")
+                    print(f"   آخر تحديث: {perm['updated_at']}")
+                
+                if not role_perms:
+                    print("\n⚠️ لا يوجد أي سجل في role_permissions لهذه الصلاحية!")
+                
+                print("="*60 + "\n")
+                
+        except Exception as e:
+            print(f"💥 خطأ في الفحص: {e}")
 
 # إنشاء كائن عالمي
 permission_engine = PermissionEngine()

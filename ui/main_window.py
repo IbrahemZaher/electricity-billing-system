@@ -668,6 +668,10 @@ class MainWindow:
         menubar.add_cascade(label="أدوات", menu=tools_menu)
         tools_menu.add_command(label="إدارة الصلاحيات", 
                             command=self.show_permission_settings)
+
+        # في setup_menu، أضف:
+        tools_menu.add_command(label="تشخيص مشكلة الصلاحيات", 
+                            command=self.debug_permission_issue)                            
         
         # قائمة مساعدة
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -675,34 +679,136 @@ class MainWindow:
         help_menu.add_command(label="دليل المستخدم", command=self.show_help)
         help_menu.add_command(label="عن البرنامج", command=self.about)
 
-            # إضافة الدالة الجديدة:
+                # إضافة الدالة الجديدة:
     def show_permission_settings(self):
-        """عرض إعدادات الصلاحيات - الإصلاح النهائي"""
-        # حل مباشر وسريع
+        """عرض إعدادات الصلاحيات - التحقق من صلاحية المستخدم الحالي"""
         from auth.session import Session
-        
-        # 1. تعيين المستخدم في الجلسة مباشرة
-        Session.current_user = {
-            'id': 1,  # هذا هو ID المستخدم admin في قاعدة البيانات
-            'username': 'admin',
-            'role': 'admin',
-            'full_name': 'المسؤول العام'
-        }
-        
-        # 2. التحقق من الصلاحية مباشرة
         from auth.permission_engine import permission_engine
         
-        # 3. هذا اختبار مباشر - يتجاوز كل الأنظمة
-        can_access = permission_engine.has_permission(1, 'settings.manage_permissions')
+        # 1. التحقق من تسجيل الدخول
+        if not Session.is_authenticated():
+            messagebox.showerror("صلاحيات", "يجب تسجيل الدخول أولاً")
+            return
         
-        print(f"✅ التحقق المباشر: {can_access}")
+        # 2. جلب بيانات المستخدم الحالي
+        current_user = Session.current_user
+        if not current_user:
+            messagebox.showerror("صلاحيات", "لا توجد جلسة نشطة")
+            return
+        
+        user_id = current_user['id']
+        username = current_user.get('username', 'مستخدم')
+        user_role = Session.get_role()
+        
+        print(f"🔍 التحقق من صلاحيات المستخدم الحالي:")
+        print(f"   ID: {user_id}")
+        print(f"   اسم المستخدم: {username}")
+        print(f"   الدور: {user_role}")
+        
+        # 3. التحقق من الصلاحية باستخدام المستخدم الحالي
+        can_access = permission_engine.has_permission(user_id, 'settings.manage_permissions')
+        
+        print(f"✅ التحقق من صلاحية 'settings.manage_permissions' للمستخدم {username}: {can_access}")
         
         if can_access:
-            # فتح واجهة الصلاحيات مباشرة
+            # فتح واجهة الصلاحيات
             self.show_advanced_settings()
         else:
-            from tkinter import messagebox
-            messagebox.showerror("صلاحيات", "ليس لديك صلاحية إدارة الصلاحيات")
+            messagebox.showerror("صلاحيات", 
+                f"ليس لديك صلاحية إدارة الصلاحيات\n\n"
+                f"المستخدم: {username}\n"
+                f"الدور: {user_role}\n\n"
+                f"يجب أن يكون لديك صلاحية 'settings.manage_permissions'")
+
+
+    def debug_permission_issue(self):
+        """تشخيص مشكلة الصلاحيات بشكل مفصل"""
+        from auth.session import Session
+        from auth.permission_engine import permission_engine
+        from database.connection import db
+        
+        if not Session.is_authenticated():
+            print("❌ لم يتم تسجيل الدخول")
+            return
+        
+        current_user = Session.current_user
+        user_id = current_user['id']
+        username = current_user.get('username')
+        role = current_user.get('role')
+        
+        print(f"\n{'='*60}")
+        print(f"🔍 تشخيص مفصل لمشكلة الصلاحيات")
+        print(f"{'='*60}")
+        
+        try:
+            # 1. التحقق من قاعدة البيانات مباشرة
+            with db.get_cursor() as cursor:
+                # أ) صلاحيات الدور في role_permissions
+                cursor.execute("""
+                    SELECT permission_key, is_allowed, updated_at
+                    FROM role_permissions 
+                    WHERE role = %s AND permission_key LIKE 'settings.%'
+                    ORDER BY permission_key
+                """, (role,))
+                
+                role_perms = cursor.fetchall()
+                print(f"\n📋 صلاحيات الدور '{role}' في جدول role_permissions:")
+                for perm in role_perms:
+                    status = "✅ مفعل" if perm['is_allowed'] else "❌ معطل"
+                    print(f"   - {perm['permission_key']}: {status}")
+                
+                # ب) صلاحيات المستخدم المباشرة في user_permissions
+                cursor.execute("""
+                    SELECT permission_key, is_allowed
+                    FROM user_permissions 
+                    WHERE user_id = %s AND permission_key LIKE 'settings.%'
+                """, (user_id,))
+                
+                user_perms = cursor.fetchall()
+                print(f"\n👤 صلاحيات المستخدم المباشرة في user_permissions:")
+                for perm in user_perms:
+                    status = "✅ مفعل" if perm['is_allowed'] else "❌ معطل"
+                    print(f"   - {perm['permission_key']}: {status}")
+                
+                # ج) الصلاحيات القديمة في users.permissions (JSONB)
+                cursor.execute("SELECT permissions FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                old_perms = user.get('permissions', {}) if user else {}
+                print(f"\n🗃️  الصلاحيات القديمة في users.permissions (JSONB):")
+                for key, value in old_perms.items():
+                    if 'settings' in key or 'manage' in key:
+                        print(f"   - {key}: {value}")
+            
+            # 2. التحقق من محرك الصلاحيات
+            print(f"\n🚀 محرك الصلاحيات:")
+            
+            # أ) استخدام has_permission
+            result = permission_engine.has_permission(user_id, 'settings.manage_permissions')
+            print(f"   has_permission('settings.manage_permissions'): {result}")
+            
+            # ب) جلب جميع الصلاحيات
+            all_perms = permission_engine.get_user_permissions(user_id)
+            settings_perms = {k: v for k, v in all_perms.items() if k.startswith('settings.')}
+            print(f"   الصلاحيات من get_user_permissions():")
+            for key, value in settings_perms.items():
+                status = "✅ مفعل" if value else "❌ معطل"
+                print(f"   - {key}: {status}")
+            
+            # 3. التحقق من الكاش
+            print(f"\n💾 حالة الكاش:")
+            cache_size = len(permission_engine._permissions_cache)
+            print(f"   حجم الكاش: {cache_size} مستخدم")
+            
+            if user_id in permission_engine._permissions_cache:
+                cache_data = permission_engine._permissions_cache[user_id]
+                cache_age = time.time() - cache_data[0]
+                print(f"   ✅ المستخدم موجود في الكاش")
+                print(f"   عمر الكاش: {cache_age:.1f} ثانية")
+            else:
+                print(f"   ❌ المستخدم غير موجود في الكاش")
+                
+        except Exception as e:
+            print(f"❌ خطأ في التشخيص: {e}")
 
 
     def setup_statusbar(self):
@@ -790,6 +896,35 @@ class MainWindow:
         if "dashboard" in current_view:
             self.show_dashboard()
         messagebox.showinfo("تحديث", "تم تحديث البيانات")
+
+    def fix_permission_cache(self):
+        """إصلاح كاش الصلاحيات يدوياً"""
+        from auth.session import Session
+        from auth.permission_engine import permission_engine
+        
+        if not Session.is_authenticated():
+            messagebox.showerror("خطأ", "لم تقم بتسجيل الدخول")
+            return
+        
+        try:
+            # مسح جميع الكاشات
+            permission_engine.clear_cache()
+            Session._permission_version.clear()
+            
+            # تحديث الجلسة
+            Session.refresh_permissions()
+            
+            messagebox.showinfo("نجاح", 
+                "✅ تم إصلاح كاش الصلاحيات بنجاح!\n\n"
+                "تم:\n"
+                "1. مسح كاش محرك الصلاحيات\n"
+                "2. مسح كاش إصدارات الجلسات\n"
+                "3. تحديث الجلسة الحالية\n\n"
+                "يمكنك الآن استخدام النظام بشكل طبيعي.")
+                
+        except Exception as e:
+            logger.error(f"خطأ في إصلاح الكاش: {e}")
+            messagebox.showerror("خطأ", f"فشل إصلاح الكاش: {str(e)}")        
     
     def show_help(self):
         """عرض دليل المستخدم"""
