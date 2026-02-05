@@ -1,6 +1,9 @@
+# database/models.py
 from database.connection import db
 from datetime import datetime
 import logging
+import json
+
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +58,6 @@ class Models:
                     ('balance_after', 'DECIMAL(15, 2)'),
                     ('current_balance_before', 'DECIMAL(15, 2)'),
                     ('current_balance_after', 'DECIMAL(15, 2)'),
-                    ('old_balance', 'DECIMAL(15, 2)'),
-                    ('new_balance', 'DECIMAL(15, 2)'),
                     ('kilowatt_amount', 'DECIMAL(10, 2)'),
                     ('free_kilowatt', 'DECIMAL(10, 2) DEFAULT 0'),
                     ('price_per_kilo', 'DECIMAL(10, 2)'),
@@ -128,29 +129,57 @@ class Models:
                 columns_info = cursor.fetchall()
                 logger.info(f"معلومات أعمدة customer_history: {columns_info}")
                 
-                # تحديث القيم NULL فقط إلى 0 (بدون استخدام المشغل النمطي !~)
-                cursor.execute("""
-                    UPDATE customer_history 
-                    SET 
-                        old_value = COALESCE(old_value, 0),
-                        new_value = COALESCE(new_value, 0),
-                        amount = COALESCE(amount, 0),
-                        current_balance_after = COALESCE(current_balance_after, 0)
-                    WHERE 
-                        old_value IS NULL OR
-                        new_value IS NULL OR
-                        amount IS NULL OR
-                        current_balance_after IS NULL
-                """)
+                # تحديث القيم النصية إلى رقمية للأعمدة التي لا تزال نصية فقط
+                for column in columns_info:
+                    column_name = column['column_name']
+                    data_type = column['data_type']
+                    
+                    if data_type == 'text':
+                        logger.info(f"معالجة العمود النصي: {column_name}")
+                        
+                        # تحويل القيم النصية إلى رقمية
+                        cursor.execute(f"""
+                            UPDATE customer_history 
+                            SET {column_name} = CASE 
+                                WHEN {column_name} IS NULL THEN 0
+                                WHEN {column_name} ~ '^[0-9]+(\\.[0-9]+)?$' THEN CAST({column_name} AS DECIMAL(15, 2))
+                                ELSE 0 
+                            END
+                            WHERE {column_name} IS NULL 
+                            OR {column_name} !~ '^[0-9]+(\\.[0-9]+)?$'
+                            OR {column_name} = ''
+                        """)
+                        
+                        # تغيير نوع العمود إلى numeric
+                        try:
+                            cursor.execute(f"""
+                                ALTER TABLE customer_history 
+                                ALTER COLUMN {column_name} TYPE DECIMAL(15, 2)
+                                USING {column_name}::DECIMAL(15, 2)
+                            """)
+                            logger.info(f"تم تغيير نوع العمود {column_name} من text إلى DECIMAL(15, 2)")
+                        except Exception as alter_error:
+                            logger.warning(f"لا يمكن تغيير نوع العمود {column_name}: {alter_error}")
+                    
+                    elif data_type == 'numeric':
+                        logger.info(f"العمود {column_name} بالفعل من نوع numeric، لا حاجة للتحديث")
+                    
+                    # التعامل مع القيم الفارغة في الأعمدة الرقمية
+                    cursor.execute(f"""
+                        UPDATE customer_history 
+                        SET {column_name} = 0
+                        WHERE {column_name} IS NULL
+                    """)
+                    
+                    rows_updated = cursor.rowcount
+                    if rows_updated > 0:
+                        logger.info(f"تم تحديث {rows_updated} قيمة فارغة في العمود {column_name}")
                 
-                rows_updated = cursor.rowcount
-                if rows_updated > 0:
-                    logger.info(f"تم تحديث {rows_updated} صف في جدول customer_history لتصحيح القيم الرقمية")
-                else:
-                    logger.info("لم تكن هناك حاجة لتحديث القيم الرقمية في جدول customer_history")
+                logger.info("تم الانتهاء من تصحيح القيم الرقمية في جدول customer_history")
                 
         except Exception as e:
             logger.error(f"خطأ في تصحيح القيم الرقمية في جدول customer_history: {e}")
+            # لا نرفع الخطأ حتى لا يمنع تشغيل التطبيق        
 
     def create_indexes(self, cursor):
         """إنشاء الفهارس للبحث السريع"""
@@ -336,8 +365,6 @@ class Models:
                 balance_after DECIMAL(15, 2),
                 current_balance_before DECIMAL(15, 2),
                 current_balance_after DECIMAL(15, 2),
-                old_balance DECIMAL(15, 2),  
-                new_balance DECIMAL(15, 2),  
                 
                 -- معلومات الفاتورة
                 kilowatt_amount DECIMAL(10, 2),
@@ -353,7 +380,6 @@ class Models:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  
             )
             """,
-            
             # جدول كتالوج الصلاحيات
             """
             CREATE TABLE IF NOT EXISTS permissions_catalog (
@@ -399,37 +425,28 @@ class Models:
                 # إنشاء جميع الجداول
                 for sql in tables_sql:
                     cursor.execute(sql)
+                logger.info("تم إنشاء جميع الجداول بنجاح")
                 
-                logger.info("✅ تم إنشاء جميع الجداول بنجاح")
-                
-                # ⭐⭐⭐ التحقق من وجود البيانات قبل إضافتها ⭐⭐⭐
-                cursor.execute("SELECT COUNT(*) as count FROM role_permissions")
-                existing_data = cursor.fetchone()['count']
-                
-                # إضافة البيانات الأساسية فقط إذا لم تكن موجودة
-                if existing_data == 0:
-                    self.seed_initial_data(cursor)
-                else:
-                    logger.info(f"✅ تخطي إضافة البيانات الأولية، يوجد {existing_data} سجل بالفعل")
+                # إضافة البيانات الأساسية
+                self.seed_initial_data(cursor)
                 
                 # إنشاء الفهارس
                 self.create_indexes(cursor)
                 
         except Exception as e:
-            logger.error(f"❌ خطأ في إنشاء الجداول: {e}")
+            logger.error(f"خطأ في إنشاء الجداول: {e}")
             raise
         finally:
-            # تحديث جدول الفواتير بإضافة الأعمدة المفقودة
+            # تحديث جدول الفواتير بإضافة الأعمدة المفقودة (للتوافق مع الإصدارات القديمة)
             self.update_invoices_table()
             # تحديث جدول سجل الزبائن
             self.update_customer_history_table()
-            # إنشاء فهارس إضافية لجدول التاريخ بعد التحديث
+            # تحديث جدول المستخدمين
             self.update_users_table()
+            # إنشاء فهارس إضافية لجدول التاريخ بعد التحديث
             self.create_history_indexes()
             # تصحيح القيم النصية في الأعمدة الرقمية
             self.fix_customer_history_numeric_values()
-            # تحديث أعمدة العدادات الهرمية
-            self.update_meter_columns()
 
     def create_history_indexes(self):
         """إنشاء فهارس لجدول التاريخ"""
@@ -457,15 +474,6 @@ class Models:
 
     def seed_initial_data(self, cursor):
         """إضافة البيانات الأولية"""
-        
-        # التحقق مما إذا كانت البيانات الأولية قد أضيفت من قبل
-        cursor.execute("SELECT COUNT(*) as count FROM role_permissions")
-        existing_permissions = cursor.fetchone()['count']
-        
-        if existing_permissions > 0:
-            logger.info(f"✅ تخطي إضافة البيانات الأولية، يوجد {existing_permissions} صلاحية حالياً")
-            return
-        
         # إضافة القطاعات الأساسية
         sectors = [
             ("بيدر", "BAIDAR"),
@@ -478,7 +486,7 @@ class Models:
         
         for name, code in sectors:
             cursor.execute("""
-                INSERT INTO sectors (name, code)
+                INSERT INTO sectors (name, code) 
                 VALUES (%s, %s)
                 ON CONFLICT (name) DO NOTHING
             """, (name, code))
@@ -486,38 +494,64 @@ class Models:
         # إضافة المستخدم الإداري الافتراضي
         cursor.execute("""
             INSERT INTO users (username, password_hash, full_name, role, permissions)
-            VALUES ('admin',
-            'scrypt:32768:8:1$wFnfT6hB9u3xKXqg$afb5fb045f9afab01e2036b5b7b7d4c6c9c6b2e7e6f7a8b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3',
-            'المسؤول العام', 'admin', '{"all": true}')
+            VALUES ('admin', 'scrypt:32768:8:1$wFnfT6hB9u3xKXqg$afb5fb045f9afab01e2036b5b7b7d4c6c9c6b2e7e6f7a8b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3', 'المسؤول العام', 'admin', '{"all": true}')
             ON CONFLICT (username) DO NOTHING
         """)
         
         # إضافة الصلاحيات إلى الكتالوج
         permissions_data = [
-            ("customers.view", "عرض الزبائن", "customers"),
-            ("customers.add", "إضافة زبون", "customers"),
-            ("customers.edit", "تعديل زبون", "customers"),
-            ("customers.delete", "حذف زبون", "customers"),
-            ("customers.view_details", "عرض تفاصيل الزبون", "customers"),
-            ("invoices.view", "عرض الفواتير", "invoices"),
-            ("invoices.create", "إنشاء فاتورة", "invoices"),
-            ("invoices.edit", "تعديل فاتورة", "invoices"),
-            ("invoices.delete", "حذف فاتورة", "invoices"),
-            ("invoices.print", "طباعة فاتورة", "invoices"),
-            ("reports.view", "عرض التقارير", "reports"),
-            ("reports.dashboard", "لوحة التحكم", "reports"),
-            ("reports.customers", "تقارير الزبائن", "reports"),
-            ("reports.balance", "تقارير الرصيد", "reports"),
-            ("reports.sales", "تقارير المبيعات", "reports"),
-            ("system.import_data", "استيراد بيانات", "system"),
-            ("system.export_data", "تصدير بيانات", "system"),
-            ("accounting.access", "الوصول للمحاسبة", "accounting"),
-            ("accounting.fast_operations", "العمليات السريعة", "accounting"),
-            ("users.manage", "إدارة المستخدمين", "users"),
-            ("settings.manage", "إدارة الإعدادات", "settings"),
-            ("backup.manage", "إدارة النسخ الاحتياطي", "backup")
+            # فئة الزبائن
+            ('customers.view', 'عرض الزبائن', 'customers'),
+            ('customers.add', 'إضافة زبون جديد', 'customers'),
+            ('customers.edit', 'تعديل الزبائن', 'customers'),
+            ('customers.delete', 'حذف الزبائن', 'customers'),
+            ('customers.view_details', 'عرض تفاصيل الزبون', 'customers'),
+            ('customers.view_history', 'عرض السجل التاريخي', 'customers'),
+            ('customers.manage_sectors', 'إدارة قطاعات الزبائن', 'customers'),
+            ('customers.reimport', 'حذف وإعادة الاستيراد', 'customers'),
+            ('customers.export', 'تصدير بيانات الزبائن', 'customers'),
+            ('customers.import_visas', 'استيراد تأشيرات الزبائن', 'customers'),
+            
+            # فئة الفواتير
+            ('invoices.view', 'عرض الفواتير', 'invoices'),
+            ('invoices.create', 'إنشاء فواتير جديدة', 'invoices'),
+            ('invoices.edit', 'تعديل الفواتير', 'invoices'),
+            ('invoices.delete', 'حذف الفواتير', 'invoices'),
+            ('invoices.cancel', 'إلغاء الفواتير', 'invoices'),
+            ('invoices.print', 'طباعة الفواتير', 'invoices'),
+            ('invoices.print_without_balance', 'طباعة بدون رصيد', 'invoices'),
+            ('invoices.fast_process', 'معالجة سريعة', 'invoices'),
+            ('invoices.view_daily_summary', 'عرض ملخص اليوم', 'invoices'),
+            
+            # فئة التقارير
+            ('reports.view', 'عرض التقارير', 'reports'),
+            ('reports.dashboard', 'لوحة التحكم', 'reports'),
+            ('reports.customers', 'تقارير الزبائن', 'reports'),
+            ('reports.balance', 'تقارير الرصيد', 'reports'),
+            ('reports.sales', 'تقارير المبيعات', 'reports'),
+            ('reports.sectors', 'تقارير القطاعات', 'reports'),
+            ('reports.export', 'تصدير التقارير', 'reports'),
+            
+            # فئة النظام
+            ('system.manage_users', 'إدارة المستخدمين', 'system'),
+            ('system.view_activity_log', 'عرض سجل النشاط', 'system'),
+            ('system.manage_backup', 'إدارة النسخ الاحتياطي', 'system'),
+            ('system.import_data', 'استيراد البيانات', 'system'),
+            ('system.export_data', 'تصدير البيانات', 'system'),
+            ('system.advanced_import', 'استيراد متقدم', 'system'),
+            ('system.advanced_export', 'تصدير متقدم', 'system'),
+            ('system.view_archive', 'عرض الأرشيف', 'system'),
+            
+            # فئة الإعدادات
+            ('settings.manage', 'إدارة الإعدادات', 'settings'),
+            ('settings.manage_permissions', 'إدارة الصلاحيات', 'settings'),
+            ('settings.printer', 'إعدادات الطابعة', 'settings'),
+            
+            # فئة المحاسبة
+            ('accounting.access', 'الدخول لوحدة المحاسبة', 'accounting'),
+            ('accounting.fast_operations', 'عمليات محاسبية سريعة', 'accounting'),
         ]
-        
+
         for permission_key, name, category in permissions_data:
             cursor.execute("""
                 INSERT INTO permissions_catalog (permission_key, name, category)
@@ -527,40 +561,38 @@ class Models:
                     category = EXCLUDED.category,
                     is_active = TRUE
             """, (permission_key, name, category))
-        
+
         # إضافة صلاحيات الأدوار الافتراضية
-        if existing_permissions == 0:
-            logger.info("إضافة الصلاحيات الافتراضية لأول مرة")
-            role_permissions = {
-                'admin': ['*.*'],
-                
-                'accountant': [
-                    'customers.view', 'customers.add', 'customers.edit', 'customers.delete',
-                    'customers.view_details', 'invoices.view', 'invoices.create', 'invoices.edit',
-                    'invoices.delete', 'invoices.print', 'reports.view', 'reports.dashboard',
-                    'reports.customers', 'reports.balance', 'reports.sales', 'system.import_data',
-                    'system.export_data'
-                ],
-                
-                'cashier': [
-                    'customers.view', 'invoices.view', 'invoices.create', 'invoices.print',
-                    'accounting.access', 'accounting.fast_operations'
-                ],
-                
-                'viewer': [
-                    'customers.view', 'reports.view'
-                ]
-            }
+        role_permissions = {
+            'admin': ['*.*'],  # جميع الصلاحيات
             
-            for role, permissions in role_permissions.items():
-                for permission_key in permissions:
-                    cursor.execute("""
-                        INSERT INTO role_permissions (role, permission_key, is_allowed)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (role, permission_key) DO UPDATE
-                        SET is_allowed = EXCLUDED.is_allowed,
-                            updated_at = CURRENT_TIMESTAMP
-                    """, (role, permission_key, True))
+            'accountant': [
+                'customers.view',  
+                'customers.view_details', 'invoices.view',
+               'invoices.print', 'reports.view', 'reports.dashboard',
+                'reports.customers', 'reports.balance', 'reports.sales', 'system.import_data',
+                'system.export_data'
+            ],
+            
+            'cashier': [
+                'customers.view', 'invoices.view', 'invoices.create', 'invoices.print',
+                'accounting.access', 'accounting.fast_operations'
+            ],
+            
+            'viewer': [
+                'customers.view', 'reports.view'
+            ]
+        }
+
+        for role, permissions in role_permissions.items():
+            for permission_key in permissions:
+                cursor.execute("""
+                    INSERT INTO role_permissions (role, permission_key, is_allowed)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (role, permission_key) DO UPDATE
+                    SET is_allowed = EXCLUDED.is_allowed,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (role, permission_key, True))
         
         # إضافة الإعدادات الافتراضية
         settings = [
@@ -608,46 +640,462 @@ class Models:
         except Exception as e:
             logger.error(f"خطأ في تحديث جدول users: {e}")
 
-    def update_meter_columns(self):
-        """تحديث جدول الزبائن بإضافة أعمدة العدادات الهرمية"""
+    # ======= الدوال المضافة من الملف القديم =======
+
+    def get_customer_count_for_sector(self, sector_id):
+        """الحصول على عدد الزبائن في قطاع معين"""
         try:
             with db.get_cursor() as cursor:
-                # إضافة عمود نوع العداد
                 cursor.execute("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'customers' 
-                    AND column_name = 'meter_type'
-                """)
-                
-                if not cursor.fetchone():
-                    cursor.execute("""
-                        ALTER TABLE customers 
-                        ADD COLUMN meter_type VARCHAR(30) DEFAULT 'زبون'
-                    """)
-                    logger.info("تم إضافة العمود meter_type إلى جدول customers")
-                else:
-                    logger.info("العمود meter_type موجود بالفعل في جدول customers")
-                
-                # إضافة عمود العلبة الأم
-                cursor.execute("""
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'customers' 
-                    AND column_name = 'parent_meter_id'
-                """)
-                
-                if not cursor.fetchone():
-                    cursor.execute("""
-                        ALTER TABLE customers 
-                        ADD COLUMN parent_meter_id INTEGER REFERENCES customers(id)
-                    """)
-                    logger.info("تم إضافة العمود parent_meter_id إلى جدول customers")
-                else:
-                    logger.info("العمود parent_meter_id موجود بالفعل في جدول customers")
-                    
+                    SELECT COUNT(*) 
+                    FROM customers 
+                    WHERE sector_id = %s AND is_active = TRUE
+                """, (sector_id,))
+                result = cursor.fetchone()
+                return result['count'] if result else 0
         except Exception as e:
-            logger.error(f"خطأ في تحديث أعمدة العدادات: {e}")
+            logger.error(f"خطأ في الحصول على عدد زبائن القطاع: {e}")
+            return 0
 
-# تأكد أن هذا السطر موجود في النهاية
+    def get_customer_count(self):
+        """الحصول على إجمالي عدد الزبائن النشطين"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*) 
+                    FROM customers 
+                    WHERE is_active = TRUE
+                """)
+                result = cursor.fetchone()
+                return result['count'] if result else 0
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على عدد الزبائن: {e}")
+            return 0
+
+    def get_sectors_with_counts(self):
+        """الحصول على جميع القطاعات مع عدد الزبائن في كل قطاع"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT s.*, 
+                           COUNT(c.id) as customer_count,
+                           COALESCE(SUM(c.current_balance), 0) as total_balance
+                    FROM sectors s
+                    LEFT JOIN customers c ON s.id = c.sector_id AND c.is_active = TRUE
+                    WHERE s.is_active = TRUE
+                    GROUP BY s.id
+                    ORDER BY s.name
+                """)
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على القطاعات مع العداد: {e}")
+            return []
+
+    def get_total_current_balance(self):
+        """الحصول على إجمالي الرصيد الحالي لجميع الزبائن"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT COALESCE(SUM(current_balance), 0) as total_balance
+                    FROM customers 
+                    WHERE is_active = TRUE
+                """)
+                result = cursor.fetchone()
+                return result['total_balance'] if result else 0
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على إجمالي الرصيد: {e}")
+            return 0
+
+    def get_daily_summary(self, date=None):
+        """الحصول على ملخص المبيعات ليوم معين"""
+        try:
+            if date is None:
+                date = datetime.now().date()
+                
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as invoice_count,
+                        COALESCE(SUM(kilowatt_amount), 0) as total_kilowatt,
+                        COALESCE(SUM(total_amount), 0) as total_amount,
+                        COALESCE(SUM(discount), 0) as total_discount,
+                        COALESCE(SUM(free_kilowatt), 0) as total_free_kilowatt
+                    FROM invoices
+                    WHERE DATE(payment_date) = %s
+                    AND status = 'active'
+                """, (date,))
+                
+                result = cursor.fetchone()
+                return {
+                    'invoice_count': result['invoice_count'] if result else 0,
+                    'total_kilowatt': float(result['total_kilowatt']) if result else 0,
+                    'total_amount': float(result['total_amount']) if result else 0,
+                    'total_discount': float(result['total_discount']) if result else 0,
+                    'total_free_kilowatt': float(result['total_free_kilowatt']) if result else 0,
+                    'date': date
+                }
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على ملخص اليوم: {e}")
+            return {
+                'invoice_count': 0,
+                'total_kilowatt': 0,
+                'total_amount': 0,
+                'total_discount': 0,
+                'total_free_kilowatt': 0,
+                'date': date
+            }
+
+    def get_monthly_summary(self, year=None, month=None):
+        """الحصول على ملخص المبيعات لشهر معين"""
+        try:
+            if year is None or month is None:
+                now = datetime.now()
+                year = now.year
+                month = now.month
+                
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        DATE(payment_date) as sale_date,
+                        COUNT(*) as invoice_count,
+                        COALESCE(SUM(kilowatt_amount), 0) as total_kilowatt,
+                        COALESCE(SUM(total_amount), 0) as total_amount,
+                        COALESCE(SUM(discount), 0) as total_discount
+                    FROM invoices
+                    WHERE EXTRACT(YEAR FROM payment_date) = %s
+                      AND EXTRACT(MONTH FROM payment_date) = %s
+                      AND status = 'active'
+                    GROUP BY DATE(payment_date)
+                    ORDER BY sale_date
+                """, (year, month))
+                
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على ملخص الشهر: {e}")
+            return []
+
+    def get_top_customers(self, limit=10, order_by='balance'):
+        """الحصول على أفضل الزبائن حسب المعيار المحدد"""
+        try:
+            with db.get_cursor() as cursor:
+                if order_by == 'balance':
+                    order_clause = "ORDER BY current_balance DESC"
+                elif order_by == 'purchases':
+                    order_clause = """
+                        ORDER BY purchase_count DESC, total_purchased DESC
+                    """
+                else:
+                    order_clause = "ORDER BY c.name"
+                
+                cursor.execute(f"""
+                    SELECT 
+                        c.id,
+                        c.name,
+                        c.box_number,
+                        c.current_balance,
+                        s.name as sector_name,
+                        COUNT(i.id) as purchase_count,
+                        COALESCE(SUM(i.total_amount), 0) as total_purchased,
+                        COALESCE(SUM(i.kilowatt_amount), 0) as total_kilowatt
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    LEFT JOIN invoices i ON c.id = i.customer_id 
+                        AND i.status = 'active'
+                    WHERE c.is_active = TRUE
+                    GROUP BY c.id, c.name, c.box_number, c.current_balance, s.name
+                    {order_clause}
+                    LIMIT %s
+                """, (limit,))
+                
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على أفضل الزبائن: {e}")
+            return []
+
+    def search_customers(self, search_term, limit=50):
+        """بحث عن الزبائن باستخدام مصطلح بحث"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        c.*,
+                        s.name as sector_name,
+                        s.code as sector_code
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.is_active = TRUE
+                      AND (
+                        c.name ILIKE %s OR
+                        c.box_number ILIKE %s OR
+                        c.serial_number ILIKE %s OR
+                        c.phone_number ILIKE %s OR
+                        s.name ILIKE %s
+                      )
+                    ORDER BY c.name
+                    LIMIT %s
+                """, (f'%{search_term}%', f'%{search_term}%', 
+                      f'%{search_term}%', f'%{search_term}%', 
+                      f'%{search_term}%', limit))
+                
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"خطأ في بحث الزبائن: {e}")
+            return []
+
+    def get_invoice_by_number(self, invoice_number):
+        """الحصول على فاتورة باستخدام رقم الفاتورة"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        i.*,
+                        c.name as customer_name,
+                        c.box_number,
+                        c.serial_number,
+                        c.phone_number,
+                        s.name as sector_name,
+                        u.full_name as user_name
+                    FROM invoices i
+                    LEFT JOIN customers c ON i.customer_id = c.id
+                    LEFT JOIN sectors s ON i.sector_id = s.id
+                    LEFT JOIN users u ON i.user_id = u.id
+                    WHERE i.invoice_number = %s
+                    AND i.status = 'active'
+                """, (invoice_number,))
+                
+                result = cursor.fetchone()
+                return result
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على الفاتورة: {e}")
+            return None
+
+    def get_customer_invoices(self, customer_id, limit=100):
+        """الحصول على فواتير زبون معين"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        i.*,
+                        s.name as sector_name,
+                        u.full_name as user_name
+                    FROM invoices i
+                    LEFT JOIN sectors s ON i.sector_id = s.id
+                    LEFT JOIN users u ON i.user_id = u.id
+                    WHERE i.customer_id = %s
+                    AND i.status = 'active'
+                    ORDER BY i.payment_date DESC, i.payment_time DESC
+                    LIMIT %s
+                """, (customer_id, limit))
+                
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على فواتير الزبون: {e}")
+            return []
+
+    def get_recent_invoices(self, days=7, limit=100):
+        """الحصول على الفواتير الحديثة"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        i.*,
+                        c.name as customer_name,
+                        c.box_number,
+                        s.name as sector_name,
+                        u.full_name as user_name
+                    FROM invoices i
+                    LEFT JOIN customers c ON i.customer_id = c.id
+                    LEFT JOIN sectors s ON i.sector_id = s.id
+                    LEFT JOIN users u ON i.user_id = u.id
+                    WHERE i.payment_date >= CURRENT_DATE - INTERVAL '%s days'
+                    AND i.status = 'active'
+                    ORDER BY i.payment_date DESC, i.payment_time DESC
+                    LIMIT %s
+                """, (days, limit))
+                
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على الفواتير الحديثة: {e}")
+            return []
+
+    def get_user_permissions(self, user_id):
+        """الحصول على صلاحيات مستخدم معين"""
+        try:
+            with db.get_cursor() as cursor:
+                # الحصول على دور المستخدم
+                cursor.execute("""
+                    SELECT role FROM users WHERE id = %s
+                """, (user_id,))
+                user = cursor.fetchone()
+                
+                if not user:
+                    return {}
+                
+                role = user['role']
+                
+                # إذا كان المستخدم مديراً، نعطيه جميع الصلاحيات
+                if role == 'admin':
+                    return {'*.*': True}
+                
+                # الحصول على صلاحيات الدور
+                cursor.execute("""
+                    SELECT permission_key 
+                    FROM role_permissions 
+                    WHERE role = %s AND is_allowed = TRUE
+                """, (role,))
+                
+                role_permissions = {row['permission_key']: True for row in cursor.fetchall()}
+                
+                # الحصول على صلاحيات المستخدم الفردية (للتجاوزات)
+                cursor.execute("""
+                    SELECT permission_key, is_allowed
+                    FROM user_permissions
+                    WHERE user_id = %s
+                """, (user_id,))
+                
+                user_permissions = {row['permission_key']: row['is_allowed'] for row in cursor.fetchall()}
+                
+                # دمج الصلاحيات (صلاحيات المستخدم تتجاوز صلاحيات الدور)
+                permissions = {**role_permissions, **user_permissions}
+                
+                return permissions
+                
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على صلاحيات المستخدم: {e}")
+            return {}
+
+    def check_permission(self, user_id, permission_key):
+        """التحقق من صلاحية مستخدم معينة"""
+        try:
+            permissions = self.get_user_permissions(user_id)
+            
+            # إذا كانت هناك صلاحية عامة (*.*) فيتم السماح بكل شيء
+            if '*.*' in permissions and permissions['*.*']:
+                return True
+            
+            # التحقق من الصلاحية المحددة
+            return permissions.get(permission_key, False)
+            
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من الصلاحية: {e}")
+            return False
+
+    def log_activity(self, user_id, action_type, description, ip_address=None, user_agent=None):
+        """تسجيل نشاط في سجل النشاطات"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO activity_logs 
+                    (user_id, action_type, description, ip_address, user_agent)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (user_id, action_type, description, ip_address, user_agent))
+                
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تسجيل النشاط: {e}")
+            return False
+
+    def get_activity_logs(self, user_id=None, action_type=None, days=30, limit=100):
+        """الحصول على سجل النشاطات"""
+        try:
+            with db.get_cursor() as cursor:
+                query = """
+                    SELECT 
+                        al.*,
+                        u.username,
+                        u.full_name
+                    FROM activity_logs al
+                    LEFT JOIN users u ON al.user_id = u.id
+                    WHERE al.created_at >= CURRENT_TIMESTAMP - INTERVAL '%s days'
+                """
+                params = [days]
+                
+                if user_id:
+                    query += " AND al.user_id = %s"
+                    params.append(user_id)
+                
+                if action_type:
+                    query += " AND al.action_type = %s"
+                    params.append(action_type)
+                
+                query += " ORDER BY al.created_at DESC LIMIT %s"
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                return cursor.fetchall()
+                
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على سجل النشاطات: {e}")
+            return []
+
+    def archive_invoice(self, invoice_id, user_id, reason="أرشفة يدوية"):
+        """أرشفة فاتورة معينة"""
+        try:
+            with db.get_cursor() as cursor:
+                # الحصول على بيانات الفاتورة الأصلية
+                cursor.execute("""
+                    SELECT * FROM invoices WHERE id = %s
+                """, (invoice_id,))
+                
+                invoice_data = cursor.fetchone()
+                
+                if not invoice_data:
+                    return False
+                
+                # تحويل بيانات الفاتورة إلى JSON
+                invoice_json = json.dumps(dict(invoice_data), default=str)
+                
+                # إضافة إلى جدول الأرشيف
+                cursor.execute("""
+                    INSERT INTO invoice_archive 
+                    (original_invoice_id, invoice_data, archived_by, archive_reason)
+                    VALUES (%s, %s, %s, %s)
+                """, (invoice_id, invoice_json, user_id, reason))
+                
+                # تحديث حالة الفاتورة الأصلية
+                cursor.execute("""
+                    UPDATE invoices 
+                    SET status = 'archived', archived_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (invoice_id,))
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"خطأ في أرشفة الفاتورة: {e}")
+            return False
+
+    def get_setting(self, key, default=None):
+        """الحصول على إعداد من جدول الإعدادات"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT value FROM settings WHERE key = %s
+                """, (key,))
+                
+                result = cursor.fetchone()
+                return result['value'] if result else default
+        except Exception as e:
+            logger.error(f"خطأ في الحصول على الإعداد: {e}")
+            return default
+
+    def update_setting(self, key, value):
+        """تحديث أو إضافة إعداد في جدول الإعدادات"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO settings (key, value) 
+                    VALUES (%s, %s)
+                    ON CONFLICT (key) 
+                    DO UPDATE SET value = EXCLUDED.value, 
+                                 updated_at = CURRENT_TIMESTAMP
+                """, (key, value))
+                
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في تحديث الإعداد: {e}")
+            return False
+
+
+# إنشاء كائن Models
 models = Models()
