@@ -17,6 +17,15 @@ class CustomerForm:
         self.user_id = user_id
         self.result = None
         self.parent_meter_candidates = []  # لتخزين المرشحين للعلبة الأم
+        self.parent_meter_map = {}  # 🔧 قاموس التعيين
+        self.parent_display_map = {}  # 🔧 قاموس العكس
+
+            # تحميل CustomerManager
+        try:
+            from modules.customers import CustomerManager
+            self.customer_manager = CustomerManager()
+        except ImportError:
+            self.customer_manager = None
         
         self.create_dialog()
         self.create_widgets()
@@ -152,23 +161,48 @@ class CustomerForm:
         # تعبئة وإظهار
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
-    
+        
     def on_meter_type_changed(self, event=None):
-        """عند تغيير نوع العداد"""
+        """عند تغيير نوع العداد - مع التحكم الذكي"""
         meter_type = self.field_vars['meter_type'].get()
         sector_name = self.field_vars['sector'].get()
         
-        if sector_name:
-            self.load_parent_meter_candidates(meter_type, sector_name)
+        if not sector_name:
+            return
+        
+        # إعادة تحميل قائمة العلبة الأم بناءً على النوع الجديد
+        self.load_parent_meter_candidates(meter_type, sector_name)
+        
+        # التحكم في إمكانية اختيار العلبة الأم
+        parent_combo = self.field_widgets['parent_meter_id']
+        
+        if meter_type == 'مولدة':
+            # المولدة لا تحتاج إلى علبة أم
+            parent_combo.set('')
+            parent_combo['state'] = 'disabled'
+            parent_combo['values'] = []
+        else:
+            # جميع الأنواع الأخرى يمكنها اختيار علبة أم
+            parent_combo['state'] = 'readonly'
             
-            # التحكم في إمكانية اختيار العلبة الأم
-            parent_combo = self.field_widgets['parent_meter_id']
-            if meter_type == 'مولدة':
-                parent_combo.set('')  # مسح القيمة
-                parent_combo['state'] = 'disabled'
-            else:
-                parent_combo['state'] = 'readonly'
-    
+            # إذا كانت هناك قيمة حالية، التحقق من توافقها مع النوع الجديد
+            current_parent = parent_combo.get()
+            if current_parent and self.parent_meter_candidates:
+                # البحث عن القيمة الحالية في القائمة الجديدة
+                found = False
+                for candidate in self.parent_meter_candidates:
+                    candidate_display = f"{candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
+                    if candidate_display == current_parent:
+                        found = True
+                        break
+                
+                if not found:
+                    # إذا لم تكن القيمة الحالية متوافقة، مسحها
+                    parent_combo.set('')
+                    messagebox.showinfo("تحديث", 
+                        f"تم مسح اختيار العلبة الأم لأنها غير متوافقة مع نوع العداد الجديد '{meter_type}'")
+                        
+
     def on_sector_changed(self, event=None):
         """عند تغيير القطاع"""
         meter_type = self.field_vars['meter_type'].get()
@@ -176,9 +210,10 @@ class CustomerForm:
         
         if meter_type and sector_name:
             self.load_parent_meter_candidates(meter_type, sector_name)
-    
-    def load_parent_meter_candidates(self, meter_type, sector_name):
+        
+    def load_parent_meter_candidates(self, meter_type: str, sector_name: str):
         """تحميل قائمة المرشحين للعلبة الأم"""
+        
         # الحصول على معرف القطاع
         sector_id = None
         for sector in self.sectors:
@@ -191,40 +226,74 @@ class CustomerForm:
         
         try:
             with db.get_cursor() as cursor:
-                # تحديد أنواع العلبة الأم المسموح بها بناءً على نوع العداد
+                # استدعاء دالة get_allowed_parent_types الجديدة
                 allowed_parent_types = []
-                if meter_type == 'علبة توزيع':
-                    allowed_parent_types = ['مولدة']
-                elif meter_type == 'رئيسية':
-                    allowed_parent_types = ['علبة توزيع']
-                elif meter_type == 'زبون':
-                    allowed_parent_types = ['رئيسية', 'علبة توزيع', 'مولدة']
-                else:  # مولدة - لا تحتاج إلى علبة أم
+                if self.customer_manager:
+                    allowed_parent_types = self.customer_manager.get_allowed_parent_types(meter_type)
+                
+                if not allowed_parent_types:
                     self.field_widgets['parent_meter_id']['values'] = []
                     return
                 
                 cursor.execute("""
-                    SELECT id, name, box_number, meter_type 
+                    SELECT id, name, box_number, serial_number, meter_type 
                     FROM customers 
                     WHERE sector_id = %s 
-                      AND meter_type = ANY(%s)
-                      AND is_active = TRUE
-                    ORDER BY meter_type, name
+                    AND meter_type = ANY(%s)
+                    AND is_active = TRUE
+                    ORDER BY 
+                        CASE meter_type 
+                            WHEN 'مولدة' THEN 1
+                            WHEN 'علبة توزيع' THEN 2
+                            WHEN 'رئيسية' THEN 3
+                            ELSE 4
+                        END,
+                        name
                 """, (sector_id, allowed_parent_types))
                 
                 candidates = cursor.fetchall()
                 self.parent_meter_candidates = candidates
                 
-                # تحديث قائمة Combobox للعلبة الأم
+                # 🔧 إنشاء قاموس للتعيين السريع
+                self.parent_meter_map = {}  # نص العرض -> ID
+                self.parent_display_map = {}  # ID -> نص العرض
+                
+                # تحديث قائمة Combobox للعلبة الأم مع تصنيف حسب النوع
                 combo = self.field_widgets['parent_meter_id']
-                combo['values'] = [f"{c['box_number']} - {c['name']} ({c['meter_type']})" for c in candidates]
+                display_values = []
+                
+                for candidate in candidates:
+                    meter_type_icon = {
+                        'مولدة': '⚡',
+                        'علبة توزيع': '🔌',
+                        'رئيسية': '🏠',
+                        'زبون': '👤'
+                    }.get(candidate['meter_type'], '📦')
+                    
+                    # نص العرض مع الرمز
+                    display_with_icon = f"{meter_type_icon} {candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
+                    # نص العرض بدون رمز (للبحث المرن)
+                    display_without_icon = f"{candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
+                    
+                    display_values.append(display_with_icon)
+                    
+                    # حفظ التعيينات
+                    self.parent_meter_map[display_with_icon] = candidate['id']
+                    self.parent_meter_map[display_without_icon] = candidate['id']
+                    self.parent_display_map[candidate['id']] = display_with_icon
+                
+                combo['values'] = display_values
                 
         except Exception as e:
             logger.error(f"خطأ في تحميل مرشحي العلبة الأم: {e}")
             self.parent_meter_candidates = []
             combo = self.field_widgets['parent_meter_id']
             combo['values'] = []
-    
+            self.parent_meter_map = {}
+            self.parent_display_map = {}
+            
+
+
     def create_buttons(self, parent):
         """إنشاء أزرار التحكم"""
         buttons_frame = tk.Frame(parent, bg='#f5f7fa')
@@ -291,6 +360,12 @@ class CustomerForm:
                         display_text = f"{candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
                         self.field_vars['parent_meter_id'].set(display_text)
                         break
+
+
+    def cancel(self):
+        """إلغاء العملية وإغلاق النافذة"""
+        self.result = None
+        self.dialog.destroy()                        
     
     def validate(self):
         """التحقق من صحة البيانات"""
@@ -348,15 +423,49 @@ class CustomerForm:
                 messagebox.showerror("خطأ", "القطاع المحدد غير صالح")
                 return
             
-            # تحويل العلبة الأم إلى ID
+            # تحويل العلبة الأم إلى ID - حل محسّن
             parent_meter_id = None
-            parent_display = self.field_vars['parent_meter_id'].get()
+            parent_display = self.field_vars['parent_meter_id'].get().strip()
+            
             if parent_display:
+                # 💡 الطريقة الأفضل: استخدم القاموس للتخطيط
+                parent_found = False
+                
+                # محاولة 1: البحث المباشر
                 for candidate in self.parent_meter_candidates:
                     candidate_display = f"{candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
-                    if candidate_display == parent_display:
+                    
+                    # 🔧 مقارنة أكثر مرونة
+                    if candidate_display.strip() == parent_display:
                         parent_meter_id = candidate['id']
+                        parent_found = True
+                        logger.info(f"تم العثور على العلبة الأم: {parent_display} -> ID: {parent_meter_id}")
                         break
+                
+                # محاولة 2: إذا فشلت، حاول البحث بدون رموز إذا تم استخدامها
+                if not parent_found:
+                    # إزالة الرموز التعبيرية للبحث
+                    clean_parent_display = parent_display
+                    emoji_removed = False
+                    emojis = ['⚡', '🔌', '🏠', '👤', '📦']
+                    for emoji in emojis:
+                        if emoji in clean_parent_display:
+                            clean_parent_display = clean_parent_display.replace(emoji, '').strip()
+                            emoji_removed = True
+                    
+                    if emoji_removed:
+                        for candidate in self.parent_meter_candidates:
+                            candidate_display = f"{candidate['box_number']} - {candidate['name']} ({candidate['meter_type']})"
+                            if candidate_display.strip() == clean_parent_display:
+                                parent_meter_id = candidate['id']
+                                parent_found = True
+                                logger.info(f"تم العثور على العلبة الأم (بعد إزالة الرموز): {clean_parent_display} -> ID: {parent_meter_id}")
+                                break
+            
+            # 🔍 تسجيل التصحيح
+            logger.info(f"parent_display: '{parent_display}'")
+            logger.info(f"parent_meter_id النهائي: {parent_meter_id}")
+            logger.info(f"عدد المرشحين: {len(self.parent_meter_candidates)}")
             
             # تجميع البيانات
             self.result = {
@@ -376,13 +485,11 @@ class CustomerForm:
                 'user_id': self.user_id or 1
             }
             
+            # 🔍 تسجيل النتيجة النهائية
+            logger.info(f"البيانات المرسلة إلى add_customer: {self.result}")
+            
             self.dialog.destroy()
             
         except Exception as e:
             logger.error(f"خطأ في حفظ البيانات: {e}")
             messagebox.showerror("خطأ", f"فشل حفظ البيانات: {str(e)}")
-    
-    def cancel(self):
-        """إلغاء العملية"""
-        self.result = None
-        self.dialog.destroy()

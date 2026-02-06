@@ -255,7 +255,7 @@ class CustomerUI(tk.Frame):
                                    bg='#34495e', fg='#bdc3c7',
                                    font=('Arial', 9))
         self.stats_label.pack(side='right', padx=10)
-    
+            
     def load_customers(self, search_term="", sector_id=None, meter_type_filter="الكل", balance_filter="الكل"):
         """تحميل قائمة الزبائن مع إمكانية البحث والتصفية"""
         if not self.customer_manager:
@@ -295,9 +295,29 @@ class CustomerUI(tk.Frame):
                 name = customer['name']
                 sector = customer.get('sector_name', 'غير محدد')
                 meter_type = customer.get('meter_type', 'زبون')
-                parent_meter = customer.get('parent_name', '')
-                if not parent_meter and customer.get('parent_box_number'):
-                    parent_meter = f"{customer['parent_box_number']} ({customer.get('parent_meter_type', '')})"
+                
+                # =========== استخدام parent_display مباشرة من بيانات الزبون ===========
+                # تأكد من وجود parent_display في البيانات
+                parent_display = customer.get('parent_display', '')
+                
+                # إذا لم يكن موجوداً، حاول بناؤه
+                if not parent_display:
+                    parent_meter = customer.get('parent_name', '')
+                    parent_box = customer.get('parent_box_number', '')
+                    parent_type = customer.get('parent_meter_type', '')
+                    
+                    if parent_box and parent_type and parent_meter:
+                        parent_display = f"{parent_box} ({parent_type}) - {parent_meter}"
+                    elif parent_box and parent_meter:
+                        parent_display = f"{parent_box} - {parent_meter}"
+                    elif parent_meter:
+                        parent_display = parent_meter
+                    elif parent_box:
+                        parent_display = f"علبة {parent_box}"
+                    else:
+                        parent_display = ''
+                # =========== نهاية التعديل ===========
+                
                 box = customer.get('box_number', '')
                 serial = customer.get('serial_number', '')
                 balance = customer.get('current_balance', 0)
@@ -332,7 +352,7 @@ class CustomerUI(tk.Frame):
                     name,
                     sector,
                     meter_type,
-                    parent_meter,
+                    parent_display,  # استخدام parent_display مباشرة
                     box,
                     serial,
                     f"{balance:,.0f} كيلو واط",
@@ -348,15 +368,16 @@ class CustomerUI(tk.Frame):
             
             # تحديث الإحصائيات
             stats_text = (f"مولدة: {meter_type_stats['مولدة']} | "
-                         f"علبة توزيع: {meter_type_stats['علبة توزيع']} | "
-                         f"رئيسية: {meter_type_stats['رئيسية']} | "
-                         f"زبون: {meter_type_stats['زبون']}")
+                        f"علبة توزيع: {meter_type_stats['علبة توزيع']} | "
+                        f"رئيسية: {meter_type_stats['رئيسية']} | "
+                        f"زبون: {meter_type_stats['زبون']}")
             self.stats_label.config(text=stats_text)
             
         except Exception as e:
             logger.error(f"خطأ في تحميل الزبائن: {e}")
             self.show_error_message(f"خطأ في تحميل البيانات: {str(e)}")
-    
+
+
     def on_search_changed(self, event=None):
         """عند تغيير نص البحث"""
         search_term = self.search_var.get().strip()
