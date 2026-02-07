@@ -1004,6 +1004,304 @@ class CustomerManager:
                 'success': False,
                 'error': f"فشل حذف زبائن القطاع: {str(e)}"
             }
+
+    # إضافة دوال التصنيف المالي إلى الكلاس
+
+    """مدير عمليات الزبائن مع دعم التصنيفات المالية"""
+    
+    def update_financial_category(self, customer_id: int, category_data: Dict) -> Dict:
+        """تحديث التصنيف المالي للزبون"""
+        try:
+            with db.get_cursor() as cursor:
+                # جلب التصنيف الحالي
+                cursor.execute("""
+                    SELECT financial_category, free_amount, free_remaining,
+                           vip_no_cut_days, vip_expiry_date
+                    FROM customers WHERE id = %s
+                """, (customer_id,))
+                
+                current = cursor.fetchone()
+                if not current:
+                    return {'success': False, 'error': 'الزبون غير موجود'}
+                
+                old_category = current['financial_category']
+                new_category = category_data.get('financial_category', old_category)
+                
+                # التحقق من صحة البيانات
+                if new_category not in ['normal', 'free', 'vip', 'free_vip']:
+                    return {'success': False, 'error': 'تصنيف غير صالح'}
+                
+                # إعداد بيانات التحديث
+                update_fields = []
+                update_values = []
+                
+                # تحديث التصنيف الأساسي
+                update_fields.append("financial_category = %s")
+                update_values.append(new_category)
+                
+                # معالجة تفاصيل المجاني
+                if 'free' in new_category:
+                    free_reason = category_data.get('free_reason', '')
+                    free_amount = float(category_data.get('free_amount', 0))
+                    free_remaining = float(category_data.get('free_remaining', free_amount))
+                    free_expiry_date = category_data.get('free_expiry_date')
+                    
+                    update_fields.extend([
+                        "free_reason = %s",
+                        "free_amount = %s",
+                        "free_remaining = %s",
+                        "free_expiry_date = %s"
+                    ])
+                    update_values.extend([
+                        free_reason,
+                        free_amount,
+                        free_remaining,
+                        free_expiry_date
+                    ])
+                else:
+                    # إعادة تعيين قيم المجاني
+                    update_fields.extend([
+                        "free_reason = NULL",
+                        "free_amount = 0",
+                        "free_remaining = 0",
+                        "free_expiry_date = NULL"
+                    ])
+                
+                # معالجة تفاصيل VIP
+                if 'vip' in new_category:
+                    vip_reason = category_data.get('vip_reason', '')
+                    vip_no_cut_days = int(category_data.get('vip_no_cut_days', 0))
+                    vip_expiry_date = category_data.get('vip_expiry_date')
+                    vip_grace_period = int(category_data.get('vip_grace_period', 0))
+                    
+                    update_fields.extend([
+                        "vip_reason = %s",
+                        "vip_no_cut_days = %s",
+                        "vip_expiry_date = %s",
+                        "vip_grace_period = %s"
+                    ])
+                    update_values.extend([
+                        vip_reason,
+                        vip_no_cut_days,
+                        vip_expiry_date,
+                        vip_grace_period
+                    ])
+                else:
+                    # إعادة تعيين قيم VIP
+                    update_fields.extend([
+                        "vip_reason = NULL",
+                        "vip_no_cut_days = 0",
+                        "vip_expiry_date = NULL",
+                        "vip_grace_period = 0"
+                    ])
+                
+                # إضافة تاريخ التحديث
+                update_fields.append("updated_at = CURRENT_TIMESTAMP")
+                
+                # تنفيذ التحديث
+                query = f"UPDATE customers SET {', '.join(update_fields)} WHERE id = %s"
+                update_values.append(customer_id)
+                
+                cursor.execute(query, tuple(update_values))
+                
+                # تسجيل التغيير في السجل
+                cursor.execute("""
+                    INSERT INTO customer_financial_logs 
+                    (customer_id, old_category, new_category, category_type,
+                     free_reason, free_amount, free_remaining, free_expiry_date,
+                     vip_reason, vip_no_cut_days, vip_expiry_date, vip_grace_period,
+                     changed_by, change_notes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    customer_id, old_category, new_category,
+                    'both' if new_category == 'free_vip' else new_category,
+                    category_data.get('free_reason', ''),
+                    category_data.get('free_amount', 0),
+                    category_data.get('free_remaining', 0),
+                    category_data.get('free_expiry_date'),
+                    category_data.get('vip_reason', ''),
+                    category_data.get('vip_no_cut_days', 0),
+                    category_data.get('vip_expiry_date'),
+                    category_data.get('vip_grace_period', 0),
+                    category_data.get('user_id', 1),
+                    category_data.get('change_notes', 'تحديث تصنيف مالي')
+                ))
+                
+                # تسجيل في سجل النشاطات
+                cursor.execute("""
+                    INSERT INTO activity_logs (user_id, action_type, description)
+                    VALUES (%s, 'update_financial_category', %s)
+                """, (
+                    category_data.get('user_id', 1),
+                    f"تحديث التصنيف المالي للزبون {customer_id}: {old_category} -> {new_category}"
+                ))
+                
+                logger.info(f"تم تحديث التصنيف المالي للزبون {customer_id} إلى {new_category}")
+                return {
+                    'success': True,
+                    'message': f'تم تحديث التصنيف المالي إلى "{self.get_category_name(new_category)}"'
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحديث التصنيف المالي: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def get_category_name(self, category_code: str) -> str:
+        """تحويل رمز التصنيف إلى اسم عربي"""
+        categories = {
+            'normal': 'عادي',
+            'free': 'مجاني',
+            'vip': 'VIP',
+            'free_vip': 'مجاني + VIP'
+        }
+        return categories.get(category_code, 'غير معروف')
+    
+    def consume_free_amount(self, customer_id: int, amount: float) -> Dict:
+        """استهلاك من رصيد المجاني"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT free_remaining, financial_category
+                    FROM customers 
+                    WHERE id = %s AND financial_category IN ('free', 'free_vip')
+                    FOR UPDATE
+                """, (customer_id,))
+                
+                customer = cursor.fetchone()
+                if not customer:
+                    return {'success': False, 'error': 'الزبون ليس لديه تصنيف مجاني'}
+                
+                free_remaining = float(customer['free_remaining'] or 0)
+                
+                if free_remaining < amount:
+                    return {
+                        'success': False,
+                        'error': f'الرصيد المتاح غير كافي ({free_remaining:,.0f})'
+                    }
+                
+                # تحديث الرصيد المتبقي
+                new_remaining = free_remaining - amount
+                cursor.execute("""
+                    UPDATE customers 
+                    SET free_remaining = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (new_remaining, customer_id))
+                
+                # تسجيل الاستهلاك
+                cursor.execute("""
+                    INSERT INTO customer_financial_logs 
+                    (customer_id, old_category, new_category, category_type,
+                     free_amount, free_remaining, change_notes, changed_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    customer_id,
+                    customer['financial_category'],
+                    customer['financial_category'],
+                    'free',
+                    amount,
+                    new_remaining,
+                    f'استهلاك من رصيد المجاني: {amount:,.0f}',
+                    1  # النظام
+                ))
+                
+                return {
+                    'success': True,
+                    'free_remaining': new_remaining,
+                    'consumed': amount,
+                    'message': f'تم استهلاك {amount:,.0f} من رصيد المجاني'
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في استهلاك رصيد المجاني: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def get_financial_logs(self, customer_id: int, limit: int = 50) -> List[Dict]:
+        """جلب سجل التصنيفات المالية للزبون"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        fl.*,
+                        u.full_name as changed_by_name,
+                        u.username
+                    FROM customer_financial_logs fl
+                    LEFT JOIN users u ON fl.changed_by = u.id
+                    WHERE fl.customer_id = %s
+                    ORDER BY fl.created_at DESC
+                    LIMIT %s
+                """, (customer_id, limit))
+                
+                return cursor.fetchall()
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب سجل التصنيفات المالية: {e}")
+            return []
+    
+    def get_customers_by_financial_category(self, category: str) -> List[Dict]:
+        """جلب الزبائن حسب التصنيف المالي"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        c.*,
+                        s.name as sector_name,
+                        s.code as sector_code
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.financial_category = %s
+                    AND c.is_active = TRUE
+                    ORDER BY c.name
+                """, (category,))
+                
+                return cursor.fetchall()
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب الزبائن حسب التصنيف: {e}")
+            return []
+    
+    def check_vip_protection(self, customer_id: int) -> Dict:
+        """التحقق من حماية الزبون VIP من القطع"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        vip_no_cut_days,
+                        vip_expiry_date,
+                        vip_grace_period,
+                        financial_category
+                    FROM customers 
+                    WHERE id = %s
+                """, (customer_id,))
+                
+                customer = cursor.fetchone()
+                if not customer:
+                    return {'is_vip': False}
+                
+                is_vip = 'vip' in customer['financial_category']
+                
+                if not is_vip:
+                    return {'is_vip': False}
+                
+                # التحقق من صلاحية VIP
+                expiry_date = customer['vip_expiry_date']
+                is_active = True
+                
+                if expiry_date:
+                    from datetime import date
+                    is_active = date.today() <= expiry_date
+                
+                return {
+                    'is_vip': True,
+                    'active': is_active,
+                    'no_cut_days': customer['vip_no_cut_days'],
+                    'expiry_date': customer['vip_expiry_date'],
+                    'grace_period': customer['vip_grace_period'],
+                    'category': customer['financial_category']
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في التحقق من حماية VIP: {e}")
+            return {'is_vip': False}
     
     def get_meter_hierarchy(self, customer_id: int) -> Dict:
         """الحصول على الشجرة الهرمية للعداد"""

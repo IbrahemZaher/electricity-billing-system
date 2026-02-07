@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class Models:
     def __init__(self):
         self.create_tables()
+        self.update_customers_table()  # أضف هذه السطر
 
     def update_invoices_table(self):
         """تحديث جدول الفواتير بإضافة الأعمدة المفقودة"""
@@ -254,10 +255,51 @@ class Models:
                 last_counter_reading DECIMAL(15, 2) DEFAULT 0,
                 visa_balance DECIMAL(15, 2) DEFAULT 0,
                 withdrawal_amount DECIMAL(15, 2) DEFAULT 0,
+
+                financial_category VARCHAR(20) DEFAULT 'normal',
+                free_reason TEXT,
+                free_amount DECIMAL(15, 2) DEFAULT 0,
+                free_remaining DECIMAL(15, 2) DEFAULT 0,
+                free_expiry_date DATE, 
+                               
+                vip_reason TEXT,
+                vip_no_cut_days INTEGER DEFAULT 0,
+                vip_expiry_date DATE,
+                vip_grace_period INTEGER DEFAULT 0,
                 notes TEXT,
+
                 is_active BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            # معلوات التصنيفات
+            """
+            CREATE TABLE IF NOT EXISTS customer_financial_logs (
+                id SERIAL PRIMARY KEY,
+                customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE,
+                
+                
+                old_category VARCHAR(20),
+                new_category VARCHAR(20) NOT NULL,
+                category_type VARCHAR(10) NOT NULL, -- 'free' أو 'vip' أو 'both'
+                
+                
+                free_reason TEXT,
+                free_amount DECIMAL(15, 2),
+                free_remaining DECIMAL(15, 2),
+                free_expiry_date DATE,
+                
+                
+                vip_reason TEXT,
+                vip_no_cut_days INTEGER,
+                vip_expiry_date DATE,
+                vip_grace_period INTEGER,
+                
+                
+                changed_by INTEGER REFERENCES users(id),
+                change_notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """,
             
@@ -551,6 +593,11 @@ class Models:
             # فئة المحاسبة
             ('accounting.access', 'الدخول لوحدة المحاسبة', 'accounting'),
             ('accounting.fast_operations', 'عمليات محاسبية سريعة', 'accounting'),
+            # إضافة صلاحيات في قسم permissions_data
+            ('customers.manage_financial_categories', 'إدارة التصنيفات المالية', 'customers'),
+            ('customers.view_financial_reports', 'عرض تقارير التصنيفات المالية', 'reports'),
+            ('invoices.apply_free_discount', 'تطبيق خصم المجاني', 'invoices'),
+            ('system.manage_vip_protection', 'إدارة حماية VIP', 'system'),
         ]
 
         for permission_key, name, category in permissions_data:
@@ -1096,6 +1143,42 @@ class Models:
         except Exception as e:
             logger.error(f"خطأ في تحديث الإعداد: {e}")
             return False
+
+
+    def update_customers_table(self):
+        """تحديث جدول customers بإضافة الحقول الجديدة"""
+        try:
+            with db.get_cursor() as cursor:
+                # التحقق من وجود الحقول الجديدة وإضافتها إذا لم تكن موجودة
+                new_columns = [
+                    ('financial_category', "VARCHAR(20) DEFAULT 'normal'"),
+                    ('free_reason', 'TEXT'),
+                    ('free_amount', 'DECIMAL(15, 2) DEFAULT 0'),
+                    ('free_remaining', 'DECIMAL(15, 2) DEFAULT 0'),
+                    ('free_expiry_date', 'DATE'),
+                    ('vip_reason', 'TEXT'),
+                    ('vip_no_cut_days', 'INTEGER DEFAULT 0'),
+                    ('vip_expiry_date', 'DATE'),
+                    ('vip_grace_period', 'INTEGER DEFAULT 0')
+                ]
+                
+                for column_name, column_type in new_columns:
+                    cursor.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'customers' 
+                        AND column_name = %s
+                    """, (column_name,))
+                    
+                    if not cursor.fetchone():
+                        cursor.execute(f"""
+                            ALTER TABLE customers 
+                            ADD COLUMN {column_name} {column_type}
+                        """)
+                        logger.info(f"تم إضافة العمود {column_name} إلى جدول customers")
+                        
+        except Exception as e:
+            logger.error(f"خطأ في تحديث جدول customers: {e}")
 
 
 # إنشاء كائن Models

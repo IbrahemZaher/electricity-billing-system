@@ -96,7 +96,8 @@ class CustomerUI(tk.Frame):
             ("📜 سجل", self.show_customer_history, "#8e44ad", 'customers.view_history'),
             ("💰 تأشيرات", self.import_visas, "#f39c12", 'customers.import_visas'),
             ("🗑️🔥 إعادة", self.delete_and_reimport, "#e74c3c", 'customers.reimport'),
-            ("🗑️ قطاع", self.delete_sector_customers, "#c0392b", 'customers.manage_sectors')
+            ("🗑️ قطاع", self.delete_sector_customers, "#c0392b", 'customers.manage_sectors'),
+            ("📊 تصنيفات", self.manage_financial_categories, "#9b59b6", 'customers.manage_financial_categories')
         ]
         
         for text, command, color, permission in buttons:
@@ -115,6 +116,15 @@ class CustomerUI(tk.Frame):
                             padx=10, pady=4)
                 btn.pack(side='left', padx=3)
         
+        # تحديث حجم Canvas
+        def configure_canvas(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfig(canvas_window, width=max(buttons_frame.winfo_reqwidth(), canvas.winfo_width()))
+        
+        buttons_frame.bind("<Configure>", configure_canvas)
+        canvas.bind("<Configure>", configure_canvas)
+        
+
         # تحديث حجم Canvas
         def configure_canvas(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -256,7 +266,8 @@ class CustomerUI(tk.Frame):
                                    font=('Arial', 9))
         self.stats_label.pack(side='right', padx=10)
             
-    def load_customers(self, search_term="", sector_id=None, meter_type_filter="الكل", balance_filter="الكل"):
+    def load_customers(self, search_term="", sector_id=None, meter_type_filter="الكل", 
+                    balance_filter="الكل", financial_filter="الكل"):
         """تحميل قائمة الزبائن مع إمكانية البحث والتصفية"""
         if not self.customer_manager:
             self.show_error_message("مدير الزبائن غير متاح")
@@ -285,16 +296,34 @@ class CustomerUI(tk.Frame):
             elif balance_filter == "صفر فقط":
                 customers = [c for c in customers if c.get('current_balance', 0) == 0]
             
+            # تطبيق فلتر التصنيف المالي
+            if financial_filter != "الكل":
+                financial_map = {
+                    'عادي': 'normal',
+                    'مجاني': 'free',
+                    'VIP': 'vip',
+                    'مجاني+VIP': 'free_vip'
+                }
+                target_category = financial_map.get(financial_filter)
+                if target_category:
+                    customers = [c for c in customers if c.get('financial_category') == target_category]
+            
             # إضافة الزبائن إلى الشجرة
             customer_count = 0
             balance_stats = {'negative': 0, 'positive': 0, 'zero': 0, 'total_balance': 0}
             meter_type_stats = {'مولدة': 0, 'علبة توزيع': 0, 'رئيسية': 0, 'زبون': 0}
+            financial_stats = {'normal': 0, 'free': 0, 'vip': 0, 'free_vip': 0}
             
             for customer in customers:
                 customer_id = customer['id']
                 name = customer['name']
                 sector = customer.get('sector_name', 'غير محدد')
                 meter_type = customer.get('meter_type', 'زبون')
+                financial_category = customer.get('financial_category', 'normal')
+                
+                # تحديث إحصائيات التصنيف المالي
+                if financial_category in financial_stats:
+                    financial_stats[financial_category] += 1
                 
                 # =========== استخدام parent_display مباشرة من بيانات الزبون ===========
                 # تأكد من وجود parent_display في البيانات
@@ -376,7 +405,7 @@ class CustomerUI(tk.Frame):
         except Exception as e:
             logger.error(f"خطأ في تحميل الزبائن: {e}")
             self.show_error_message(f"خطأ في تحميل البيانات: {str(e)}")
-
+            
 
     def on_search_changed(self, event=None):
         """عند تغيير نص البحث"""
@@ -720,6 +749,37 @@ class CustomerUI(tk.Frame):
         except Exception as e:
             logger.error(f"خطأ في حذف وإعادة الاستيراد: {e}")
             messagebox.showerror("خطأ", f"فشل العملية: {str(e)}")
+
+            
+    # إضافة دالة إدارة التصنيفات        
+    def manage_financial_categories(self):
+        """فتح مدير التصنيف المالي للزبون المحدد"""
+        try:
+            require_permission('customers.manage_financial_categories')
+        except PermissionError as e:
+            messagebox.showerror("صلاحيات", str(e))
+            return
+        
+        customer_id = self.get_selected_customer_id()
+        if not customer_id:
+            messagebox.showwarning("تحذير", "يرجى تحديد زبون أولاً")
+            return
+        
+        try:
+            # جلب بيانات الزبون
+            customer = self.customer_manager.get_customer(customer_id)
+            if not customer:
+                messagebox.showerror("خطأ", "الزبون غير موجود")
+                return
+            
+            from ui.financial_category_ui import FinancialCategoryUI
+            FinancialCategoryUI(self, customer, self.user_data)
+            
+        except Exception as e:
+            logger.error(f"خطأ في فتح مدير التصنيف المالي: {e}")
+            messagebox.showerror("خطأ", f"فشل فتح مدير التصنيف: {str(e)}")
+
+
     
     def delete_sector_customers(self):
         """حذف زبائن قطاع معين"""

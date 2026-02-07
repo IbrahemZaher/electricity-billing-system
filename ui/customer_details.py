@@ -70,6 +70,11 @@ class CustomerDetails:
         hierarchy_tab = ttk.Frame(notebook)
         self.create_hierarchy_info_tab(hierarchy_tab)
         notebook.add(hierarchy_tab, text='العلاقات الهرمية')
+
+        # معلومات التصنيف المالي
+        financial_tab = ttk.Frame(notebook)
+        self.create_financial_info_tab(financial_tab)
+        notebook.add(financial_tab, text='التصنيف المالي')
         
         # أزرار التحكم
         self.create_buttons()
@@ -515,3 +520,139 @@ class CustomerDetails:
             pass
         
         return str(date_value)
+
+
+
+    # إضافة دالة جديدة
+    def create_financial_info_tab(self, parent):
+        """إنشاء تبويب معلومات التصنيف المالي"""
+        canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient='vertical', command=canvas.yview)
+        content_frame = tk.Frame(canvas, bg='white')
+        
+        canvas.create_window((0, 0), window=content_frame, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        content_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        
+        # جلب بيانات التصنيف المالي من قاعدة البيانات
+        try:
+            from database.connection import db
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT financial_category, free_reason, free_amount,
+                           free_remaining, free_expiry_date, vip_reason,
+                           vip_no_cut_days, vip_expiry_date, vip_grace_period
+                    FROM customers WHERE id = %s
+                """, (self.customer_data['id'],))
+                
+                financial_data = cursor.fetchone()
+                
+                if financial_data:
+                    category = financial_data['financial_category']
+                    
+                    # عرض أيقونة التصنيف
+                    category_icons = {
+                        'normal': '👤 عادي',
+                        'free': '🎁 مجاني',
+                        'vip': '⭐ VIP',
+                        'free_vip': '🌟 مجاني + VIP'
+                    }
+                    
+                    category_colors = {
+                        'normal': '#3498db',
+                        'free': '#2ecc71',
+                        'vip': '#e67e22',
+                        'free_vip': '#9b59b6'
+                    }
+                    
+                    icon_label = tk.Label(content_frame,
+                                        text=category_icons.get(category, '❓ غير معروف'),
+                                        font=('Arial', 16, 'bold'),
+                                        bg='white', fg=category_colors.get(category, '#7f8c8d'))
+                    icon_label.pack(pady=20)
+                    
+                    # عرض معلومات التصنيف
+                    info_frame = tk.Frame(content_frame, bg='white')
+                    info_frame.pack(fill='x', padx=30, pady=10)
+                    
+                    # معلومات المجاني
+                    if category in ['free', 'free_vip']:
+                        free_frame = tk.LabelFrame(info_frame, 
+                                                  text="🎁 معلومات المجانية",
+                                                  font=('Arial', 12, 'bold'),
+                                                  bg='white', fg='#27ae60',
+                                                  relief='groove')
+                        free_frame.pack(fill='x', pady=10)
+                        
+                        free_info = [
+                            ('السبب', financial_data['free_reason'] or 'غير محدد'),
+                            ('المبلغ الكلي', f"{financial_data['free_amount']:,.0f} كيلو واط"),
+                            ('المتبقي', f"{financial_data['free_remaining']:,.0f} كيلو واط"),
+                            ('تاريخ الانتهاء', self.format_date(financial_data['free_expiry_date']))
+                        ]
+                        
+                        for label, value in free_info:
+                            row = tk.Frame(free_frame, bg='white')
+                            row.pack(fill='x', pady=5)
+                            
+                            tk.Label(row, text=label + ":", font=('Arial', 10, 'bold'),
+                                   bg='white', width=15, anchor='e').pack(side='left', padx=5)
+                            tk.Label(row, text=value, font=('Arial', 10),
+                                   bg='#f8f9fa', fg='#495057',
+                                   relief='ridge', anchor='w', padx=10, pady=2).pack(side='left', fill='x', expand=True)
+                    
+                    # معلومات VIP
+                    if category in ['vip', 'free_vip']:
+                        vip_frame = tk.LabelFrame(info_frame,
+                                                 text="⭐ معلومات VIP",
+                                                 font=('Arial', 12, 'bold'),
+                                                 bg='white', fg='#e67e22',
+                                                 relief='groove')
+                        vip_frame.pack(fill='x', pady=10)
+                        
+                        vip_info = [
+                            ('السبب', financial_data['vip_reason'] or 'غير محدد'),
+                            ('أيام عدم القطع', f"{financial_data['vip_no_cut_days']} يوم"),
+                            ('تاريخ انتهاء VIP', self.format_date(financial_data['vip_expiry_date'])),
+                            ('فترة السماح', f"{financial_data['vip_grace_period']} يوم")
+                        ]
+                        
+                        for label, value in vip_info:
+                            row = tk.Frame(vip_frame, bg='white')
+                            row.pack(fill='x', pady=5)
+                            
+                            tk.Label(row, text=label + ":", font=('Arial', 10, 'bold'),
+                                   bg='white', width=15, anchor='e').pack(side='left', padx=5)
+                            tk.Label(row, text=value, font=('Arial', 10),
+                                   bg='#f8f9fa', fg='#495057',
+                                   relief='ridge', anchor='w', padx=10, pady=2).pack(side='left', fill='x', expand=True)
+                    
+                    # زر إدارة التصنيف
+                    if hasattr(self.parent, 'user_data'):
+                        manage_btn = tk.Button(content_frame,
+                                             text="⚙️ إدارة التصنيف المالي",
+                                             command=self.open_financial_manager,
+                                             bg='#9b59b6', fg='white',
+                                             font=('Arial', 11),
+                                             padx=20, pady=10, cursor='hand2')
+                        manage_btn.pack(pady=20)
+        
+        except Exception as e:
+            logger.error(f"خطأ في تحميل بيانات التصنيف المالي: {e}")
+            error_label = tk.Label(content_frame,
+                                 text="⚠️ خطأ في تحميل بيانات التصنيف المالي",
+                                 font=('Arial', 12),
+                                 bg='white', fg='#e74c3c')
+            error_label.pack(pady=50)
+        
+        canvas.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+    
+    def open_financial_manager(self):
+        """فتح مدير التصنيف المالي"""
+        try:
+            from ui.financial_category_ui import FinancialCategoryUI
+            FinancialCategoryUI(self.parent, self.customer_data, self.parent.user_data)
+        except ImportError as e:
+            messagebox.showerror("خطأ", f"لا يمكن تحميل مدير التصنيف المالي: {e}")        
