@@ -127,7 +127,7 @@ class MainWindow:
             ("📊 التقارير", "reports"),
             ("💰 المحاسبة", "accounting"),
             ("🗃️ الأرشيف", "archive"),
-            ("🔄 مدير الاستيراد", "import_manager"),  # أضف هذا السطر هنا
+            ("⚡ تحليل الهدر", "waste_analysis"),  # أضف هذا السطر
             ("👤 المستخدمين", "users"),
             ("📝 سجل النشاط", "activity_log"),
             ("⚙️ الإعدادات", "settings"),
@@ -200,6 +200,13 @@ class MainWindow:
                 self.show_import_manager()
             else:
                 messagebox.showerror("صلاحيات", "ليس لديك صلاحية الاستيراد المتقدم")
+        elif command == "waste_analysis":
+            if has_permission('reports.view'):
+                self.show_waste_analysis()
+            else:
+                messagebox.showerror("صلاحيات", "ليس لديك صلاحية عرض تحليل الهدر")
+
+
 
         # إضافة تبويب جديد للإعدادات المتقدمة:
     def show_advanced_settings(self):
@@ -924,7 +931,52 @@ class MainWindow:
                 
         except Exception as e:
             logger.error(f"خطأ في إصلاح الكاش: {e}")
-            messagebox.showerror("خطأ", f"فشل إصلاح الكاش: {str(e)}")        
+            messagebox.showerror("خطأ", f"فشل إصلاح الكاش: {str(e)}")
+
+
+    
+    def show_waste_analysis(self):
+        """عرض واجهة تحليل الهدر"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        try:
+            from ui.hierarchical_waste_ui import HierarchicalWasteUI
+            waste_ui = HierarchicalWasteUI(self.content_frame, self.user_data)
+            waste_ui.pack(fill='both', expand=True)
+            logger.info("تم تحميل واجهة تحليل الهدر بنجاح")
+        except ImportError as e:
+            logger.error(f"خطأ في تحميل واجهة تحليل الهدر: {e}")
+            self.show_simple_waste_analysis()
+
+
+    # حاص بالهدر  
+    def open_hierarchical_waste_analysis(self):
+        waste_window = tk.Toplevel(self)
+        waste_window.title("التحليل الهرمي للهدر")
+        waste_window.geometry("1200x800")
+        
+        waste_ui = HierarchicalWasteUI(waste_window, self.user_data)
+        waste_ui.pack(fill='both', expand=True)
+
+    def show_simple_waste_analysis(self):
+        """عرض واجهة مبسطة لتحليل الهدر"""
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        
+        frame = tk.Frame(self.content_frame, bg='white')
+        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        title = tk.Label(frame, text="⚡ نظام تحليل الهدر",
+                        font=('Arial', 20, 'bold'),
+                        bg='white', fg='#2c3e50')
+        title.pack(pady=10)
+        
+        msg = tk.Label(frame,
+                    text="يتم تطوير نظام متكامل لتحليل الهدر في الطاقة الكهربائية\nسيتم إضافته قريباً",
+                    font=('Arial', 14),
+                    bg='white', fg='#7f8c8d')
+        msg.pack(pady=50)                    
     
     def show_help(self):
         """عرض دليل المستخدم"""

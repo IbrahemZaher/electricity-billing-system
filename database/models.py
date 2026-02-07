@@ -531,6 +531,7 @@ class Models:
             ('reports.sales', 'تقارير المبيعات', 'reports'),
             ('reports.sectors', 'تقارير القطاعات', 'reports'),
             ('reports.export', 'تصدير التقارير', 'reports'),
+            ('waste_analysis.view', 'عرض تحليل الهدر', 'reports'),
             
             # فئة النظام
             ('system.manage_users', 'إدارة المستخدمين', 'system'),

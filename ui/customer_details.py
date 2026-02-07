@@ -87,37 +87,33 @@ class CustomerDetails:
         # تحديث منطقة التمرير
         content_frame.bind('<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
         
+        # عرض العلبة الأم - طريقة مبسطة
+        if self.customer_data.get('parent_display'):
+            parent_display = self.customer_data.get('parent_display')
+        else:
+            parent_name = self.customer_data.get('parent_name', '')
+            parent_box = self.customer_data.get('parent_box_number', '')
+            parent_type = self.customer_data.get('parent_meter_type', '')
+            
+            # بناء عرض العلبة الأم بنفس الطريقة للجميع
+            if parent_box and parent_type and parent_name:
+                parent_display = f"{parent_box} ({parent_type}) - {parent_name}"
+            elif parent_box and parent_name:
+                parent_display = f"{parent_box} - {parent_name}"
+            elif parent_name and parent_type:
+                parent_display = f"{parent_name} ({parent_type})"
+            elif parent_name:
+                parent_display = parent_name
+            elif parent_box and parent_type:
+                parent_display = f"{parent_box} ({parent_type})"
+            elif parent_box:
+                parent_display = f"علبة {parent_box}"
+            else:
+                parent_display = 'لا يوجد'
+        
         # تعريف المعلومات الأساسية
         meter_type = self.customer_data.get('meter_type', 'زبون')
         
-
-    
-    # عرض العلبة الأم - طريقة مبسطة
-    if self.customer_data.get('parent_display'):
-        parent_display = self.customer_data.get('parent_display')
-    else:
-        parent_name = self.customer_data.get('parent_name', '')
-        parent_box = self.customer_data.get('parent_box_number', '')
-        parent_type = self.customer_data.get('parent_meter_type', '')
-        
-        # بناء عرض العلبة الأم بنفس الطريقة للجميع
-        if parent_box and parent_type and parent_name:
-            parent_display = f"{parent_box} ({parent_type}) - {parent_name}"
-        elif parent_box and parent_name:
-            parent_display = f"{parent_box} - {parent_name}"
-        elif parent_name and parent_type:
-            parent_display = f"{parent_name} ({parent_type})"
-        elif parent_name:
-            parent_display = parent_name
-        elif parent_box and parent_type:
-            parent_display = f"{parent_box} ({parent_type})"
-        elif parent_box:
-            parent_display = f"علبة {parent_box}"
-        else:
-            parent_display = 'لا يوجد'
-    
-            
-        # إضافة إلى basic_info
         basic_info = [
             ('اسم الزبون', self.customer_data.get('name', '')),
             ('نوع العداد', meter_type),
@@ -192,9 +188,7 @@ class CustomerDetails:
         # تعبئة وإظهار
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
-
-        
-
+    
     def get_meter_type_color(self, meter_type):
         """الحصول على لون يمثل نوع العداد"""
         colors = {
@@ -475,9 +469,7 @@ class CustomerDetails:
         
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
-
-
-
+    
     def get_hierarchy_level(self, meter_type):
         """الحصول على المستوى الهرمي بناءً على نوع العداد"""
         levels = {
