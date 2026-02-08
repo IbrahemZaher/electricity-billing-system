@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from modules.reports import ReportManager
 import webbrowser
 import os
-
 logger = logging.getLogger(__name__)
 
 class ReportUI(tk.Frame):
@@ -32,7 +31,8 @@ class ReportUI(tk.Frame):
             ("🧾 تقرير الفواتير", self.show_invoice_report),
             ("📈 تقرير المبيعات", self.show_sales_report),
             ("📅 المبيعات اليومية", self.show_daily_sales),
-            ("🏢 تقرير القطاعات", self.show_sector_report)
+            ("🏢 تقرير القطاعات", self.show_sector_report),
+            ("🆓 تقرير الزبائن المجانيين", self.show_free_customer_report)
         ]
         
         for i, (text, command) in enumerate(report_types):
@@ -114,7 +114,15 @@ class ReportUI(tk.Frame):
             self.current_report = report
             
             self.clear_frames()
-            self.display_customer_report(report)
+            # عرض النتائج
+            # إذا كانت هناك دالة عرض مخصصة، ضعها هنا، وإلا استخدم نفس الدالة الحالية
+            # self.display_customer_report(report)
+            # مؤقتاً: عرض النتائج كنص بسيط
+            results_text = tk.Text(self.results_frame, wrap='word', height=20)
+            results_text.pack(fill='both', expand=True, padx=10, pady=10)
+            text = f"تقرير الزبائن\n{'='*40}\nعدد الزبائن: {len(report.get('customers', []))}\n"
+            results_text.insert('1.0', text)
+            results_text.config(state='disabled')
             
         except Exception as e:
             logger.error(f"خطأ في عرض تقرير الزبائن: {e}")
@@ -134,8 +142,11 @@ class ReportUI(tk.Frame):
                 self.display_balance_report(report)
                 
             except Exception as e:
-                logger.error(f"خطأ في عرض تقرير الرصيد: {e}")
+                import traceback
+                print("حدث خطأ أثناء عرض تقرير الرصيد:", e)
+                traceback.print_exc()
     
+        # تم دمج أزرار التقارير في report_types أعلاه ولا حاجة لتعريف قائمة buttons هنا
     def show_invoice_report(self):
         """عرض تقرير الفواتير"""
         try:
@@ -543,6 +554,272 @@ class ReportUI(tk.Frame):
         tree.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
 
+    def show_free_customer_report(self):
+        """عرض تقرير الزبائن المجانيين"""
+        try:
+            report = self.report_manager.get_free_customers_by_sector_report()
+            self.current_report = report
+            
+            self.clear_frames()
+            
+            if 'error' in report:
+                messagebox.showerror("خطأ", report['error'])
+                return
+                
+            # عرض النتائج
+            self.display_free_customer_report(report)
+            
+        except Exception as e:
+            logger.error(f"خطأ في عرض تقرير الزبائن المجانيين: {e}")
+            messagebox.showerror("خطأ", f"فشل تحميل التقرير: {str(e)}")
+
+    def display_free_customer_report(self, report):
+        """عرض تقرير الزبائن المجانيين بطريقة منظمة مع جداول لكل قطاع"""
+        # إطار رئيسي قابل للتمرير
+        main_scroll_frame = tk.Frame(self.results_frame)
+        main_scroll_frame.pack(fill='both', expand=True)
+        
+        # Canvas وشريط التمرير
+        canvas = tk.Canvas(main_scroll_frame, bg='white')
+        scrollbar = ttk.Scrollbar(main_scroll_frame, orient='vertical', command=canvas.yview)
+        
+        # إطار داخلي للعناصر
+        inner_frame = tk.Frame(canvas, bg='white')
+        
+        # إعداد الـ Canvas
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas_window = canvas.create_window((0, 0), window=inner_frame, anchor='nw')
+        
+        # حز العناصر
+        canvas.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+        
+        def configure_canvas(event):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+            canvas.itemconfig(canvas_window, width=canvas.winfo_width())
+        
+        inner_frame.bind('<Configure>', configure_canvas)
+        canvas.bind('<Configure>', lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        
+        # عرض كل قطاع في قسم منفصل
+        sectors = report.get('sectors', [])
+        
+        if not sectors:
+            tk.Label(inner_frame, text="لا يوجد زبائن مجانيين", 
+                    font=('Arial', 14, 'bold'), fg='#7f8c8d',
+                    bg='white', pady=50).pack(fill='both', expand=True)
+            return
+        
+        # إجماليات عامة
+        grand_total_free_count = 0
+        grand_total_balance = 0
+        grand_total_withdrawal = 0
+        grand_total_visa = 0
+        
+        for i, sector in enumerate(sectors):
+            sector_name = sector['sector_name']
+            customers = sector.get('customers', [])
+            
+            if not customers:
+                continue
+            
+            # إطار القطاع
+            sector_frame = tk.LabelFrame(inner_frame, text=f"قطاع: {sector_name}", 
+                                        font=('Arial', 12, 'bold'),
+                                        bg='#f8f9fa', fg='#2c3e50',
+                                        relief='groove', borderwidth=2,
+                                        padx=10, pady=10)
+            sector_frame.pack(fill='x', padx=10, pady=10, ipady=5)
+            
+            # معلومات القطاع
+            info_frame = tk.Frame(sector_frame, bg='#f8f9fa')
+            info_frame.pack(fill='x', pady=(0, 10))
+            
+            tk.Label(info_frame, 
+                    text=f"عدد الزبائن المجانيين: {len(customers):,}",
+                    font=('Arial', 10, 'bold'),
+                    bg='#f8f9fa', fg='#27ae60').pack(side='left', padx=10)
+            
+            # جدول زبائن القطاع
+            tree_frame = tk.Frame(sector_frame)
+            tree_frame.pack(fill='both', expand=True, pady=(0, 10))
+            
+            # شريط تمرير أفقي للجدول
+            tree_x_scrollbar = ttk.Scrollbar(tree_frame, orient='horizontal')
+            tree_x_scrollbar.pack(side='bottom', fill='x')
+            
+            # شريط تمرير عمودي للجدول
+            tree_y_scrollbar = ttk.Scrollbar(tree_frame, orient='vertical')
+            tree_y_scrollbar.pack(side='right', fill='y')
+            
+            # إنشاء جدول لكل قطاع
+            tree = ttk.Treeview(tree_frame, 
+                            columns=('الاسم', 'رقم العلبة', 'الرصيد', 'السحب', 'رصيد التأشيرة'),
+                            xscrollcommand=tree_x_scrollbar.set,
+                            yscrollcommand=tree_y_scrollbar.set,
+                            height=min(8, len(customers)))  # ارتفاع مناسب
+            
+            tree_x_scrollbar.config(command=tree.xview)
+            tree_y_scrollbar.config(command=tree.yview)
+            
+            # تعريف الأعمدة
+            tree.heading('الاسم', text='اسم الزبون')
+            tree.heading('رقم العلبة', text='رقم العلبة')
+            tree.heading('الرصيد', text='الرصيد (ك.و)')
+            tree.heading('السحب', text='السحب (ك.و)')
+            tree.heading('رصيد التأشيرة', text='رصيد التأشيرة (ك.و)')
+            
+            tree.column('الاسم', width=150, anchor='w')
+            tree.column('رقم العلبة', width=100, anchor='center')
+            tree.column('الرصيد', width=120, anchor='center')
+            tree.column('السحب', width=120, anchor='center')
+            tree.column('رصيد التأشيرة', width=120, anchor='center')
+            
+            tree.pack(side='left', fill='both', expand=True)
+            
+            # إضافة البيانات للجدول
+            sector_total_balance = 0
+            sector_total_withdrawal = 0
+            sector_total_visa = 0
+            
+            for customer in customers:
+                balance = customer.get('current_balance', 0)
+                withdrawal = customer.get('withdrawal_amount', 0)
+                visa = customer.get('visa_balance', 0)
+                
+                # تحديث إجماليات القطاع
+                sector_total_balance += balance
+                sector_total_withdrawal += withdrawal
+                sector_total_visa += visa
+                
+                # إضافة الصف للجدول
+                tree.insert('', 'end', values=(
+                    customer['name'],
+                    customer.get('box_number', ''),
+                    f"{balance:,.0f}",
+                    f"{withdrawal:,.0f}",
+                    f"{visa:,.0f}"
+                ))
+            
+            # إطار مجموعات القطاع
+            totals_frame = tk.Frame(sector_frame, bg='#e8f4f8', relief='sunken', borderwidth=2)
+            totals_frame.pack(fill='x', pady=5)
+            
+            # تسميات المجموعات
+            tk.Label(totals_frame, 
+                    text="مجموع القطاع:", 
+                    font=('Arial', 10, 'bold'),
+                    bg='#e8f4f8', fg='#2980b9').pack(side='left', padx=10, pady=5)
+            
+            # عرض المجموعات
+            totals_text = f"""
+            الرصيد: {sector_total_balance:,.0f} ك.و
+            السحب: {sector_total_withdrawal:,.0f} ك.و
+            التأشيرة: {sector_total_visa:,.0f} ك.و
+            """
+            
+            totals_label = tk.Label(totals_frame, 
+                                text=totals_text,
+                                font=('Arial', 9),
+                                bg='#e8f4f8', fg='#2c3e50',
+                                justify='left')
+            totals_label.pack(side='left', padx=20, pady=5)
+            
+            # تحديث الإجماليات العامة
+            grand_total_free_count += len(customers)
+            grand_total_balance += sector_total_balance
+            grand_total_withdrawal += sector_total_withdrawal
+            grand_total_visa += sector_total_visa
+        
+        # إضافة خط فاصل بين القطاعات والإجمالي
+        tk.Frame(inner_frame, height=2, bg='#bdc3c7').pack(fill='x', padx=20, pady=10)
+        
+        # إطار الإجمالي العام
+        grand_totals_frame = tk.LabelFrame(inner_frame, 
+                                        text="الإجمالي العام",
+                                        font=('Arial', 13, 'bold'),
+                                        bg='#2c3e50', fg='white',
+                                        relief='raised', borderwidth=3)
+        grand_totals_frame.pack(fill='x', padx=20, pady=(0, 20))
+        
+        # محتوى الإجمالي العام
+        totals_content = tk.Frame(grand_totals_frame, bg='#34495e')
+        totals_content.pack(fill='both', padx=15, pady=15)
+        
+        # إحصائيات عامة
+        stats_grid = tk.Frame(totals_content, bg='#34495e')
+        stats_grid.pack(fill='both')
+        
+        # صف الإحصائيات
+        stats_data = [
+            ("عدد الزبائن المجانيين:", f"{grand_total_free_count:,}", "#27ae60"),
+            ("إجمالي الرصيد:", f"{grand_total_balance:,.0f} كيلو واط", "#3498db"),
+            ("إجمالي السحب:", f"{grand_total_withdrawal:,.0f} كيلو واط", "#e74c3c"),
+            ("إجمالي رصيد التأشيرة:", f"{grand_total_visa:,.0f} كيلو واط", "#f39c12")
+        ]
+        
+        for i, (label, value, color) in enumerate(stats_data):
+            # تسمية
+            lbl = tk.Label(stats_grid, text=label, 
+                        font=('Arial', 11, 'bold'),
+                        bg='#34495e', fg='white',
+                        anchor='w')
+            lbl.grid(row=i, column=0, padx=10, pady=5, sticky='w')
+            
+            # القيمة
+            val = tk.Label(stats_grid, text=value,
+                        font=('Arial', 12, 'bold'),
+                        bg='#34495e', fg=color)
+            val.grid(row=i, column=1, padx=20, pady=5, sticky='w')
+        
+        # إضافة التاريخ
+        date_frame = tk.Frame(totals_content, bg='#34495e')
+        date_frame.pack(fill='x', pady=(10, 0))
+        
+        tk.Label(date_frame, 
+                text=f"تم الإنشاء: {report.get('generated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}",
+                font=('Arial', 9),
+                bg='#34495e', fg='#bdc3c7').pack(anchor='e')
+        
+        # ===== عرض الإحصائيات في تبويب الإحصائيات =====
+        stats_text = tk.Text(self.stats_frame, wrap='word', bg='#f8f9fa')
+        stats_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        stats_content = f"""
+        📊 تحليل إحصائي لتقرير الزبائن المجانيين
+        {'='*60}
+        
+        📈 نظرة عامة:
+        -------------
+        • عدد القطاعات التي تحتوي على زبائن مجانيين: {len([s for s in sectors if s.get('customers')]):,}
+        • إجمالي عدد الزبائن المجانيين: {grand_total_free_count:,}
+        • متوسط عدد الزبائن المجانيين لكل قطاع: {grand_total_free_count / max(len(sectors), 1):.1f}
+        
+        💰 التحليل المالي:
+        ---------------
+        • إجمالي رصيد الزبائن المجانيين: {grand_total_balance:,.0f} كيلو واط
+        • إجمالي السحب من الزبائن المجانيين: {grand_total_withdrawal:,.0f} كيلو واط
+        • إجمالي رصيد التأشيرة: {grand_total_visa:,.0f} كيلو واط
+        • صافي الرصيد (الرصيد - السحب): {grand_total_balance - grand_total_withdrawal:,.0f} كيلو واط
+        
+        📊 مقارنات:
+        ----------
+        • نسبة رصيد التأشيرة إلى الرصيد الإجمالي: {(grand_total_visa / max(grand_total_balance, 1) * 100):.1f}%
+        • متوسط الرصيد لكل زبون مجاني: {grand_total_balance / max(grand_total_free_count, 1):,.0f} ك.و
+        • متوسط السحب لكل زبون مجاني: {grand_total_withdrawal / max(grand_total_free_count, 1):,.0f} ك.و
+        
+        🎯 ملاحظات:
+        ----------
+        1. الزبائن المجانيين هم من لديهم تصنيف مالي 'free' أو 'free_vip'
+        2. يمكن تصدير هذا التقرير باستخدام زر 'تصدير إلى Excel'
+        3. يمكن تطبيق فلاتر تاريخية إذا كانت البيانات تتغير مع الوقت
+        
+        تم إنشاء التقرير بواسطة: {self.user_data.get('full_name', 'النظام')}
+        """
+        
+        stats_text.insert('1.0', stats_content)
+        stats_text.config(state='disabled', font=('Arial', 10))
+        
 
 class BalanceTypeDialog(tk.Toplevel):
     """نافذة اختيار نوع تقرير الرصيد"""
@@ -659,3 +936,4 @@ class SalesGroupDialog(tk.Toplevel):
     
     def cancel(self):
         self.destroy()
+

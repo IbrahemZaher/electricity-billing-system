@@ -6,6 +6,43 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 class CustomerManager:
+    def report_free_customers_by_sector(self) -> dict:
+        """تقرير الزبائن المجانيين حسب القطاع - نسخة مبسطة"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        s.name as sector_name,
+                        c.id,
+                        c.name,
+                        c.box_number,
+                        c.current_balance,
+                        c.withdrawal_amount,
+                        c.visa_balance,
+                        c.phone_number
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.financial_category IN ('free', 'free_vip')
+                    AND c.is_active = TRUE
+                    ORDER BY s.name, c.name
+                """)
+                
+                rows = cursor.fetchall()
+                sector_dict = {}
+                
+                for row in rows:
+                    sector = row['sector_name'] or 'بدون قطاع'
+                    if sector not in sector_dict:
+                        sector_dict[sector] = {'customers': []}
+                    sector_dict[sector]['customers'].append(dict(row))
+                
+                return sector_dict
+                
+        except Exception as e:
+            logger.error(f"خطأ في تقرير الزبائن المجانيين: {e}")
+            return {}
+        
+
     """مدير عمليات الزبائن مع دعم العدادات الهرمية"""
         
     def __init__(self):
@@ -1355,3 +1392,71 @@ class CustomerManager:
         except Exception as e:
             logger.error(f"خطأ في جلب الشجرة الهرمية: {e}")
             return None
+
+    def get_customer_balance_by_sector(self) -> Dict:
+        """
+        حساب لنا وعلينا لكل قطاع بدقة عالية:
+        - لنا: مجموع أرصدة العدادات من نوع زبون أو غير مصنف ورصيدهم سالب
+        - علينا: مجموع أرصدة العدادات من نوع زبون أو غير مصنف ورصيدهم موجب
+        فقط للزبائن النشطين وذوي sector_id صحيح
+        """
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        s.name as sector_name,
+                        s.id as sector_id,
+                        COALESCE(SUM(CASE 
+                            WHEN (c.meter_type IS NULL OR TRIM(c.meter_type) NOT IN ('مولدة', 'علبة توزيع', 'رئيسية')) 
+                            AND c.current_balance < 0 
+                            THEN ABS(c.current_balance)  -- القيمة المطلقة للرصيد السالب
+                            ELSE 0 
+                        END), 0) as lana_amount,
+                        COALESCE(SUM(CASE 
+                            WHEN (c.meter_type IS NULL OR TRIM(c.meter_type) NOT IN ('مولدة', 'علبة توزيع', 'رئيسية')) 
+                            AND c.current_balance > 0 
+                            THEN c.current_balance  -- الرصيد الموجب كما هو
+                            ELSE 0 
+                        END), 0) as alayna_amount,
+                        COUNT(CASE 
+                            WHEN (c.meter_type IS NULL OR TRIM(c.meter_type) NOT IN ('مولدة', 'علبة توزيع', 'رئيسية')) 
+                            AND c.current_balance < 0 
+                            THEN 1 
+                        END) as lana_count,
+                        COUNT(CASE 
+                            WHEN (c.meter_type IS NULL OR TRIM(c.meter_type) NOT IN ('مولدة', 'علبة توزيع', 'رئيسية')) 
+                            AND c.current_balance > 0 
+                            THEN 1 
+                        END) as alayna_count
+                    FROM customers c
+                    INNER JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.is_active = TRUE
+                    GROUP BY s.id, s.name
+                    ORDER BY s.name
+                """)
+                
+                results = cursor.fetchall()
+                
+                # حساب الإجماليات
+                total_lana_amount = sum(row['lana_amount'] or 0 for row in results)
+                total_alayna_amount = sum(row['alayna_amount'] or 0 for row in results)
+                total_lana_count = sum(row['lana_count'] or 0 for row in results)
+                total_alayna_count = sum(row['alayna_count'] or 0 for row in results)
+                
+                return {
+                    'sectors': [dict(row) for row in results],
+                    'total_lana_amount': total_lana_amount,
+                    'total_alayna_amount': total_alayna_amount,
+                    'total_lana_count': total_lana_count,
+                    'total_alayna_count': total_alayna_count
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في حساب لنا وعلينا حسب القطاع: {e}")
+            return {
+                'sectors': [], 
+                'total_lana_amount': 0, 
+                'total_alayna_amount': 0,
+                'total_lana_count': 0,
+                'total_alayna_count': 0
+            }

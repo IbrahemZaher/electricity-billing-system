@@ -116,6 +116,11 @@ class CustomerUI(tk.Frame):
                             padx=10, pady=4)
                 btn.pack(side='left', padx=3)
         
+        # زر إحصائيات لنا وعلينا
+        stats_btn = tk.Button(buttons_frame, text="📊 لنا/علينا", command=self.show_balance_stats,
+                              bg="#34495e", fg="white", font=("Arial", 9), padx=10, pady=4, cursor='hand2')
+        stats_btn.pack(side='left', padx=3)
+        
         # تحديث حجم Canvas
         def configure_canvas(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -851,3 +856,153 @@ class CustomerUI(tk.Frame):
                 command=sector_dialog.destroy,
                 bg='#95a5a6', fg='white',
                 font=('Arial', 11)).pack(side='left', padx=10)
+        
+    def show_balance_stats(self):
+        """عرض إحصائيات لنا وعلينا لكل قطاع مع المجموع النقدي"""
+        stats = self.customer_manager.get_customer_balance_by_sector()
+        
+        window = tk.Toplevel(self)
+        window.title("إحصائيات لنا وعلينا لكل قطاع")
+        window.geometry("700x500")
+        
+        # إطار العنوان
+        title_frame = tk.Frame(window, bg='#2c3e50', height=60)
+        title_frame.pack(fill='x', pady=(0, 10))
+        title_frame.pack_propagate(False)
+        
+        tk.Label(title_frame, 
+                text="💰 إحصائيات لنا وعلينا لكل قطاع",
+                font=('Arial', 16, 'bold'),
+                bg='#2c3e50', fg='white').pack(pady=15)
+        
+        # إنشاء Treeview مع أعمدة جديدة
+        tree_frame = tk.Frame(window)
+        tree_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        # شريط تمرير
+        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical')
+        scrollbar.pack(side='right', fill='y')
+        
+        # تعريف الأعمدة
+        columns = ("sector", "lana_count", "lana_amount", "alayna_count", "alayna_amount", "net_balance")
+        tree = ttk.Treeview(tree_frame, columns=columns, yscrollcommand=scrollbar.set, show="headings")
+        scrollbar.config(command=tree.yview)
+        
+        # تعريف رؤوس الأعمدة
+        tree.heading("sector", text="القطاع")
+        tree.heading("lana_count", text="عدد (لنا)")
+        tree.heading("lana_amount", text="مجموع لنا (ك.و)")
+        tree.heading("alayna_count", text="عدد (علينا)")
+        tree.heading("alayna_amount", text="مجموع علينا (ك.و)")
+        tree.heading("net_balance", text="الرصيد الصافي")
+        
+        # تحديد عرض الأعمدة
+        tree.column("sector", width=150)
+        tree.column("lana_count", width=80, anchor="center")
+        tree.column("lana_amount", width=120, anchor="center")
+        tree.column("alayna_count", width=80, anchor="center")
+        tree.column("alayna_amount", width=120, anchor="center")
+        tree.column("net_balance", width=120, anchor="center")
+        
+        tree.pack(fill='both', expand=True)
+        
+        # إضافة البيانات
+        for row in stats['sectors']:
+            lana_amount = row.get('lana_amount', 0)
+            alayna_amount = row.get('alayna_amount', 0)
+            net_balance = alayna_amount - lana_amount  # علينا - لنا
+            
+            # تحديد لون الرصيد الصافي
+            tags = ()
+            if net_balance > 0:
+                tags = ('positive',)
+            elif net_balance < 0:
+                tags = ('negative',)
+            
+            tree.insert('', 'end', values=(
+                row['sector_name'],
+                row.get('lana_count', 0),
+                f"{lana_amount:,.0f}",
+                row.get('alayna_count', 0),
+                f"{alayna_amount:,.0f}",
+                f"{net_balance:,.0f}"
+            ), tags=tags)
+        
+        # تنسيق الألوان
+        tree.tag_configure('positive', foreground='#27ae60')
+        tree.tag_configure('negative', foreground='#e74c3c')
+        
+        # إطار الإجماليات
+        total_frame = tk.Frame(window, bg='#f8f9fa', relief='groove', borderwidth=2)
+        total_frame.pack(fill='x', padx=10, pady=10)
+        
+        # الإجماليات
+        tk.Label(total_frame, 
+                text=f"🧮 الإجماليات:",
+                font=('Arial', 12, 'bold'),
+                bg='#f8f9fa').pack(side='left', padx=10, pady=5)
+        
+        # صف الإجماليات
+        totals_text = f"""
+        • عدد الزبائن (لنا): {stats['total_lana_count']} زبون
+        • إجمالي المبالغ (لنا): {stats['total_lana_amount']:,.0f} ك.و
+        • عدد الزبائن (علينا): {stats['total_alayna_count']} زبون
+        • إجمالي المبالغ (علينا): {stats['total_alayna_amount']:,.0f} ك.و
+        • الرصيد الصافي العام: {(stats['total_alayna_amount'] - stats['total_lana_amount']):,.0f} ك.و
+        """
+        
+        tk.Label(total_frame, 
+                text=totals_text,
+                font=('Arial', 10),
+                bg='#f8f9fa',
+                justify='left').pack(side='left', padx=10, pady=5)
+        
+        # زر التصدير
+        def export_stats():
+            try:
+                from datetime import datetime
+                import csv
+                
+                filename = f"احصائيات_لنا_علينا_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                
+                with open(filename, 'w', newline='', encoding='utf-8-sig') as file:
+                    writer = csv.writer(file)
+                    writer.writerow(['القطاع', 'عدد (لنا)', 'مجموع لنا (ك.و)', 'عدد (علينا)', 'مجموع علينا (ك.و)', 'الرصيد الصافي'])
+                    
+                    for row in stats['sectors']:
+                        writer.writerow([
+                            row['sector_name'],
+                            row.get('lana_count', 0),
+                            row.get('lana_amount', 0),
+                            row.get('alayna_count', 0),
+                            row.get('alayna_amount', 0),
+                            row.get('alayna_amount', 0) - row.get('lana_amount', 0)
+                        ])
+                    
+                    # كتابة الإجماليات
+                    writer.writerow([])
+                    writer.writerow(['الإجمالي العام', 
+                                stats['total_lana_count'],
+                                stats['total_lana_amount'],
+                                stats['total_alayna_count'],
+                                stats['total_alayna_amount'],
+                                stats['total_alayna_amount'] - stats['total_lana_amount']])
+                
+                messagebox.showinfo("نجاح", f"تم تصدير البيانات إلى: {filename}")
+                
+            except Exception as e:
+                logger.error(f"خطأ في تصدير الإحصائيات: {e}")
+                messagebox.showerror("خطأ", f"فشل التصدير: {str(e)}")
+        
+        btn_frame = tk.Frame(window)
+        btn_frame.pack(pady=10)
+        
+        tk.Button(btn_frame, text="📥 تصدير إلى CSV", 
+                command=export_stats,
+                bg='#3498db', fg='white',
+                font=('Arial', 10)).pack(side='left', padx=5)
+        
+        tk.Button(btn_frame, text="إغلاق", 
+                command=window.destroy,
+                bg='#95a5a6', fg='white',
+                font=('Arial', 10)).pack(side='left', padx=5)

@@ -8,10 +8,86 @@ logger = logging.getLogger(__name__)
 
 class ReportManager:
     """مدير عمليات التقارير والإحصائيات"""
-    
+
     def __init__(self):
         pass
-    
+
+    def get_free_customers_by_sector_report(self) -> Dict[str, Any]:
+        """تقرير الزبائن المجانيين - نسخة مبسطة جداً"""
+        try:
+            with db.get_cursor() as cursor:
+                # جلب الزبائن المجانيين فقط
+                cursor.execute("""
+                    SELECT 
+                        c.name,
+                        c.box_number,
+                        c.current_balance,
+                        c.withdrawal_amount,
+                        c.visa_balance,
+                        c.phone_number,
+                        s.name as sector_name
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE (c.financial_category = 'free' OR c.financial_category = 'free_vip')
+                    AND c.is_active = TRUE
+                    ORDER BY s.name, c.name
+                """)
+                
+                customers = cursor.fetchall()
+                
+                # تجميع حسب القطاع
+                sectors_dict = {}
+                for customer in customers:
+                    sector = customer['sector_name'] or 'بدون قطاع'
+                    if sector not in sectors_dict:
+                        sectors_dict[sector] = []
+                    
+                    sectors_dict[sector].append({
+                        'name': customer['name'],
+                        'box_number': customer['box_number'],
+                        'current_balance': customer['current_balance'],
+                        'withdrawal_amount': customer['withdrawal_amount'],
+                        'visa_balance': customer['visa_balance'],
+                        'phone_number': customer['phone_number']
+                    })
+                
+                # تحويل إلى الصيغة المطلوبة
+                sectors_list = []
+                total_free_count = 0
+                total_balance = 0
+                total_visa_balance = 0
+                
+                for sector_name, customers_list in sectors_dict.items():
+                    sectors_list.append({
+                        'sector_name': sector_name,
+                        'customers': customers_list,
+                        'free_count': len(customers_list),
+                        'total_balance': sum(c['current_balance'] for c in customers_list),
+                        'total_visa_balance': sum(c['visa_balance'] for c in customers_list)
+                    })
+                    
+                    total_free_count += len(customers_list)
+                    total_balance += sum(c['current_balance'] for c in customers_list)
+                    total_visa_balance += sum(c['visa_balance'] for c in customers_list)
+                
+                return {
+                    'sectors': sectors_list,
+                    'total': {
+                        'free_count': total_free_count,
+                        'total_balance': total_balance,
+                        'total_visa_balance': total_visa_balance
+                    },
+                    'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في تقرير الزبائن المجانيين: {e}")
+            return {
+                'sectors': [],
+                'total': {'free_count': 0, 'total_balance': 0, 'total_visa_balance': 0},
+                'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        
     # ============== تقارير الزبائن ==============
     
     def get_customer_balance_report(self, balance_type: str = "all") -> Dict[str, Any]:
