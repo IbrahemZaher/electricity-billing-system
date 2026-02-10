@@ -6,6 +6,99 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 class CustomerManager:
+    def get_cut_lists_by_box(self, min_balance: float = 0, max_balance: float = -1000, exclude_categories: list = None) -> dict:
+        """
+        جلب قوائم القطع لكل علبة (مولدة/علبة توزيع/رئيسية) مع زبائنها الذين رصيدهم السالب ضمن مجال محدد، مع استثناء تصنيفات مالية معينة.
+        :param min_balance: الحد الأدنى للرصيد (عادة 0)
+        :param max_balance: الحد الأعلى للرصيد (سالب)
+        :param exclude_categories: قائمة التصنيفات المالية المستثناة (مثل VIP، مجاني)
+        :return: dict {box_id: {box_info, customers: [...]}}
+        """
+        try:
+            if exclude_categories is None:
+                exclude_categories = []
+            with db.get_cursor() as cursor:
+                # جلب جميع العلب (مولدة/علبة توزيع/رئيسية)
+                cursor.execute("""
+                    SELECT id, name, box_number, meter_type, sector_id
+                    FROM customers
+                    WHERE meter_type IN ('مولدة', 'علبة توزيع', 'رئيسية')
+                      AND is_active = TRUE
+                """)
+                boxes = cursor.fetchall()
+                result = {}
+                for box in boxes:
+                    box_id = box['id']
+                    # جلب الزبائن التابعين لهذه العلبة وضمن مجال الرصيد المطلوب
+                    query = """
+                        SELECT id, name, box_number, current_balance, financial_category, phone_number
+                        FROM customers
+                        WHERE parent_meter_id = %s
+                          AND is_active = TRUE
+                          AND current_balance <= %s AND current_balance >= %s
+                    """
+                    params = [box_id, min_balance, max_balance]
+                    if exclude_categories:
+                        query += " AND financial_category NOT IN (%s)" % (', '.join(['%s']*len(exclude_categories)))
+                        params.extend(exclude_categories)
+                    query += " ORDER BY current_balance ASC"
+                    cursor.execute(query, params)
+                    customers = cursor.fetchall()
+                    if customers:
+                        result[box_id] = {
+                            'box_info': dict(box),
+                            'customers': [dict(c) for c in customers]
+                        }
+                return result
+        except Exception as e:
+            logger.error(f"خطأ في جلب قوائم القطع: {e}")
+            return {}
+
+    def get_negative_balance_customers_by_sector(self, financial_category: str = None, sector_id: int = None) -> dict:
+        """
+        جلب الزبائن ذوي الرصيد السالب (قوائم الكسر) مرتبين من الأكبر إلى الأصغر لكل قطاع مع إمكانية الفلترة حسب التصنيف المالي والقطاع.
+        :param financial_category: تصنيف الزبون المالي (اختياري: عادي، مجاني، VIP ...)
+        :param sector_id: رقم القطاع (اختياري)
+        :return: dict {اسم القطاع: [قائمة الزبائن]}
+        """
+        try:
+            with db.get_cursor() as cursor:
+                query = """
+                    SELECT 
+                        s.name as sector_name,
+                        s.id as sector_id,
+                        c.id,
+                        c.name,
+                        c.box_number,
+                        c.current_balance,
+                        c.financial_category,
+                        c.phone_number
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.current_balance < 0
+                      AND c.is_active = TRUE
+                """
+                params = []
+                if financial_category:
+                    query += " AND c.financial_category = %s"
+                    params.append(financial_category)
+                if sector_id:
+                    query += " AND c.sector_id = %s"
+                    params.append(sector_id)
+                query += " ORDER BY s.name, c.current_balance ASC"  # ASC لأن الرصيد سالب (الأكبر فالأصغر)
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                sector_dict = {}
+                for row in rows:
+                    sector = row['sector_name'] or 'بدون قطاع'
+                    if sector not in sector_dict:
+                        sector_dict[sector] = {'customers': []}
+                    sector_dict[sector]['customers'].append(dict(row))
+                return sector_dict
+        except Exception as e:
+            logger.error(f"خطأ في جلب قوائم الكسر: {e}")
+            return {}
+
     def report_free_customers_by_sector(self) -> dict:
         """تقرير الزبائن المجانيين حسب القطاع - نسخة مبسطة"""
         try:
@@ -44,7 +137,7 @@ class CustomerManager:
         
 
     """مدير عمليات الزبائن مع دعم العدادات الهرمية"""
-        
+
     def __init__(self):
         self.table_name = "customers"
 
@@ -1460,3 +1553,107 @@ class CustomerManager:
                 'total_lana_count': 0,
                 'total_alayna_count': 0
             }
+
+    def get_negative_balance_customers_advanced(
+        self, 
+        min_balance: float = None,
+        max_balance: float = 0,
+        exclude_categories: list = None,
+        include_meter_types: list = None,
+        sector_id: int = None,
+        sort_by: str = "balance_desc"
+    ) -> dict:
+        """
+        جلب الزبائن ذوي الرصيد السالب مع خيارات فلترة متقدمة
+        
+        :param min_balance: الحد الأدنى للرصيد (سالب)
+        :param max_balance: الحد الأقصى للرصيد (سالب، الافتراضي 0)
+        :param exclude_categories: قائمة التصنيفات المالية المستثناة
+        :param include_meter_types: قائمة أنواع العدادات المطلوبة
+        :param sector_id: رقم القطاع المحدد
+        :param sort_by: طريقة الترتيب (balance_desc, balance_asc, name)
+        :return: dict {sector_name: {customers: [], stats: {}}}
+        """
+        try:
+            # القيم الافتراضية
+            if min_balance is None:
+                min_balance = -1000000
+            
+            if exclude_categories is None:
+                exclude_categories = []
+            
+            if include_meter_types is None:
+                include_meter_types = ["زبون"]
+            
+            with db.get_cursor() as cursor:
+                query = """
+                    SELECT 
+                        s.name as sector_name,
+                        c.id,
+                        c.name,
+                        c.box_number,
+                        c.serial_number,
+                        c.current_balance,
+                        c.withdrawal_amount,
+                        c.visa_balance,
+                        c.financial_category,
+                        c.phone_number,
+                        c.meter_type,
+                        c.last_counter_reading
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.is_active = TRUE
+                    AND c.current_balance < 0
+                    AND c.current_balance BETWEEN %s AND %s
+                """
+                
+                params = [min_balance, max_balance]
+                
+                if sector_id:
+                    query += " AND c.sector_id = %s"
+                    params.append(sector_id)
+                
+                if exclude_categories:
+                    placeholders = ', '.join(['%s'] * len(exclude_categories))
+                    query += f" AND c.financial_category NOT IN ({placeholders})"
+                    params.extend(exclude_categories)
+                
+                if include_meter_types:
+                    placeholders = ', '.join(['%s'] * len(include_meter_types))
+                    query += f" AND c.meter_type IN ({placeholders})"
+                    params.extend(include_meter_types)
+                
+                # إضافة الترتيب
+                if sort_by == "balance_desc":
+                    query += " ORDER BY c.current_balance ASC"
+                elif sort_by == "balance_asc":
+                    query += " ORDER BY c.current_balance DESC"
+                elif sort_by == "name":
+                    query += " ORDER BY c.name"
+                else:
+                    query += " ORDER BY s.name, c.current_balance ASC"
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                sector_dict = {}
+                for row in rows:
+                    sector = row['sector_name'] or 'بدون قطاع'
+                    if sector not in sector_dict:
+                        sector_dict[sector] = {'customers': []}
+                    
+                    # حساب الرصيد الجديد
+                    new_balance = row['current_balance']
+                    withdrawal = row['withdrawal_amount'] or 0
+                    visa = row['visa_balance'] or 0
+                    calculated_new_balance = new_balance - withdrawal + visa
+                    
+                    customer_data = dict(row)
+                    customer_data['calculated_new_balance'] = calculated_new_balance
+                    sector_dict[sector]['customers'].append(customer_data)
+                
+                return sector_dict
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب قوائم الكسر المتقدمة: {e}")
+            return {}            

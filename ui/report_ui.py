@@ -1,254 +1,907 @@
-# ui/report_ui.py
+# ui/report_ui.py - النسخة المكتملة
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 import logging
-from datetime import datetime, timedelta
-from modules.reports import ReportManager
-import webbrowser
+from datetime import datetime
 import os
+import webbrowser
+
 logger = logging.getLogger(__name__)
 
+
 class ReportUI(tk.Frame):
-    """واجهة التقارير والإحصائيات"""
+    """واجهة التقارير والإحصائيات المحسّنة"""
     
     def __init__(self, parent, user_data):
         super().__init__(parent)
         self.user_data = user_data
-        self.report_manager = ReportManager()
+        self.report_manager = None
         self.current_report = None
+        self.current_report_type = None
         self.create_widgets()
+        self.load_report_manager()
+    
+    def load_report_manager(self):
+        """تحميل مدير التقارير"""
+        try:
+            from modules.reports import ReportManager
+            self.report_manager = ReportManager()
+        except Exception as e:
+            logger.error(f"خطأ في تحميل مدير التقارير: {e}")
+            messagebox.showerror("خطأ", f"فشل تحميل نظام التقارير: {e}")
     
     def create_widgets(self):
-        # قسم اختيار نوع التقرير
-        report_type_frame = tk.LabelFrame(self, text="نوع التقرير", padx=10, pady=10)
-        report_type_frame.pack(fill='x', padx=10, pady=10)
+        # شريط الأدوات العلوي
+        toolbar = tk.Frame(self, bg='#2c3e50', height=50)
+        toolbar.pack(fill='x', padx=10, pady=5)
         
-        # أزرار أنواع التقارير
-        report_types = [
-            ("📊 لوحة التحكم", self.show_dashboard_report),
-            ("👥 تقرير الزبائن", self.show_customer_report),
-            ("💰 تقرير الرصيد", self.show_balance_report),
-            ("🧾 تقرير الفواتير", self.show_invoice_report),
-            ("📈 تقرير المبيعات", self.show_sales_report),
-            ("📅 المبيعات اليومية", self.show_daily_sales),
-            ("🏢 تقرير القطاعات", self.show_sector_report),
-            ("🆓 تقرير الزبائن المجانيين", self.show_free_customer_report)
+        tk.Label(toolbar, text="📊 نظام التقارير المتقدم", 
+                font=('Arial', 14, 'bold'), 
+                bg='#2c3e50', fg='white').pack(side='left', padx=10)
+        
+        # قسم رئيسي
+        main_frame = tk.Frame(self)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # قسم اختيار التقارير (يسار)
+        left_frame = tk.LabelFrame(main_frame, text="أنواع التقارير", 
+                                  font=('Arial', 12, 'bold'),
+                                  padx=10, pady=10)
+        left_frame.pack(side='left', fill='y', padx=(0, 10))
+        
+        # إنشاء قائمة التقارير
+        reports = [
+            ("📉 قوائم الكسر (قديم)", self.show_negative_balance_old),
+            ("📉 قوائم الكسر (متقدم)", self.show_negative_balance_advanced),
+            ("✂️ قوائم القطع (قديم)", self.show_cut_lists_old),
+            ("✂️ قوائم القطع (متقدم)", self.show_cut_lists_advanced),
+            ("🆓 الزبائن المجانيين (قديم)", self.show_free_customers_old),
+            ("🆓 الزبائن المجانيين (متقدم)", self.show_free_customers_advanced),
+            ("📊 إحصائيات عامة", self.show_dashboard_statistics),
+            ("💰 تقرير المبيعات", self.show_sales_report),
+            ("🧾 تقرير الفواتير", self.show_invoice_report)
         ]
         
-        for i, (text, command) in enumerate(report_types):
-            btn = tk.Button(report_type_frame, text=text, command=command,
-                          width=15, height=2, bg='#3498db', fg='white')
-            btn.grid(row=i//4, column=i%4, padx=5, pady=5, sticky='nsew')
+        for report_name, command in reports:
+            btn = tk.Button(left_frame, text=report_name, command=command,
+                          width=25, anchor='w', justify='left',
+                          bg='#ecf0f1', fg='#2c3e50',
+                          font=('Arial', 10))
+            btn.pack(fill='x', pady=2)
         
-        # إطار الفلاتر والتاريخ
-        self.filter_frame = tk.LabelFrame(self, text="فلاتر التقرير", padx=10, pady=10)
-        self.filter_frame.pack(fill='x', padx=10, pady=10)
+        # قسم عرض التقرير (يمين)
+        right_frame = tk.Frame(main_frame)
+        right_frame.pack(side='right', fill='both', expand=True)
         
-        # تاريخ البداية
-        tk.Label(self.filter_frame, text="من تاريخ:").grid(row=0, column=0, padx=5, pady=5)
-        self.start_date_entry = tk.Entry(self.filter_frame, width=12)
-        self.start_date_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.start_date_entry.insert(0, (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"))
+        # إضافة أزرار التحكم
+        control_frame = tk.Frame(right_frame)
+        control_frame.pack(fill='x', pady=(0, 10))
         
-        # تاريخ النهاية
-        tk.Label(self.filter_frame, text="إلى تاريخ:").grid(row=0, column=2, padx=5, pady=5)
-        self.end_date_entry = tk.Entry(self.filter_frame, width=12)
-        self.end_date_entry.grid(row=0, column=3, padx=5, pady=5)
-        self.end_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.export_excel_btn = tk.Button(control_frame, text="📥 تصدير Excel", 
+                                         command=self.export_current_to_excel,
+                                         bg='#f39c12', fg='white',
+                                         font=('Arial', 10),
+                                         state='disabled')
+        self.export_excel_btn.pack(side='left', padx=5)
         
-        # زر تطبيق الفلاتر
-        tk.Button(self.filter_frame, text="تطبيق الفلاتر", 
-                 command=self.apply_filters, bg='#27ae60', fg='white').grid(row=0, column=4, padx=10)
+        self.filter_btn = tk.Button(control_frame, text="🔍 فلترة متقدمة", 
+                                   command=self.show_advanced_filter,
+                                   bg='#3498db', fg='white',
+                                   font=('Arial', 10))
+        self.filter_btn.pack(side='left', padx=5)
         
-        # زر تصدير
-        tk.Button(self.filter_frame, text="📥 تصدير إلى Excel", 
-                 command=self.export_report, bg='#f39c12', fg='white').grid(row=0, column=5, padx=5)
-        
-        # زر طباعة
-        tk.Button(self.filter_frame, text="🖨️ طباعة التقرير", 
-                 command=self.print_report, bg='#9b59b6', fg='white').grid(row=0, column=6, padx=5)
-        
-        # منطقة عرض التقرير
-        report_display_frame = tk.Frame(self)
-        report_display_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        # إنشاء Notebook (تبويبات) لعرض التقارير
-        self.notebook = ttk.Notebook(report_display_frame)
+        # إنشاء Notebook (تبويبات)
+        self.notebook = ttk.Notebook(right_frame)
         self.notebook.pack(fill='both', expand=True)
         
         # تبويب النتائج
         self.results_frame = tk.Frame(self.notebook)
-        self.notebook.add(self.results_frame, text="النتائج")
+        self.notebook.add(self.results_frame, text="📋 النتائج")
         
         # تبويب الإحصائيات
         self.stats_frame = tk.Frame(self.notebook)
-        self.notebook.add(self.stats_frame, text="الإحصائيات")
+        self.notebook.add(self.stats_frame, text="📊 الإحصائيات")
         
-        # تبويب الرسوم البيانية
-        self.charts_frame = tk.Frame(self.notebook)
-        self.notebook.add(self.charts_frame, text="الرسوم البيانية")
+        # تبويب التصدير
+        self.export_frame = tk.Frame(self.notebook)
+        self.notebook.add(self.export_frame, text="💾 التصدير")
         
-        # عرض لوحة التحكم افتراضياً
-        self.show_dashboard_report()
+        # شريط الحالة
+        self.status_bar = tk.Label(self, text="جاهز", 
+                                  bd=1, relief='sunken', anchor='w')
+        self.status_bar.pack(side='bottom', fill='x', padx=10, pady=5)
+        
+        # عرض تقرير افتراضي
+        self.show_dashboard_statistics()
     
-    def show_dashboard_report(self):
-        """عرض تقرير لوحة التحكم"""
+    # ============== دوال عرض التقارير ==============
+    
+    def show_negative_balance_old(self):
+        """عرض تقرير قوائم الكسر القديم"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_negative_balance_lists_report_old_interface()
+            self.display_report_old(report, "قوائم الكسر (قديم)")
+            self.current_report = report
+            self.current_report_type = "negative_balance_old"
+            self.export_excel_btn.config(state='disabled')
+            self.filter_btn.config(state='disabled')
+            self.update_status("تم توليد تقرير قوائم الكسر القديم")
+        except Exception as e:
+            self.show_error(f"خطأ في عرض التقرير: {e}")
+    
+    def show_negative_balance_advanced(self):
+        """عرض تقرير قوائم الكسر المتقدم"""
+        # عرض قائمة خيارات
+        response = messagebox.askquestion("فلترة", 
+            "هل تريد تطبيق فلترة متقدمة؟\n\nنعم: فلترة متقدمة\nلا: فلترة بسيطة",
+            icon='question')
+        
+        if response == 'yes':
+            self.show_negative_balance_advanced_filter()
+        else:
+            # استخدام الفلترة البسيطة الحالية
+            self.show_negative_balance_simple_filter()
+    
+    def show_negative_balance_simple_filter(self):
+        """عرض نافذة فلترة بسيطة لقوائم الكسر"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        # نافذة فلترة بسيطة
+        filter_window = tk.Toplevel(self)
+        filter_window.title("فلترة قوائم الكسر")
+        filter_window.geometry("400x300")
+        
+        tk.Label(filter_window, text="فلترة قوائم الكسر", 
+                font=('Arial', 14, 'bold')).pack(pady=10)
+        
+        # حقل للقطاع
+        tk.Label(filter_window, text="رقم القطاع (اترك فارغاً للكل):").pack(pady=5)
+        sector_entry = tk.Entry(filter_window)
+        sector_entry.pack(pady=5)
+        
+        def apply_filter():
+            try:
+                sector_id = sector_entry.get().strip()
+                sector_id = int(sector_id) if sector_id else None
+                
+                filter_window.destroy()
+                self.clear_frames()
+                
+                report = self.report_manager.get_negative_balance_lists_report(
+                    sector_id=sector_id
+                )
+                self.display_negative_balance_advanced(report)
+                self.current_report = report
+                self.current_report_type = "negative_balance_advanced"
+                self.export_excel_btn.config(state='normal')
+                self.filter_btn.config(state='normal')
+                self.setup_export_options("negative_balance_advanced")
+                self.update_status("تم توليد تقرير قوائم الكسر المتقدم")
+                
+            except ValueError:
+                messagebox.showerror("خطأ", "رقم القطاع يجب أن يكون رقماً")
+            except Exception as e:
+                self.show_error(f"خطأ في عرض التقرير: {e}")
+        
+        tk.Button(filter_window, text="تطبيق", command=apply_filter,
+                 bg='#27ae60', fg='white').pack(pady=10)
+        
+        tk.Button(filter_window, text="إلغاء", command=filter_window.destroy,
+                 bg='#e74c3c', fg='white').pack(pady=5)
+    
+    def show_cut_lists_old(self):
+        """عرض تقرير قوائم القطع القديم"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_cut_lists_report_old_interface()
+            self.display_cut_lists_old(report)
+            self.current_report = report
+            self.current_report_type = "cut_lists_old"
+            self.export_excel_btn.config(state='disabled')
+            self.filter_btn.config(state='disabled')
+            self.update_status("تم توليد تقرير قوائم القطع القديم")
+        except Exception as e:
+            self.show_error(f"خطأ في عرض التقرير: {e}")
+    
+    def show_cut_lists_advanced(self):
+        """عرض تقرير قوائم القطع المتقدم مع فلترة متقدمة"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        # نافذة فلترة متقدمة للقطع
+        filter_window = tk.Toplevel(self)
+        filter_window.title("فلترة قوائم القطع المتقدمة")
+        filter_window.geometry("500x650")
+        
+        # مركز النافذة
+        filter_window.update_idletasks()
+        x = (filter_window.winfo_screenwidth() // 2) - (500 // 2)
+        y = (filter_window.winfo_screenheight() // 2) - (650 // 2)
+        filter_window.geometry(f"500x650+{x}+{y}")
+        
+        main_frame = tk.Frame(filter_window, padx=20, pady=20)
+        main_frame.pack(fill='both', expand=True)
+        
+        tk.Label(main_frame, text="فلترة متقدمة - قوائم القطع", 
+                font=('Arial', 14, 'bold')).pack(pady=(0, 20))
+        
+        # مجال الرصيد
+        balance_frame = tk.LabelFrame(main_frame, text="مجال الرصيد للقطع", padx=10, pady=10)
+        balance_frame.pack(fill='x', pady=10)
+        
+        tk.Label(balance_frame, text="من:").grid(row=0, column=0, padx=5, pady=5)
+        min_balance_entry = tk.Entry(balance_frame, width=15)
+        min_balance_entry.insert(0, "-1000")
+        min_balance_entry.grid(row=0, column=1, padx=5, pady=5)
+        
+        tk.Label(balance_frame, text="إلى:").grid(row=0, column=2, padx=5, pady=5)
+        max_balance_entry = tk.Entry(balance_frame, width=15)
+        max_balance_entry.insert(0, "0")
+        max_balance_entry.grid(row=0, column=3, padx=5, pady=5)
+        
+        # أنواع العدادات
+        meter_frame = tk.LabelFrame(main_frame, text="أنواع العدادات", padx=10, pady=10)
+        meter_frame.pack(fill='x', pady=10)
+        
+        meter_types = ['مولدة', 'علبة توزيع', 'رئيسية', 'زبون']
+        meter_vars = {}
+        
+        for i, meter_type in enumerate(meter_types):
+            var = tk.BooleanVar(value=True if meter_type == 'زبون' else False)
+            chk = tk.Checkbutton(meter_frame, text=meter_type, variable=var)
+            chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
+            meter_vars[meter_type] = var
+        
+        # التصنيفات المالية المستثناة
+        category_frame = tk.LabelFrame(main_frame, text="استبعاد التصنيفات", padx=10, pady=10)
+        category_frame.pack(fill='x', pady=10)
+        
+        categories = ['normal', 'free', 'vip', 'free_vip']
+        category_names = {
+            'normal': 'عادي',
+            'free': 'مجاني',
+            'vip': 'VIP',
+            'free_vip': 'مجاني + VIP'
+        }
+        category_vars = {}
+        
+        for i, category in enumerate(categories):
+            var = tk.BooleanVar(value=False)
+            chk = tk.Checkbutton(category_frame, 
+                            text=category_names.get(category, category),
+                            variable=var)
+            chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
+            category_vars[category] = var
+        
+        # القطاع
+        sector_frame = tk.LabelFrame(main_frame, text="القطاع", padx=10, pady=10)
+        sector_frame.pack(fill='x', pady=10)
+        
+        tk.Label(sector_frame, text="اختر قطاع:").pack(side='left', padx=5)
+        
+        sectors = self.report_manager.get_available_sectors()
+        sector_options = [("الكل", None)]
+        sector_options.extend([(s['name'], s['id']) for s in sectors])
+        
+        sector_combo = ttk.Combobox(sector_frame, 
+                                values=[name for name, _ in sector_options],
+                                state='readonly', width=30)
+        sector_combo.pack(side='left', padx=5)
+        sector_combo.current(0)
+        
+        # حالة القطع
+        cut_status_frame = tk.LabelFrame(main_frame, text="حالة القطع", padx=10, pady=10)
+        cut_status_frame.pack(fill='x', pady=10)
+        
+        cut_status_var = tk.StringVar(value="all")
+        
+        tk.Radiobutton(cut_status_frame, text="الكل", 
+                    variable=cut_status_var, value="all").pack(anchor='w', pady=2)
+        tk.Radiobutton(cut_status_frame, text="تم القطع فقط", 
+                    variable=cut_status_var, value="cut").pack(anchor='w', pady=2)
+        tk.Radiobutton(cut_status_frame, text="لم يتم القطع", 
+                    variable=cut_status_var, value="not_cut").pack(anchor='w', pady=2)
+        
+        # الترتيب
+        sort_frame = tk.LabelFrame(main_frame, text="طريقة الترتيب", padx=10, pady=10)
+        sort_frame.pack(fill='x', pady=10)
+        
+        sort_var = tk.StringVar(value="balance_desc")
+        
+        tk.Radiobutton(sort_frame, text="الرصيد تنازلياً (الأكبر فالأصغر)", 
+                    variable=sort_var, value="balance_desc").pack(anchor='w', pady=2)
+        tk.Radiobutton(sort_frame, text="الرصيد تصاعدياً (الأصغر فالأكبر)", 
+                    variable=sort_var, value="balance_asc").pack(anchor='w', pady=2)
+        tk.Radiobutton(sort_frame, text="الاسم أبجدياً", 
+                    variable=sort_var, value="name").pack(anchor='w', pady=2)
+        
+        def apply_filter():
+            try:
+                # جمع البيانات
+                min_balance = float(min_balance_entry.get())
+                max_balance = float(max_balance_entry.get())
+                
+                include_meter_types = [mt for mt, var in meter_vars.items() if var.get()]
+                exclude_categories = [cat for cat, var in category_vars.items() if var.get()]
+                
+                selected_sector = sector_combo.get()
+                sector_id = None
+                for name, sid in sector_options:
+                    if name == selected_sector:
+                        sector_id = sid
+                        break
+                
+                cut_status = cut_status_var.get()
+                sort_by = sort_var.get()
+                
+                filter_window.destroy()
+                self.clear_frames()
+                
+                # تطبيق الفلترة للقطع
+                try:
+                    report = self.report_manager.get_cut_lists_report(
+                        min_balance=min_balance,
+                        max_balance=max_balance,
+                        exclude_categories=exclude_categories,
+                        include_meter_types=include_meter_types,
+                        sector_id=sector_id,
+                        cut_status=cut_status,
+                        sort_by=sort_by
+                    )
+                except Exception as e:
+                    # إذا لم توجد الدالة، نستخدم الدالة الأساسية
+                    logger.warning(f"الدالة مع الفلاتر غير متوفرة: {e}")
+                    report = self.report_manager.get_cut_lists_report()
+                
+                self.display_cut_lists_advanced(report)
+                self.current_report = report
+                self.current_report_type = "cut_lists_advanced"
+                self.export_excel_btn.config(state='normal')
+                self.filter_btn.config(state='normal')
+                self.setup_export_options("cut_lists_advanced")
+                self.update_status("تم توليد تقرير قوائم القطع مع الفلترة المتقدمة")
+                
+            except ValueError:
+                messagebox.showerror("خطأ", "قيم غير صحيحة. تأكد من إدخال أرقام صحيحة")
+            except Exception as e:
+                self.show_error(f"خطأ في التصفية: {e}")
+        
+        # أزرار التحكم
+        btn_frame = tk.Frame(main_frame, pady=20)
+        btn_frame.pack(fill='x')
+        
+        tk.Button(btn_frame, text="تطبيق", command=apply_filter,
+                bg='#27ae60', fg='white', width=15).pack(side='right', padx=5)
+        
+        tk.Button(btn_frame, text="إلغاء", command=filter_window.destroy,
+                bg='#e74c3c', fg='white', width=15).pack(side='right', padx=5)
+        
+        tk.Button(btn_frame, text="إعادة تعيين", 
+                command=lambda: self.reset_filter_fields_cut(
+                    min_balance_entry, max_balance_entry,
+                    meter_vars, category_vars,
+                    sector_combo, cut_status_var, sort_var
+                ),
+                bg='#3498db', fg='white', width=15).pack(side='right', padx=5)
+    
+    def reset_filter_fields_cut(self, min_entry, max_entry, meter_vars, 
+                               category_vars, sector_combo, cut_status_var, sort_var):
+        """إعادة تعيين حقول الفلترة للقطع"""
+        min_entry.delete(0, 'end')
+        min_entry.insert(0, "-1000")
+        
+        max_entry.delete(0, 'end')
+        max_entry.insert(0, "0")
+        
+        for var in meter_vars.values():
+            var.set(False)
+        meter_vars['زبون'].set(True)
+        
+        for var in category_vars.values():
+            var.set(False)
+        
+        sector_combo.current(0)
+        cut_status_var.set("all")
+        sort_var.set("balance_desc")
+    
+    def show_free_customers_old(self):
+        """عرض تقرير الزبائن المجانيين القديم"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_free_customers_by_sector_report_old_interface()
+            self.display_free_customers_old(report)
+            self.current_report = report
+            self.current_report_type = "free_customers_old"
+            self.export_excel_btn.config(state='disabled')
+            self.filter_btn.config(state='disabled')
+            self.update_status("تم توليد تقرير الزبائن المجانيين القديم")
+        except Exception as e:
+            self.show_error(f"خطأ في عرض التقرير: {e}")
+    
+    def show_free_customers_advanced(self):
+        """عرض تقرير الزبائن المجانيين المتقدم"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_free_customers_by_sector_report()
+            self.display_free_customers_advanced(report)
+            self.current_report = report
+            self.current_report_type = "free_customers_advanced"
+            self.export_excel_btn.config(state='normal')
+            self.filter_btn.config(state='normal')
+            self.setup_export_options("free_customers_advanced")
+            self.update_status("تم توليد تقرير الزبائن المجانيين المتقدم")
+        except Exception as e:
+            self.show_error(f"خطأ في عرض التقرير: {e}")
+    
+    def show_dashboard_statistics(self):
+        """عرض إحصائيات لوحة التحكم"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        self.clear_frames()
         try:
             report = self.report_manager.get_dashboard_statistics()
+            self.display_dashboard_statistics(report)
             self.current_report = report
-            
-            # مسح الإطارات السابقة
-            self.clear_frames()
-            
-            # عرض النتائج
-            self.display_dashboard_results(report)
-            
+            self.current_report_type = "dashboard"
+            self.export_excel_btn.config(state='normal')
+            self.filter_btn.config(state='disabled')
+            self.setup_export_options("dashboard")
+            self.update_status("تم تحميل إحصائيات لوحة التحكم")
         except Exception as e:
-            logger.error(f"خطأ في عرض تقرير لوحة التحكم: {e}")
-            messagebox.showerror("خطأ", f"فشل تحميل التقرير: {str(e)}")
-    
-    def show_customer_report(self):
-        """عرض تقرير الزبائن"""
-        try:
-            report = self.report_manager.get_customers_by_sector_report()
-            self.current_report = report
-            
-            self.clear_frames()
-            # عرض النتائج
-            # إذا كانت هناك دالة عرض مخصصة، ضعها هنا، وإلا استخدم نفس الدالة الحالية
-            # self.display_customer_report(report)
-            # مؤقتاً: عرض النتائج كنص بسيط
-            results_text = tk.Text(self.results_frame, wrap='word', height=20)
-            results_text.pack(fill='both', expand=True, padx=10, pady=10)
-            text = f"تقرير الزبائن\n{'='*40}\nعدد الزبائن: {len(report.get('customers', []))}\n"
-            results_text.insert('1.0', text)
-            results_text.config(state='disabled')
-            
-        except Exception as e:
-            logger.error(f"خطأ في عرض تقرير الزبائن: {e}")
-    
-    def show_balance_report(self):
-        """عرض تقرير الرصيد"""
-        # نافذة اختيار نوع الرصيد
-        balance_dialog = BalanceTypeDialog(self)
-        self.wait_window(balance_dialog)
-        
-        if balance_dialog.balance_type:
-            try:
-                report = self.report_manager.get_customer_balance_report(balance_dialog.balance_type)
-                self.current_report = report
-                
-                self.clear_frames()
-                self.display_balance_report(report)
-                
-            except Exception as e:
-                import traceback
-                print("حدث خطأ أثناء عرض تقرير الرصيد:", e)
-                traceback.print_exc()
-    
-        # تم دمج أزرار التقارير في report_types أعلاه ولا حاجة لتعريف قائمة buttons هنا
-    def show_invoice_report(self):
-        """عرض تقرير الفواتير"""
-        try:
-            start_date = self.start_date_entry.get()
-            end_date = self.end_date_entry.get()
-            
-            report = self.report_manager.get_invoice_detailed_report(start_date, end_date)
-            self.current_report = report
-            
-            self.clear_frames()
-            self.display_invoice_report(report)
-            
-        except Exception as e:
-            logger.error(f"خطأ في عرض تقرير الفواتير: {e}")
+            self.show_error(f"خطأ في عرض الإحصائيات: {e}")
     
     def show_sales_report(self):
         """عرض تقرير المبيعات"""
-        # نافذة اختيار نوع التجميع
-        sales_dialog = SalesGroupDialog(self)
-        self.wait_window(sales_dialog)
-        
-        if sales_dialog.group_by:
-            try:
-                start_date = self.start_date_entry.get()
-                end_date = self.end_date_entry.get()
-                
-                report = self.report_manager.get_sales_report(start_date, end_date, sales_dialog.group_by)
-                self.current_report = report
-                
-                self.clear_frames()
-                self.display_sales_report(report)
-                
-            except Exception as e:
-                logger.error(f"خطأ في عرض تقرير المبيعات: {e}")
-    
-    def show_daily_sales(self):
-        """عرض تقرير المبيعات اليومية"""
-        try:
-            report = self.report_manager.get_daily_sales_summary()
-            self.current_report = report
-            
-            self.clear_frames()
-            self.display_daily_sales(report)
-            
-        except Exception as e:
-            logger.error(f"خطأ في عرض تقرير المبيعات اليومية: {e}")
-    
-    def show_sector_report(self):
-        """عرض تقرير القطاعات"""
-        try:
-            report = self.report_manager.get_customers_by_sector_report()
-            self.current_report = report
-            
-            self.clear_frames()
-            self.display_sector_report(report)
-            
-        except Exception as e:
-            logger.error(f"خطأ في عرض تقرير القطاعات: {e}")
-    
-    def apply_filters(self):
-        """تطبيق الفلاتر على التقرير الحالي"""
-        messagebox.showinfo("تطبيق الفلاتر", "تم تطبيق الفلاتر بنجاح")
-    
-    def export_report(self):
-        """تصدير التقرير الحالي إلى Excel"""
-        if not self.current_report:
-            messagebox.showwarning("تحذير", "لا يوجد تقرير للتصدير")
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
             return
         
+        self.clear_frames()
         try:
-            # تحديد نوع التقرير للتصدير
-            report_type = "report"
-            if 'report_type' in self.current_report:
-                report_type = self.current_report['report_type']
-            elif 'group_by' in self.current_report:
-                report_type = f"sales_{self.current_report['group_by']}"
-            
-            filename = self.report_manager.export_report_to_excel(self.current_report, report_type)
-            
-            if filename and os.path.exists(filename):
-                messagebox.showinfo("نجاح", f"تم تصدير التقرير إلى:\n{filename}")
-                
-                # فتح الملف
-                try:
-                    webbrowser.open(filename)
-                except:
-                    pass
-            else:
-                messagebox.showerror("خطأ", "فشل تصدير التقرير")
-                
+            report = self.report_manager.get_sales_report()
+            self.display_sales_report(report)
+            self.current_report = report
+            self.current_report_type = "sales"
+            self.export_excel_btn.config(state='normal')
+            self.filter_btn.config(state='disabled')
+            self.setup_export_options("sales")
+            self.update_status("تم توليد تقرير المبيعات")
         except Exception as e:
-            logger.error(f"خطأ في تصدير التقرير: {e}")
-            messagebox.showerror("خطأ", f"فشل تصدير التقرير: {str(e)}")
+            self.show_error(f"خطأ في عرض التقرير: {e}")
     
-    def print_report(self):
-        """طباعة التقرير"""
-        if not self.current_report:
-            messagebox.showwarning("تحذير", "لا يوجد تقرير للطباعة")
+    def show_invoice_report(self):
+        """عرض تقرير الفواتير"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
             return
         
-        messagebox.showinfo("طباعة", "سيتم إرسال التقرير إلى الطابعة")
-        # هنا يمكن إضافة منطق الطباعة الفعلي
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_invoice_detailed_report()
+            self.display_invoice_report(report)
+            self.current_report = report
+            self.current_report_type = "invoices"
+            self.export_excel_btn.config(state='normal')
+            self.filter_btn.config(state='disabled')
+            self.setup_export_options("invoices")
+            self.update_status("تم توليد تقرير الفواتير")
+        except Exception as e:
+            self.show_error(f"خطأ في عرض التقرير: {e}")
+    
+    # ============== دوال العرض ==============
+    
+    def display_report_old(self, report, title):
+        """عرض تقرير قديم"""
+        text_widget = tk.Text(self.results_frame, wrap='word')
+        text_widget.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        content = f"تقرير: {title}\n"
+        content += f"تاريخ الإنشاء: {report.get('generated_at', '')}\n"
+        content += "="*50 + "\n\n"
+        
+        if 'sectors' in report:
+            for sector in report['sectors']:
+                content += f"القطاع: {sector['sector_name']}\n"
+                content += f"عدد الزبائن: {sector['count']}\n"
+                content += f"إجمالي الرصيد السالب: {sector['total_negative_balance']}\n"
+                content += "-"*30 + "\n"
+                
+                for customer in sector['customers']:
+                    content += f"  • {customer['name']}: {customer['current_balance']}\n"
+                content += "\n"
+        
+        text_widget.insert('1.0', content)
+        text_widget.config(state='disabled')
+    
+    def display_negative_balance_advanced(self, report):
+        """عرض تقرير قوائم الكسر المتقدم"""
+        # إنشاء Treeview لعرض البيانات
+        frame = tk.Frame(self.results_frame)
+        frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # إضافة معلومات التقرير
+        info_frame = tk.LabelFrame(frame, text="معلومات التقرير", padx=10, pady=10)
+        info_frame.pack(fill='x', pady=(0, 10))
+        
+        tk.Label(info_frame, text=f"عنوان التقرير: {report.get('report_title', '')}", 
+                anchor='w').pack(fill='x')
+        tk.Label(info_frame, text=f"تاريخ الإنشاء: {report.get('generated_at', '')}", 
+                anchor='w').pack(fill='x')
+        
+        # إنشاء Treeview مع scrollbars
+        tree_frame = tk.Frame(frame)
+        tree_frame.pack(fill='both', expand=True)
+        
+        scrollbar_y = ttk.Scrollbar(tree_frame)
+        scrollbar_y.pack(side='right', fill='y')
+        
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
+        
+        tree = ttk.Treeview(tree_frame, 
+                           yscrollcommand=scrollbar_y.set,
+                           xscrollcommand=scrollbar_x.set,
+                           columns=('الاسم', 'رقم العلبة', 'الرصيد', 'السحب', 'التأشيرة', 'الجديد', 'التصنيف', 'الهاتف'))
+        
+        scrollbar_y.config(command=tree.yview)
+        scrollbar_x.config(command=tree.xview)
+        
+        # تعريف الأعمدة
+        tree.heading('#0', text='القطاع')
+        tree.column('#0', width=150)
+        
+        for col in tree['columns']:
+            tree.heading(col, text=col)
+            tree.column(col, width=100)
+        
+        # إضافة البيانات
+        for sector in report.get('sectors', []):
+            sector_id = tree.insert('', 'end', text=sector['sector_name'], 
+                                  values=('', '', f"{sector['total_balance']:,.0f}", 
+                                         f"{sector['total_withdrawal']:,.0f}", 
+                                         f"{sector['total_visa']:,.0f}",
+                                         f"{sector['total_calculated_balance']:,.0f}", '', ''))
+            
+            for customer in sector.get('customers', []):
+                tree.insert(sector_id, 'end', text='', 
+                          values=(customer['name'],
+                                 customer['box_number'],
+                                 f"{customer['current_balance']:,.0f}",
+                                 f"{customer['withdrawal_amount']:,.0f}",
+                                 f"{customer['visa_balance']:,.0f}",
+                                 f"{customer['calculated_new_balance']:,.0f}",
+                                 customer.get('financial_category', ''),
+                                 customer.get('phone_number', '')))
+        
+        tree.pack(fill='both', expand=True)
+        
+        # عرض الإجماليات
+        grand_total = report.get('grand_total', {})
+        total_frame = tk.LabelFrame(frame, text="الإجماليات", padx=10, pady=10)
+        total_frame.pack(fill='x', pady=10)
+        
+        tk.Label(total_frame, 
+                text=f"عدد الزبائن: {grand_total.get('customer_count', 0):,} | "
+                     f"إجمالي الرصيد: {grand_total.get('total_balance', 0):,.0f} | "
+                     f"إجمالي السحب: {grand_total.get('total_withdrawal', 0):,.0f} | "
+                     f"إجمالي التأشيرة: {grand_total.get('total_visa', 0):,.0f} | "
+                     f"الرصيد الجديد: {grand_total.get('total_calculated_balance', 0):,.0f}",
+                font=('Arial', 10, 'bold')).pack()
+    
+    def display_cut_lists_old(self, report):
+        """عرض تقرير قوائم القطع القديم"""
+        text_widget = tk.Text(self.results_frame, wrap='word')
+        text_widget.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        content = f"تقرير: قوائم القطع (قديم)\n"
+        content += f"تاريخ الإنشاء: {report.get('generated_at', '')}\n"
+        content += f"إجمالي الزبائن: {report.get('total_customers', 0)}\n"
+        content += "="*50 + "\n\n"
+        
+        if 'boxes' in report:
+            for box in report['boxes']:
+                content += f"العلبة: {box['box_info'].get('name', '')} ({box['box_info'].get('box_number', '')})\n"
+                content += f"عدد الزبائن: {box['count']}\n"
+                content += "-"*30 + "\n"
+                
+                for customer in box['customers']:
+                    content += f"  • {customer['name']}: {customer['current_balance']}\n"
+                content += "\n"
+        
+        text_widget.insert('1.0', content)
+        text_widget.config(state='disabled')
+    
+    def display_cut_lists_advanced(self, report):
+        """عرض تقرير قوائم القطع المتقدم"""
+        # إنشاء Treeview لعرض البيانات
+        frame = tk.Frame(self.results_frame)
+        frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # إضافة معلومات التقرير
+        info_frame = tk.LabelFrame(frame, text="معلومات التقرير", padx=10, pady=10)
+        info_frame.pack(fill='x', pady=(0, 10))
+        
+        tk.Label(info_frame, text=f"عنوان التقرير: {report.get('report_title', '')}", 
+                anchor='w').pack(fill='x')
+        tk.Label(info_frame, text=f"تاريخ الإنشاء: {report.get('generated_at', '')}", 
+                anchor='w').pack(fill='x')
+        
+        # عرض الفلاتر
+        filters = report.get('filters', {})
+        if filters:
+            filters_text = f"الفلاتر: مجال الرصيد من {filters.get('min_balance', -1000)} إلى {filters.get('max_balance', 0)}"
+            tk.Label(info_frame, text=filters_text, anchor='w').pack(fill='x')
+        
+        # إنشاء Treeview مع scrollbars
+        tree_frame = tk.Frame(frame)
+        tree_frame.pack(fill='both', expand=True)
+        
+        scrollbar_y = ttk.Scrollbar(tree_frame)
+        scrollbar_y.pack(side='right', fill='y')
+        
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
+        
+        tree = ttk.Treeview(tree_frame, 
+                           yscrollcommand=scrollbar_y.set,
+                           xscrollcommand=scrollbar_x.set,
+                           columns=('الاسم', 'رقم العلبة', 'الرصيد', 'السحب', 'التأشيرة', 'الجديد', 'التصنيف', 'الهاتف'))
+        
+        scrollbar_y.config(command=tree.yview)
+        scrollbar_x.config(command=tree.xview)
+        
+        # تعريف الأعمدة
+        tree.heading('#0', text='العلبة')
+        tree.column('#0', width=200)
+        
+        for col in tree['columns']:
+            tree.heading(col, text=col)
+            tree.column(col, width=100)
+        
+        # إضافة البيانات
+        for box in report.get('boxes', []):
+            box_id = tree.insert('', 'end', 
+                               text=f"{box['box_name']} ({box['box_number']}) - {box['sector_name']}",
+                               values=('', '', f"{box['box_total_balance']:,.0f}", 
+                                      f"{box['box_total_withdrawal']:,.0f}", 
+                                      f"{box['box_total_visa']:,.0f}",
+                                      f"{box['box_calculated_balance']:,.0f}", '', ''))
+            
+            for customer in box.get('customers', []):
+                tree.insert(box_id, 'end', text='', 
+                          values=(customer['name'],
+                                 customer['box_number'],
+                                 f"{customer['current_balance']:,.0f}",
+                                 f"{customer['withdrawal_amount']:,.0f}",
+                                 f"{customer['visa_balance']:,.0f}",
+                                 f"{customer['calculated_new_balance']:,.0f}",
+                                 customer.get('financial_category', ''),
+                                 customer.get('phone_number', '')))
+        
+        tree.pack(fill='both', expand=True)
+        
+        # عرض الإجماليات
+        grand_total = report.get('grand_total', {})
+        total_frame = tk.LabelFrame(frame, text="الإجماليات", padx=10, pady=10)
+        total_frame.pack(fill='x', pady=10)
+        
+        tk.Label(total_frame, 
+                text=f"عدد العلب: {grand_total.get('total_boxes', 0):,} | "
+                     f"عدد الزبائن: {grand_total.get('total_customers', 0):,} | "
+                     f"إجمالي الرصيد: {grand_total.get('total_balance', 0):,.0f}",
+                font=('Arial', 10, 'bold')).pack()
+    
+    def display_free_customers_old(self, report):
+        """عرض تقرير الزبائن المجانيين القديم"""
+        text_widget = tk.Text(self.results_frame, wrap='word')
+        text_widget.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        content = f"تقرير: الزبائن المجانيين (قديم)\n"
+        content += f"تاريخ الإنشاء: {report.get('generated_at', '')}\n"
+        content += "="*50 + "\n\n"
+        
+        if 'sectors' in report:
+            for sector in report['sectors']:
+                content += f"القطاع: {sector['sector_name']}\n"
+                content += f"عدد الزبائن المجانيين: {sector['free_count']}\n"
+                content += f"إجمالي الرصيد: {sector['total_balance']}\n"
+                content += f"إجمالي التأشيرة: {sector['total_visa_balance']}\n"
+                content += "-"*30 + "\n"
+                
+                for customer in sector['customers']:
+                    content += f"  • {customer['name']}: رصيد={customer['current_balance']}, سحب={customer['withdrawal_amount']}, تأشيرة={customer['visa_balance']}\n"
+                content += "\n"
+        
+        total = report.get('total', {})
+        content += f"\nالإجماليات:\n"
+        content += f"عدد الزبائن المجانيين: {total.get('free_count', 0)}\n"
+        content += f"إجمالي الرصيد: {total.get('total_balance', 0)}\n"
+        content += f"إجمالي التأشيرة: {total.get('total_visa_balance', 0)}\n"
+        
+        text_widget.insert('1.0', content)
+        text_widget.config(state='disabled')
+    
+    def display_free_customers_advanced(self, report):
+        """عرض تقرير الزبائن المجانيين المتقدم"""
+        # إنشاء Treeview لعرض البيانات
+        frame = tk.Frame(self.results_frame)
+        frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # إضافة معلومات التقرير
+        info_frame = tk.LabelFrame(frame, text="معلومات التقرير", padx=10, pady=10)
+        info_frame.pack(fill='x', pady=(0, 10))
+        
+        tk.Label(info_frame, text=f"عنوان التقرير: {report.get('report_title', '')}", 
+                anchor='w').pack(fill='x')
+        tk.Label(info_frame, text=f"تاريخ الإنشاء: {report.get('generated_at', '')}", 
+                anchor='w').pack(fill='x')
+        
+        # إنشاء Treeview مع scrollbars
+        tree_frame = tk.Frame(frame)
+        tree_frame.pack(fill='both', expand=True)
+        
+        scrollbar_y = ttk.Scrollbar(tree_frame)
+        scrollbar_y.pack(side='right', fill='y')
+        
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
+        
+        tree = tttk.Treeview(tree_frame, 
+                           yscrollcommand=scrollbar_y.set,
+                           xscrollcommand=scrollbar_x.set,
+                           columns=('الاسم', 'رقم العلبة', 'الرصيد', 'السحب', 'التأشيرة', 'الجديد', 'التصنيف', 'الهاتف', 'نوع العداد'))
+        
+        scrollbar_y.config(command=tree.yview)
+        scrollbar_x.config(command=tree.xview)
+        
+        # تعريف الأعمدة
+        tree.heading('#0', text='القطاع')
+        tree.column('#0', width=150)
+        
+        for col in tree['columns']:
+            tree.heading(col, text=col)
+            tree.column(col, width=100)
+        
+        # إضافة البيانات
+        for sector in report.get('sectors', []):
+            sector_id = tree.insert('', 'end', text=sector['sector_name'], 
+                                  values=('', '', f"{sector['total_balance']:,.0f}", 
+                                         f"{sector['total_withdrawal']:,.0f}", 
+                                         f"{sector['total_visa_balance']:,.0f}",
+                                         f"{sector['calculated_balance']:,.0f}", '', '', ''))
+            
+            for customer in sector.get('customers', []):
+                tree.insert(sector_id, 'end', text='', 
+                          values=(customer['name'],
+                                 customer['box_number'],
+                                 f"{customer['current_balance']:,.0f}",
+                                 f"{customer['withdrawal_amount']:,.0f}",
+                                 f"{customer['visa_balance']:,.0f}",
+                                 f"{customer['current_balance'] - customer['withdrawal_amount'] + customer['visa_balance']:,.0f}",
+                                 customer.get('financial_category', ''),
+                                 customer.get('phone_number', ''),
+                                 customer.get('meter_type', '')))
+        
+        tree.pack(fill='both', expand=True)
+        
+        # عرض الإجماليات
+        total = report.get('total', {})
+        total_frame = tk.LabelFrame(frame, text="الإجماليات", padx=10, pady=10)
+        total_frame.pack(fill='x', pady=10)
+        
+        tk.Label(total_frame, 
+                text=f"عدد الزبائن: {total.get('free_count', 0):,} | "
+                     f"إجمالي الرصيد: {total.get('total_balance', 0):,.0f} | "
+                     f"إجمالي السحب: {total.get('total_withdrawal', 0):,.0f} | "
+                     f"إجمالي التأشيرة: {total.get('total_visa_balance', 0):,.0f} | "
+                     f"الرصيد الجديد: {total.get('calculated_balance', 0):,.0f}",
+                font=('Arial', 10, 'bold')).pack()
+    
+    def display_dashboard_statistics(self, report):
+        """عرض إحصائيات لوحة التحكم"""
+        text_widget = tk.Text(self.results_frame, wrap='word')
+        text_widget.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        content = f"📊 إحصائيات لوحة التحكم\n"
+        content += f"تاريخ الإنشاء: {report.get('generated_at', '')}\n"
+        content += "="*50 + "\n\n"
+        
+        content += f"👥 إجمالي الزبائن: {report.get('total_customers', 0):,}\n"
+        content += f"📅 فواتير اليوم: {report.get('today_invoices', 0):,} - مبلغ: {report.get('today_amount', 0):,.0f} ك.و\n"
+        content += f"📅 فواتير الشهر: {report.get('month_invoices', 0):,} - مبلغ: {report.get('month_amount', 0):,.0f} ك.و\n"
+        content += f"🔻 زبائن برصيد سالب: {report.get('negative_count', 0):,} - إجمالي: {report.get('negative_total', 0):,.0f} ك.و\n"
+        content += f"🔼 زبائن برصيد موجب: {report.get('positive_count', 0):,} - إجمالي: {report.get('positive_total', 0):,.0f} ك.و\n"
+        
+        content += "\n🏆 أفضل القطاعات أداءً هذا الشهر:\n"
+        for sector in report.get('top_sectors', []):
+            content += f"  • {sector['name']}: {sector['invoice_count']:,} فاتورة - {sector['total_amount']:,.0f} ك.و\n"
+        
+        text_widget.insert('1.0', content)
+        text_widget.config(state='disabled')
+    
+    def display_sales_report(self, report):
+        """عرض تقرير المبيعات"""
+        text_widget = tk.Text(self.results_frame, wrap='word')
+        text_widget.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        content = f"💰 تقرير المبيعات\n"
+        content += f"تاريخ الإنشاء: {report.get('generated_at', '')}\n"
+        content += f"الفترة: من {report['period']['start_date']} إلى {report['period']['end_date']}\n"
+        content += "="*50 + "\n\n"
+        
+        if 'sales_data' in report:
+            for data in report['sales_data']:
+                content += f"{data.get('period', '')}:\n"
+                content += f"  عدد الفواتير: {data.get('invoice_count', 0):,}\n"
+                content += f"  إجمالي المبلغ: {data.get('total_amount', 0):,.0f} ك.و\n"
+                content += f"  إجمالي الكيلوات: {data.get('total_kilowatts', 0):,.0f}\n"
+                content += f"  إجمالي المجاني: {data.get('total_free', 0):,.0f}\n"
+                content += f"  إجمالي الخصم: {data.get('total_discount', 0):,.0f}\n"
+                content += "-"*30 + "\n"
+        
+        if 'totals' in report:
+            totals = report['totals']
+            content += f"\n📊 الإجماليات:\n"
+            content += f"عدد الفواتير: {totals.get('total_invoices', 0):,}\n"
+            content += f"إجمالي المبيعات: {totals.get('grand_total', 0):,.0f} ك.و\n"
+            content += f"إجمالي الكيلوات: {totals.get('total_kilowatts', 0):,.0f}\n"
+            content += f"إجمالي المجاني: {totals.get('total_free', 0):,.0f}\n"
+            content += f"إجمالي الخصم: {totals.get('total_discount', 0):,.0f}\n"
+        
+        text_widget.insert('1.0', content)
+        text_widget.config(state='disabled')
+    
+    def display_invoice_report(self, report):
+        """عرض تقرير الفواتير"""
+        text_widget = tk.Text(self.results_frame, wrap='word')
+        text_widget.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        content = f"🧾 تقرير الفواتير\n"
+        content += f"تاريخ الإنشاء: {report.get('generated_at', '')}\n"
+        content += f"الفترة: من {report['period']['start_date']} إلى {report['period']['end_date']}\n"
+        content += f"عدد الفواتير: {report.get('total_count', 0):,}\n"
+        content += "="*50 + "\n\n"
+        
+        if 'invoices' in report:
+            for invoice in report['invoices'][:50]:  # عرض أول 50 فاتورة فقط
+                content += f"فاتورة #{invoice.get('invoice_number', '')}\n"
+                content += f"  التاريخ: {invoice.get('payment_date', '')} {invoice.get('payment_time', '')}\n"
+                content += f"  الزبون: {invoice.get('customer_name', '')}\n"
+                content += f"  القطاع: {invoice.get('sector_name', '')}\n"
+                content += f"  الكيلوات: {invoice.get('kilowatt_amount', 0):,.0f}\n"
+                content += f"  المبلغ: {invoice.get('total_amount', 0):,.0f} ك.و\n"
+                content += f"  المحاسب: {invoice.get('accountant_name', '')}\n"
+                content += "-"*30 + "\n"
+            
+            if len(report['invoices']) > 50:
+                content += f"\n... وعرض {len(report['invoices']) - 50} فاتورة إضافية\n"
+        
+        text_widget.insert('1.0', content)
+        text_widget.config(state='disabled')
+    
+    # ============== دوال مساعدة ==============
     
     def clear_frames(self):
         """مسح محتوى الإطارات"""
@@ -258,682 +911,303 @@ class ReportUI(tk.Frame):
         for widget in self.stats_frame.winfo_children():
             widget.destroy()
         
-        for widget in self.charts_frame.winfo_children():
+        for widget in self.export_frame.winfo_children():
             widget.destroy()
     
-    def display_dashboard_results(self, report):
-        """عرض نتائج لوحة التحكم"""
-        # النتائج
-        results_text = tk.Text(self.results_frame, wrap='word', height=20)
-        results_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        text = f"""
-        {'='*50}
-        لوحة التحكم - إحصائيات النظام
-        {'='*50}
-        
-        الزبائن:
-        --------
-        • إجمالي الزبائن: {report.get('total_customers', 0):,}
-        • زبائن برصيد سالب: {report.get('negative_count', 0):,} ({abs(report.get('negative_total', 0)):,.0f} كيلو واط)
-        • زبائن برصيد موجب: {report.get('positive_count', 0):,} ({report.get('positive_total', 0):,.0f} كيلو واط)
-        
-        المبيعات:
-        ---------
-        • الفواتير اليوم: {report.get('today_invoices', 0):,} فاتورة
-        • إجمالي اليوم: {report.get('today_amount', 0):,.0f} ل.س
-        • الفواتير الشهرية: {report.get('month_invoices', 0):,} فاتورة
-        • إجمالي الشهر: {report.get('month_amount', 0):,.0f} ل.س
-        
-        أفضل القطاعات أداءً هذا الشهر:
-        --------------------------
-        """
-        
-        for sector in report.get('top_sectors', []):
-            text += f"• {sector['name']}: {sector['invoice_count']} فاتورة ({sector['total_amount']:,.0f} ل.س)\n"
-        
-        text += f"\nتم الإنشاء: {report.get('generated_at', '')}"
-        
-        results_text.insert('1.0', text)
-        results_text.config(state='disabled')
-        
-        # الإحصائيات
-        stats_text = tk.Text(self.stats_frame, wrap='word')
-        stats_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        stats = f"""
-        الإحصائيات:
-        -----------
-        
-        متوسط قيمة الفاتورة اليومية: {report.get('today_amount', 0) / max(report.get('today_invoices', 1), 1):,.0f} ل.س
-        متوسط قيمة الفاتورة الشهرية: {report.get('month_amount', 0) / max(report.get('month_invoices', 1), 1):,.0f} ل.س
-        
-        نسبة الزبائن برصيد سالب: {(report.get('negative_count', 0) / max(report.get('total_customers', 1), 1) * 100):.1f}%
-        نسبة الزبائن برصيد موجب: {(report.get('positive_count', 0) / max(report.get('total_customers', 1), 1) * 100):.1f}%
-        
-        صافي الرصيد: {(report.get('positive_total', 0) + report.get('negative_total', 0)):,.0f} ل.س
-        """
-        
-        stats_text.insert('1.0', stats)
-        stats_text.config(state='disabled')
+    def update_status(self, message: str):
+        """تحديث شريط الحالة"""
+        self.status_bar.config(text=message, fg='#27ae60')
     
-    def display_balance_report(self, report):
-        """عرض تقرير الرصيد"""
-        # إنشاء Treeview لعرض الزبائن
-        tree_frame = tk.Frame(self.results_frame)
-        tree_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        columns = ('ID', 'الاسم', 'القطاع', 'الرصيد', 'الحالة', 'الهاتف')
-        
-        tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
-        
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=100)
-        
-        tree.column('الاسم', width=150)
-        
-        # إضافة البيانات
-        for customer in report.get('customers', []):
-            balance = customer['current_balance']
-            status = 'سالب' if balance < 0 else 'موجب' if balance > 0 else 'صفر'
-            
-            tree.insert('', 'end', values=(
-                customer['id'],
-                customer['name'],
-                customer.get('sector_name', ''),
-                f"{balance:,.0f}",
-                status,
-                customer.get('phone_number', '')
-            ))
-        
-        # شريط التمرير
-        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
-        
-        # عرض الإحصائيات
-        stats_text = tk.Text(self.stats_frame, wrap='word')
-        stats_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        stats = f"""
-        تقرير الرصيد ({report.get('report_type', 'all')})
-        {'='*50}
-        
-        إجمالي الزبائن: {report.get('total_count', 0):,}
-        إجمالي الرصيد: {report.get('total_balance', 0):,.0f} كيلو واط
-        إجمالي الرصيد السالب: {report.get('negative_total', 0):,.0f} كيلو واط
-        إجمالي الرصيد الموجب: {report.get('positive_total', 0):,.0f} كيلو واط
-        صافي الرصيد: {(report.get('positive_total', 0) + report.get('negative_total', 0)):,.0f} كيلو واط
-        
-        
-        تم الإنشاء: {report.get('generated_at', '')}
-        """
-        
-        stats_text.insert('1.0', stats)
-        stats_text.config(state='disabled')
-    
-    def display_invoice_report(self, report):
-        """عرض تقرير الفواتير"""
-        # Treeview للفواتير
-        tree_frame = tk.Frame(self.results_frame)
-        tree_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        columns = ('الرقم', 'التاريخ', 'الزبون', 'القطاع', 'الكيلوات', 'المبلغ', 'المحاسب')
-        
-        tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
-        
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=100)
-        
-        tree.column('الزبون', width=150)
-        tree.column('الرقم', width=120)
-        
-        # إضافة البيانات
-        for invoice in report.get('invoices', []):
-            tree.insert('', 'end', values=(
-                invoice['invoice_number'],
-                invoice['payment_date'],
-                invoice['customer_name'],
-                invoice.get('sector_name', ''),
-                f"{invoice.get('kilowatt_amount', 0):.1f}",
-                f"{invoice.get('total_amount', 0):,.0f}",
-                invoice.get('accountant_name', '')
-            ))
-        
-        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
-        
-        # الإحصائيات
-        stats_text = tk.Text(self.stats_frame, wrap='word')
-        stats_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        stats = f"""
-        تقرير الفواتير
-        {'='*50}
-        
-        الفترة: من {report['period']['start_date']} إلى {report['period']['end_date']}
-        إجمالي الفواتير: {report.get('total_count', 0):,}
-        
-        تم الإنشاء: {report.get('generated_at', '')}
-        """
-        
-        stats_text.insert('1.0', stats)
-        stats_text.config(state='disabled')
-    
-    def display_sales_report(self, report):
-        """عرض تقرير المبيعات"""
-        # Treeview للمبيعات
-        tree_frame = tk.Frame(self.results_frame)
-        tree_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        columns = ('الفترة', 'عدد الفواتير', 'إجمالي المبلغ', 'إجمالي الكيلوات', 'متوسط الفاتورة')
-        
-        tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
-        
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=120)
-        
-        # إضافة البيانات
-        for data in report.get('sales_data', []):
-            avg_amount = data.get('average_amount', 0)
-            tree.insert('', 'end', values=(
-                data['period'],
-                data.get('invoice_count', 0),
-                f"{data.get('total_amount', 0):,.0f}",
-                f"{data.get('total_kilowatts', 0):.1f}",
-                f"{avg_amount:,.0f}" if avg_amount else '0'
-            ))
-        
-        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
-        
-        # الإحصائيات
-        stats_text = tk.Text(self.stats_frame, wrap='word')
-        stats_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        totals = report.get('totals', {})
-        stats = f"""
-        تقرير المبيعات ({report.get('group_by', 'daily')})
-        {'='*50}
-        
-        الفترة: من {report['period']['start_date']} إلى {report['period']['end_date']}
-        
-        الإجماليات:
-        • عدد الفواتير: {totals.get('total_invoices', 0):,}
-        • إجمالي المبلغ: {totals.get('grand_total', 0):,.0f} ل.س
-        • إجمالي الكيلوات: {totals.get('total_kilowatts', 0):.1f}
-        • إجمالي الخصم: {totals.get('total_discount', 0):,.0f} ل.س
-        
-        المتوسطات:
-        • متوسط الفاتورة: {totals.get('grand_total', 0) / max(totals.get('total_invoices', 1), 1):,.0f} ل.س
-        • متوسط الكيلوات/فاتورة: {totals.get('total_kilowatts', 0) / max(totals.get('total_invoices', 1), 1):.1f}
-        
-        تم الإنشاء: {report.get('generated_at', '')}
-        """
-        
-        stats_text.insert('1.0', stats)
-        stats_text.config(state='disabled')
-    
-    def display_daily_sales(self, report):
-        """عرض تقرير المبيعات اليومية"""
-        # النتائج
-        results_text = tk.Text(self.results_frame, wrap='word')
-        results_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        today = report.get('today', {})
-        yesterday = report.get('yesterday', {})
-        
-        text = f"""
-        تقرير المبيعات اليومية
-        {'='*50}
-        
-        التاريخ: {report.get('date', '')}
-        
-        أداء اليوم:
-        • عدد الفواتير: {today.get('invoice_count', 0):,}
-        • إجمالي المبلغ: {today.get('total_amount', 0):,.0f} ل.س
-        • إجمالي الكيلوات: {today.get('total_kilowatts', 0):.1f}
-        • متوسط الفاتورة: {today.get('average_amount', 0):,.0f} ل.س
-        
-        المقارنة مع الأمس:
-        • عدد فواتير الأمس: {yesterday.get('invoice_count', 0):,}
-        • إجمالي أمس: {yesterday.get('total_amount', 0):,.0f} ل.س
-        • نسبة التغير: {report.get('change_percentage', 0):.1f}%
-        
-        أفضل 5 زبائن اليوم:
-        -----------------
-        """
-        
-        for i, customer in enumerate(report.get('top_customers', []), 1):
-            text += f"{i}. {customer['customer_name']} ({customer.get('sector_name', '')}): "
-            text += f"{customer['invoice_count']} فواتير، {customer['total_amount']:,.0f} ل.س\n"
-        
-        text += f"\nتم الإنشاء: {report.get('generated_at', '')}"
-        
-        results_text.insert('1.0', text)
-        results_text.config(state='disabled')
-    
-    def display_sector_report(self, report):
-        """عرض تقرير القطاعات"""
-        # Treeview للقطاعات
-        tree_frame = tk.Frame(self.results_frame)
-        tree_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        columns = ('القطاع', 'عدد الزبائن', 'إجمالي الرصيد', 'متوسط الرصيد', 'سالب', 'موجب', 'صفر')
-        
-        tree = ttk.Treeview(tree_frame, columns=columns, show='headings')
-        
-        for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=100)
-        
-        tree.column('القطاع', width=150)
-        
-        # إضافة البيانات
-        for sector in report.get('sectors', []):
-            tree.insert('', 'end', values=(
-                sector['sector_name'],
-                sector.get('customer_count', 0),
-                f"{sector.get('total_balance', 0):,.0f}",
-                f"{sector.get('average_balance', 0):,.0f}",
-                sector.get('negative_count', 0),
-                sector.get('positive_count', 0),
-                sector.get('zero_count', 0)
-            ))
-        
-        scrollbar = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+    def show_error(self, message: str):
+        """عرض خطأ"""
+        self.status_bar.config(text=f"خطأ: {message}", fg='#e74c3c')
+        messagebox.showerror("خطأ", message)
 
-    def show_free_customer_report(self):
-        """عرض تقرير الزبائن المجانيين"""
-        try:
-            report = self.report_manager.get_free_customers_by_sector_report()
-            self.current_report = report
-            
-            self.clear_frames()
-            
-            if 'error' in report:
-                messagebox.showerror("خطأ", report['error'])
-                return
-                
-            # عرض النتائج
-            self.display_free_customer_report(report)
-            
-        except Exception as e:
-            logger.error(f"خطأ في عرض تقرير الزبائن المجانيين: {e}")
-            messagebox.showerror("خطأ", f"فشل تحميل التقرير: {str(e)}")
+    def setup_export_options(self, report_type: str):
+        """إعداد خيارات التصدير حسب نوع التقرير"""
+        for widget in self.export_frame.winfo_children():
+            widget.destroy()
+        
+        export_frame = tk.Frame(self.export_frame, padx=20, pady=20)
+        export_frame.pack(fill='both', expand=True)
+        
+        tk.Label(export_frame, text="خيارات التصدير", 
+                font=('Arial', 14, 'bold')).pack(pady=(0, 20))
+        
+        # اسم الملف
+        name_frame = tk.Frame(export_frame)
+        name_frame.pack(fill='x', pady=10)
+        
+        tk.Label(name_frame, text="اسم الملف:", 
+                font=('Arial', 10)).pack(side='left', padx=(0, 10))
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"تقرير_{report_type}_{timestamp}"
+        
+        self.filename_entry = tk.Entry(name_frame, width=40)
+        self.filename_entry.insert(0, default_name)
+        self.filename_entry.pack(side='left')
+        
+        # زر التصدير
+        btn_frame = tk.Frame(export_frame, pady=20)
+        btn_frame.pack(fill='x')
+        
+        tk.Button(btn_frame, text="📥 تصدير إلى Excel", 
+                command=lambda: self.export_current_report_to_excel(report_type),
+                bg='#f39c12', fg='white',
+                font=('Arial', 11, 'bold'),
+                width=15).pack()
 
-    def display_free_customer_report(self, report):
-        """عرض تقرير الزبائن المجانيين بطريقة منظمة مع جداول لكل قطاع"""
-        # إطار رئيسي قابل للتمرير
-        main_scroll_frame = tk.Frame(self.results_frame)
-        main_scroll_frame.pack(fill='both', expand=True)
-        
-        # Canvas وشريط التمرير
-        canvas = tk.Canvas(main_scroll_frame, bg='white')
-        scrollbar = ttk.Scrollbar(main_scroll_frame, orient='vertical', command=canvas.yview)
-        
-        # إطار داخلي للعناصر
-        inner_frame = tk.Frame(canvas, bg='white')
-        
-        # إعداد الـ Canvas
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas_window = canvas.create_window((0, 0), window=inner_frame, anchor='nw')
-        
-        # حز العناصر
-        canvas.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
-        
-        def configure_canvas(event):
-            canvas.configure(scrollregion=canvas.bbox('all'))
-            canvas.itemconfig(canvas_window, width=canvas.winfo_width())
-        
-        inner_frame.bind('<Configure>', configure_canvas)
-        canvas.bind('<Configure>', lambda e: canvas.itemconfig(canvas_window, width=e.width))
-        
-        # عرض كل قطاع في قسم منفصل
-        sectors = report.get('sectors', [])
-        
-        if not sectors:
-            tk.Label(inner_frame, text="لا يوجد زبائن مجانيين", 
-                    font=('Arial', 14, 'bold'), fg='#7f8c8d',
-                    bg='white', pady=50).pack(fill='both', expand=True)
+    def export_current_report_to_excel(self, report_type: str):
+        """تصدير التقرير الحالي إلى Excel"""
+        if not self.current_report:
+            messagebox.showwarning("تحذير", "لا يوجد تقرير للتصدير")
             return
         
-        # إجماليات عامة
-        grand_total_free_count = 0
-        grand_total_balance = 0
-        grand_total_withdrawal = 0
-        grand_total_visa = 0
-        
-        for i, sector in enumerate(sectors):
-            sector_name = sector['sector_name']
-            customers = sector.get('customers', [])
+        try:
+            filename = self.filename_entry.get().strip()
+            if not filename:
+                filename = f"تقرير_{report_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
-            if not customers:
-                continue
+            # إضافة امتداد .xlsx إذا لم يكن موجوداً
+            if not filename.lower().endswith('.xlsx'):
+                filename += ".xlsx"
             
-            # إطار القطاع
-            sector_frame = tk.LabelFrame(inner_frame, text=f"قطاع: {sector_name}", 
-                                        font=('Arial', 12, 'bold'),
-                                        bg='#f8f9fa', fg='#2c3e50',
-                                        relief='groove', borderwidth=2,
-                                        padx=10, pady=10)
-            sector_frame.pack(fill='x', padx=10, pady=10, ipady=5)
+            success = False
+            filepath = ""
             
-            # معلومات القطاع
-            info_frame = tk.Frame(sector_frame, bg='#f8f9fa')
-            info_frame.pack(fill='x', pady=(0, 10))
+            if report_type == "negative_balance_advanced":
+                success, filepath = self.report_manager.export_negative_balance_report_to_excel(
+                    self.current_report, filename
+                )
+            elif report_type == "cut_lists_advanced":
+                success, filepath = self.report_manager.export_cut_lists_report_to_excel(
+                    self.current_report, filename
+                )
+            elif report_type == "free_customers_advanced":
+                success, filepath = self.report_manager.export_free_customers_to_excel(
+                    self.current_report, filename
+                )
+            elif report_type in ["sales", "invoices", "dashboard"]:
+                success, filepath = self.report_manager.export_to_excel_generic(
+                    self.current_report, report_type
+                )
+            else:
+                messagebox.showwarning("تحذير", "نوع التقرير غير مدعوم للتصدير")
+                return
             
-            tk.Label(info_frame, 
-                    text=f"عدد الزبائن المجانيين: {len(customers):,}",
-                    font=('Arial', 10, 'bold'),
-                    bg='#f8f9fa', fg='#27ae60').pack(side='left', padx=10)
-            
-            # جدول زبائن القطاع
-            tree_frame = tk.Frame(sector_frame)
-            tree_frame.pack(fill='both', expand=True, pady=(0, 10))
-            
-            # شريط تمرير أفقي للجدول
-            tree_x_scrollbar = ttk.Scrollbar(tree_frame, orient='horizontal')
-            tree_x_scrollbar.pack(side='bottom', fill='x')
-            
-            # شريط تمرير عمودي للجدول
-            tree_y_scrollbar = ttk.Scrollbar(tree_frame, orient='vertical')
-            tree_y_scrollbar.pack(side='right', fill='y')
-            
-            # إنشاء جدول لكل قطاع
-            tree = ttk.Treeview(tree_frame, 
-                            columns=('الاسم', 'رقم العلبة', 'الرصيد', 'السحب', 'رصيد التأشيرة'),
-                            xscrollcommand=tree_x_scrollbar.set,
-                            yscrollcommand=tree_y_scrollbar.set,
-                            height=min(8, len(customers)))  # ارتفاع مناسب
-            
-            tree_x_scrollbar.config(command=tree.xview)
-            tree_y_scrollbar.config(command=tree.yview)
-            
-            # تعريف الأعمدة
-            tree.heading('الاسم', text='اسم الزبون')
-            tree.heading('رقم العلبة', text='رقم العلبة')
-            tree.heading('الرصيد', text='الرصيد (ك.و)')
-            tree.heading('السحب', text='السحب (ك.و)')
-            tree.heading('رصيد التأشيرة', text='رصيد التأشيرة (ك.و)')
-            
-            tree.column('الاسم', width=150, anchor='w')
-            tree.column('رقم العلبة', width=100, anchor='center')
-            tree.column('الرصيد', width=120, anchor='center')
-            tree.column('السحب', width=120, anchor='center')
-            tree.column('رصيد التأشيرة', width=120, anchor='center')
-            
-            tree.pack(side='left', fill='both', expand=True)
-            
-            # إضافة البيانات للجدول
-            sector_total_balance = 0
-            sector_total_withdrawal = 0
-            sector_total_visa = 0
-            
-            for customer in customers:
-                balance = customer.get('current_balance', 0)
-                withdrawal = customer.get('withdrawal_amount', 0)
-                visa = customer.get('visa_balance', 0)
+            if success:
+                messagebox.showinfo("نجاح", f"تم تصدير التقرير بنجاح إلى:\n{filepath}")
                 
-                # تحديث إجماليات القطاع
-                sector_total_balance += balance
-                sector_total_withdrawal += withdrawal
-                sector_total_visa += visa
+                # فتح الملف بعد التصدير
+                try:
+                    os.startfile(filepath) if os.name == 'nt' else webbrowser.open(filepath)
+                except:
+                    pass
                 
-                # إضافة الصف للجدول
-                tree.insert('', 'end', values=(
-                    customer['name'],
-                    customer.get('box_number', ''),
-                    f"{balance:,.0f}",
-                    f"{withdrawal:,.0f}",
-                    f"{visa:,.0f}"
-                ))
-            
-            # إطار مجموعات القطاع
-            totals_frame = tk.Frame(sector_frame, bg='#e8f4f8', relief='sunken', borderwidth=2)
-            totals_frame.pack(fill='x', pady=5)
-            
-            # تسميات المجموعات
-            tk.Label(totals_frame, 
-                    text="مجموع القطاع:", 
-                    font=('Arial', 10, 'bold'),
-                    bg='#e8f4f8', fg='#2980b9').pack(side='left', padx=10, pady=5)
-            
-            # عرض المجموعات
-            totals_text = f"""
-            الرصيد: {sector_total_balance:,.0f} ك.و
-            السحب: {sector_total_withdrawal:,.0f} ك.و
-            التأشيرة: {sector_total_visa:,.0f} ك.و
-            """
-            
-            totals_label = tk.Label(totals_frame, 
-                                text=totals_text,
-                                font=('Arial', 9),
-                                bg='#e8f4f8', fg='#2c3e50',
-                                justify='left')
-            totals_label.pack(side='left', padx=20, pady=5)
-            
-            # تحديث الإجماليات العامة
-            grand_total_free_count += len(customers)
-            grand_total_balance += sector_total_balance
-            grand_total_withdrawal += sector_total_withdrawal
-            grand_total_visa += sector_total_visa
-        
-        # إضافة خط فاصل بين القطاعات والإجمالي
-        tk.Frame(inner_frame, height=2, bg='#bdc3c7').pack(fill='x', padx=20, pady=10)
-        
-        # إطار الإجمالي العام
-        grand_totals_frame = tk.LabelFrame(inner_frame, 
-                                        text="الإجمالي العام",
-                                        font=('Arial', 13, 'bold'),
-                                        bg='#2c3e50', fg='white',
-                                        relief='raised', borderwidth=3)
-        grand_totals_frame.pack(fill='x', padx=20, pady=(0, 20))
-        
-        # محتوى الإجمالي العام
-        totals_content = tk.Frame(grand_totals_frame, bg='#34495e')
-        totals_content.pack(fill='both', padx=15, pady=15)
-        
-        # إحصائيات عامة
-        stats_grid = tk.Frame(totals_content, bg='#34495e')
-        stats_grid.pack(fill='both')
-        
-        # صف الإحصائيات
-        stats_data = [
-            ("عدد الزبائن المجانيين:", f"{grand_total_free_count:,}", "#27ae60"),
-            ("إجمالي الرصيد:", f"{grand_total_balance:,.0f} كيلو واط", "#3498db"),
-            ("إجمالي السحب:", f"{grand_total_withdrawal:,.0f} كيلو واط", "#e74c3c"),
-            ("إجمالي رصيد التأشيرة:", f"{grand_total_visa:,.0f} كيلو واط", "#f39c12")
-        ]
-        
-        for i, (label, value, color) in enumerate(stats_data):
-            # تسمية
-            lbl = tk.Label(stats_grid, text=label, 
-                        font=('Arial', 11, 'bold'),
-                        bg='#34495e', fg='white',
-                        anchor='w')
-            lbl.grid(row=i, column=0, padx=10, pady=5, sticky='w')
-            
-            # القيمة
-            val = tk.Label(stats_grid, text=value,
-                        font=('Arial', 12, 'bold'),
-                        bg='#34495e', fg=color)
-            val.grid(row=i, column=1, padx=20, pady=5, sticky='w')
-        
-        # إضافة التاريخ
-        date_frame = tk.Frame(totals_content, bg='#34495e')
-        date_frame.pack(fill='x', pady=(10, 0))
-        
-        tk.Label(date_frame, 
-                text=f"تم الإنشاء: {report.get('generated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}",
-                font=('Arial', 9),
-                bg='#34495e', fg='#bdc3c7').pack(anchor='e')
-        
-        # ===== عرض الإحصائيات في تبويب الإحصائيات =====
-        stats_text = tk.Text(self.stats_frame, wrap='word', bg='#f8f9fa')
-        stats_text.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        stats_content = f"""
-        📊 تحليل إحصائي لتقرير الزبائن المجانيين
-        {'='*60}
-        
-        📈 نظرة عامة:
-        -------------
-        • عدد القطاعات التي تحتوي على زبائن مجانيين: {len([s for s in sectors if s.get('customers')]):,}
-        • إجمالي عدد الزبائن المجانيين: {grand_total_free_count:,}
-        • متوسط عدد الزبائن المجانيين لكل قطاع: {grand_total_free_count / max(len(sectors), 1):.1f}
-        
-        💰 التحليل المالي:
-        ---------------
-        • إجمالي رصيد الزبائن المجانيين: {grand_total_balance:,.0f} كيلو واط
-        • إجمالي السحب من الزبائن المجانيين: {grand_total_withdrawal:,.0f} كيلو واط
-        • إجمالي رصيد التأشيرة: {grand_total_visa:,.0f} كيلو واط
-        • صافي الرصيد (الرصيد - السحب): {grand_total_balance - grand_total_withdrawal:,.0f} كيلو واط
-        
-        📊 مقارنات:
-        ----------
-        • نسبة رصيد التأشيرة إلى الرصيد الإجمالي: {(grand_total_visa / max(grand_total_balance, 1) * 100):.1f}%
-        • متوسط الرصيد لكل زبون مجاني: {grand_total_balance / max(grand_total_free_count, 1):,.0f} ك.و
-        • متوسط السحب لكل زبون مجاني: {grand_total_withdrawal / max(grand_total_free_count, 1):,.0f} ك.و
-        
-        🎯 ملاحظات:
-        ----------
-        1. الزبائن المجانيين هم من لديهم تصنيف مالي 'free' أو 'free_vip'
-        2. يمكن تصدير هذا التقرير باستخدام زر 'تصدير إلى Excel'
-        3. يمكن تطبيق فلاتر تاريخية إذا كانت البيانات تتغير مع الوقت
-        
-        تم إنشاء التقرير بواسطة: {self.user_data.get('full_name', 'النظام')}
-        """
-        
-        stats_text.insert('1.0', stats_content)
-        stats_text.config(state='disabled', font=('Arial', 10))
-        
+                self.update_status("تم تصدير التقرير بنجاح")
+            else:
+                messagebox.showerror("خطأ", f"فشل تصدير التقرير: {filepath}")
+                self.show_error(f"خطأ: {filepath}")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تصدير التقرير: {e}")
+            messagebox.showerror("خطأ", f"فشل تصدير التقرير: {str(e)}")
+            self.show_error(f"خطأ: {str(e)}")
 
-class BalanceTypeDialog(tk.Toplevel):
-    """نافذة اختيار نوع تقرير الرصيد"""
-    
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("اختر نوع تقرير الرصيد")
-        self.geometry("300x200")
-        self.balance_type = None
+    def export_current_to_excel(self):
+        """تصدير التقرير الحالي إلى Excel"""
+        if self.current_report and self.current_report_type:
+            self.export_current_report_to_excel(self.current_report_type)
+        else:
+            messagebox.showwarning("تحذير", "لا يوجد تقرير للتصدير")
+
+    def show_advanced_filter(self):
+        """عرض الفلترة المتقدمة حسب نوع التقرير"""
+        if self.current_report_type == "negative_balance_advanced":
+            self.show_negative_balance_advanced_filter()
+        elif self.current_report_type == "cut_lists_advanced":
+            # افتح نافذة الفلترة المتقدمة للقطع
+            self.show_cut_lists_advanced()
+        elif self.current_report_type == "free_customers_advanced":
+            self.show_free_customers_advanced_filter()
+        else:
+            messagebox.showinfo("فلترة", "الفلترة المتقدمة غير متاحة لهذا النوع من التقارير")
+
+    def show_negative_balance_advanced_filter(self):
+        """عرض نافذة فلترة متقدمة لقوائم الكسر"""
+        filter_window = tk.Toplevel(self)
+        filter_window.title("فلترة متقدمة - قوائم الكسر")
+        filter_window.geometry("500x600")
         
-        self.create_widgets()
-        self.center_window()
-    
-    def center_window(self):
-        """توسيط النافذة"""
-        self.update_idletasks()
-        width = self.winfo_width()
-        height = self.winfo_height()
-        x = (self.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.winfo_screenheight() // 2) - (height // 2)
-        self.geometry(f'{width}x{height}+{x}+{y}')
-    
-    def create_widgets(self):
-        """إنشاء عناصر الواجهة"""
-        main_frame = tk.Frame(self, padx=20, pady=20)
+        # مركز النافذة
+        filter_window.update_idletasks()
+        x = (filter_window.winfo_screenwidth() // 2) - (500 // 2)
+        y = (filter_window.winfo_screenheight() // 2) - (600 // 2)
+        filter_window.geometry(f"500x600+{x}+{y}")
+        
+        main_frame = tk.Frame(filter_window, padx=20, pady=20)
         main_frame.pack(fill='both', expand=True)
         
-        tk.Label(main_frame, text="اختر نوع تقرير الرصيد:", 
-                font=('Arial', 12, 'bold')).pack(pady=(0, 20))
+        tk.Label(main_frame, text="فلترة متقدمة - قوائم الكسر", 
+                font=('Arial', 14, 'bold')).pack(pady=(0, 20))
         
-        balance_types = [
-            ("الكل", "all"),
-            ("رصيد سالب فقط", "negative"),
-            ("رصيد موجب فقط", "positive"),
-            ("رصيد صفر فقط", "zero")
-        ]
+        # مجال الرصيد
+        balance_frame = tk.LabelFrame(main_frame, text="مجال الرصيد", padx=10, pady=10)
+        balance_frame.pack(fill='x', pady=10)
         
-        self.selected_type = tk.StringVar(value="all")
+        tk.Label(balance_frame, text="من:").grid(row=0, column=0, padx=5, pady=5)
+        min_balance_entry = tk.Entry(balance_frame, width=15)
+        min_balance_entry.insert(0, "-1000000")
+        min_balance_entry.grid(row=0, column=1, padx=5, pady=5)
         
-        for text, value in balance_types:
-            rb = tk.Radiobutton(main_frame, text=text, variable=self.selected_type,
-                              value=value, font=('Arial', 10))
-            rb.pack(anchor='w', pady=5)
+        tk.Label(balance_frame, text="إلى:").grid(row=0, column=2, padx=5, pady=5)
+        max_balance_entry = tk.Entry(balance_frame, width=15)
+        max_balance_entry.insert(0, "0")
+        max_balance_entry.grid(row=0, column=3, padx=5, pady=5)
         
+        # أنواع العدادات
+        meter_frame = tk.LabelFrame(main_frame, text="أنواع العدادات", padx=10, pady=10)
+        meter_frame.pack(fill='x', pady=10)
+        
+        meter_types = ['مولدة', 'علبة توزيع', 'رئيسية', 'زبون']
+        meter_vars = {}
+        
+        for i, meter_type in enumerate(meter_types):
+            var = tk.BooleanVar(value=True if meter_type == 'زبون' else False)
+            chk = tk.Checkbutton(meter_frame, text=meter_type, variable=var)
+            chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
+            meter_vars[meter_type] = var
+        
+        # التصنيفات المالية المستثناة
+        category_frame = tk.LabelFrame(main_frame, text="استبعاد التصنيفات", padx=10, pady=10)
+        category_frame.pack(fill='x', pady=10)
+        
+        categories = ['normal', 'free', 'vip', 'free_vip']
+        category_names = {
+            'normal': 'عادي',
+            'free': 'مجاني',
+            'vip': 'VIP',
+            'free_vip': 'مجاني + VIP'
+        }
+        category_vars = {}
+        
+        for i, category in enumerate(categories):
+            var = tk.BooleanVar(value=False)
+            chk = tk.Checkbutton(category_frame, 
+                            text=category_names.get(category, category),
+                            variable=var)
+            chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
+            category_vars[category] = var
+        
+        # القطاع
+        sector_frame = tk.LabelFrame(main_frame, text="القطاع", padx=10, pady=10)
+        sector_frame.pack(fill='x', pady=10)
+        
+        tk.Label(sector_frame, text="اختر قطاع:").pack(side='left', padx=5)
+        
+        sectors = self.report_manager.get_available_sectors()
+        sector_options = [("الكل", None)]
+        sector_options.extend([(s['name'], s['id']) for s in sectors])
+        
+        sector_combo = ttk.Combobox(sector_frame, 
+                                values=[name for name, _ in sector_options],
+                                state='readonly', width=30)
+        sector_combo.pack(side='left', padx=5)
+        sector_combo.current(0)
+        
+        # الترتيب
+        sort_frame = tk.LabelFrame(main_frame, text="طريقة الترتيب", padx=10, pady=10)
+        sort_frame.pack(fill='x', pady=10)
+        
+        sort_var = tk.StringVar(value="balance_desc")
+        
+        tk.Radiobutton(sort_frame, text="الرصيد تنازلياً (الأكبر فالأصغر)", 
+                    variable=sort_var, value="balance_desc").pack(anchor='w', pady=2)
+        tk.Radiobutton(sort_frame, text="الرصيد تصاعدياً (الأصغر فالأكبر)", 
+                    variable=sort_var, value="balance_asc").pack(anchor='w', pady=2)
+        tk.Radiobutton(sort_frame, text="الاسم أبجدياً", 
+                    variable=sort_var, value="name").pack(anchor='w', pady=2)
+        
+        def apply_filter():
+            try:
+                # جمع البيانات
+                min_balance = float(min_balance_entry.get())
+                max_balance = float(max_balance_entry.get())
+                
+                include_meter_types = [mt for mt, var in meter_vars.items() if var.get()]
+                exclude_categories = [cat for cat, var in category_vars.items() if var.get()]
+                
+                selected_sector = sector_combo.get()
+                sector_id = None
+                for name, sid in sector_options:
+                    if name == selected_sector:
+                        sector_id = sid
+                        break
+                
+                sort_by = sort_var.get()
+                
+                filter_window.destroy()
+                self.clear_frames()
+                
+                # تطبيق الفلترة
+                report = self.report_manager.get_negative_balance_lists_report(
+                    min_balance=min_balance,
+                    max_balance=max_balance,
+                    exclude_categories=exclude_categories,
+                    include_meter_types=include_meter_types,
+                    sector_id=sector_id,
+                    sort_by=sort_by
+                )
+                
+                self.display_negative_balance_advanced(report)
+                self.current_report = report
+                self.current_report_type = "negative_balance_advanced"
+                self.export_excel_btn.config(state='normal')
+                self.filter_btn.config(state='normal')
+                self.setup_export_options("negative_balance_advanced")
+                self.update_status("تم توليد تقرير قوائم الكسر مع الفلترة المتقدمة")
+                
+            except ValueError:
+                messagebox.showerror("خطأ", "قيم غير صحيحة. تأكد من إدخال أرقام صحيحة")
+            except Exception as e:
+                self.show_error(f"خطأ في التصفية: {e}")
+        
+        # أزرار التحكم
         btn_frame = tk.Frame(main_frame, pady=20)
         btn_frame.pack(fill='x')
         
-        tk.Button(btn_frame, text="موافق", command=self.on_ok,
-                 bg='#27ae60', fg='white').pack(side='right', padx=5)
-        tk.Button(btn_frame, text="إلغاء", command=self.cancel,
-                 bg='#e74c3c', fg='white').pack(side='right')
-    
-    def on_ok(self):
-        """معالجة زر موافق"""
-        self.balance_type = self.selected_type.get()
-        self.destroy()
-    
-    def cancel(self):
-        """إلغاء العملية"""
-        self.balance_type = None
-        self.destroy()
+        tk.Button(btn_frame, text="تطبيق", command=apply_filter,
+                bg='#27ae60', fg='white', width=15).pack(side='right', padx=5)
+        
+        tk.Button(btn_frame, text="إلغاء", command=filter_window.destroy,
+                bg='#e74c3c', fg='white', width=15).pack(side='right', padx=5)
+        
+        tk.Button(btn_frame, text="إعادة تعيين", 
+                command=lambda: self.reset_filter_fields(min_balance_entry, max_balance_entry,
+                                                        meter_vars, category_vars,
+                                                        sector_combo, sort_var),
+                bg='#3498db', fg='white', width=15).pack(side='right', padx=5)
 
-class SalesGroupDialog(tk.Toplevel):
-    """نافذة اختيار نوع تجميع تقرير المبيعات"""
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("اختر نوع التجميع")
-        self.geometry("300x250")
-        self.group_by = None
+    def reset_filter_fields(self, min_balance_entry, max_balance_entry, 
+                          meter_vars, category_vars, sector_combo, sort_var):
+        """إعادة تعيين حقول الفلترة"""
+        min_balance_entry.delete(0, 'end')
+        min_balance_entry.insert(0, "-1000000")
         
-        self.create_widgets()
-        self.center_window()
+        max_balance_entry.delete(0, 'end')
+        max_balance_entry.insert(0, "0")
+        
+        for var in meter_vars.values():
+            var.set(False)
+        meter_vars['زبون'].set(True)
+        
+        for var in category_vars.values():
+            var.set(False)
+        
+        sector_combo.current(0)
+        sort_var.set("balance_desc")
     
-    def center_window(self):
-        self.update_idletasks()
-        width = self.winfo_width()
-        height = self.winfo_height()
-        x = (self.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.winfo_screenheight() // 2) - (height // 2)
-        self.geometry(f'{width}x{height}+{x}+{y}')
-    
-    def create_widgets(self):
-        main_frame = tk.Frame(self, padx=20, pady=20)
-        main_frame.pack(fill='both', expand=True)
-        
-        tk.Label(main_frame, text="اختر نوع تجميع البيانات:", 
-                font=('Arial', 12, 'bold')).pack(pady=(0, 20))
-        
-        group_types = [
-            ("يومي", "daily"),
-            ("شهري", "monthly"),
-            ("سنوي", "yearly"),
-            ("حسب القطاع", "sector")
-        ]
-        
-        self.selected_group = tk.StringVar(value="daily")
-        
-        for text, value in group_types:
-            rb = tk.Radiobutton(main_frame, text=text, variable=self.selected_group,
-                              value=value, font=('Arial', 10))
-            rb.pack(anchor='w', pady=5)
-        
-        btn_frame = tk.Frame(main_frame, pady=20)
-        btn_frame.pack(fill='x')
-        
-        tk.Button(btn_frame, text="موافق", command=self.ok,
-                 bg='#27ae60', fg='white').pack(side='right', padx=5)
-        tk.Button(btn_frame, text="إلغاء", command=self.cancel,
-                 bg='#e74c3c', fg='white').pack(side='right')
-    
-    def ok(self):
-        self.group_by = self.selected_group.get()
-        self.destroy()
-    
-    def cancel(self):
-        self.destroy()
-
+    def show_free_customers_advanced_filter(self):
+        """عرض نافذة فلترة متقدمة للزبائن المجانيين"""
+        messagebox.showinfo("فلترة", "فلترة الزبائن المجانيين المتقدمة قريباً")
