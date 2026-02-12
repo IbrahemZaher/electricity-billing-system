@@ -1,4 +1,4 @@
-# ui/report_ui.py - النسخة المكتملة
+# ui/report_ui.py - الإصدار المعدل
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
@@ -9,28 +9,93 @@ import webbrowser
 logger = logging.getLogger(__name__)
 
 
+
 class ReportUI(tk.Frame):
     """واجهة التقارير والإحصائيات المحسّنة"""
     
     def __init__(self, parent, user_data):
         super().__init__(parent)
         self.user_data = user_data
-        self.report_manager = None
+        
+        # ✅ محاولة تحميل ReportManager مباشرة (مثل القديم)
+        try:
+            from modules.reports import ReportManager
+            self.report_manager = ReportManager()
+            logger.info("✅ تم تحميل مدير التقارير بنجاح")
+            self.report_loaded = True
+        except ImportError as e:
+            logger.error(f"❌ خطأ في استيراد ReportManager: {e}")
+            messagebox.showerror("خطأ", f"لم يتم تحميل نظام التقارير: {e}")
+            self.report_manager = None
+            self.report_loaded = False
+            return  # أو يمكنك الخروج إذا كان التقرير ضرورياً
+        
         self.current_report = None
         self.current_report_type = None
-        self.create_widgets()
-        self.load_report_manager()
-    
+        self.create_widgets() 
+
     def load_report_manager(self):
         """تحميل مدير التقارير"""
         try:
             from modules.reports import ReportManager
             self.report_manager = ReportManager()
+            logger.info("تم تحميل مدير التقارير بنجاح")
+        except ImportError as e:
+            logger.error(f"خطأ في استيراد ReportManager: {e}")
+            # إنشاء ReportManager وهمي للاختبار
+            self.report_manager = self.create_dummy_report_manager()
+            messagebox.showwarning("تحذير", f"تم تحميل نسخة تجريبية من نظام التقارير: {e}")
         except Exception as e:
             logger.error(f"خطأ في تحميل مدير التقارير: {e}")
-            messagebox.showerror("خطأ", f"فشل تحميل نظام التقارير: {e}")
+            self.report_manager = self.create_dummy_report_manager()
+            messagebox.showwarning("تحذير", f"تم تحميل نسخة تجريبية من نظام التقارير: {e}")
+
+    def create_dummy_report_manager(self):
+        """إنشاء ReportManager تجريبي للاختبار"""
+        class DummyReportManager:
+            def __init__(self):
+                self.dummy = True
+            def get_negative_balance_lists_report_old_interface(self):
+                return {
+                    'sectors': [],
+                    'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            def get_cut_lists_report_old_interface(self):
+                return {
+                    'boxes': [],
+                    'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            def get_free_customers_by_sector_report_old_interface(self):
+                return {
+                    'sectors': [],
+                    'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            def get_dashboard_statistics(self):
+                return {
+                    'total_customers': 0,
+                    'today_invoices': 0,
+                    'today_amount': 0,
+                    'month_invoices': 0,
+                    'month_amount': 0,
+                    'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+        return DummyReportManager()
     
     def create_widgets(self):
+        # ✅ تحقق أولاً إذا تم تحميل ReportManager
+        if not self.report_loaded:
+            error_frame = tk.Frame(self)
+            error_frame.pack(fill='both', expand=True)
+            
+            tk.Label(error_frame, 
+                    text="❌ لم يتم تحميل نظام التقارير",
+                    font=('Arial', 16, 'bold'),
+                    fg='red').pack(pady=20)
+            
+            tk.Label(error_frame,
+                    text="يرجى التحقق من:\n1. وجود ملف modules/reports.py\n2. أن الكود لا يحتوي على أخطاء",
+                    font=('Arial', 12)).pack(pady=10)
+            return
         # شريط الأدوات العلوي
         toolbar = tk.Frame(self, bg='#2c3e50', height=50)
         toolbar.pack(fill='x', padx=10, pady=5)
@@ -214,60 +279,71 @@ class ReportUI(tk.Frame):
         except Exception as e:
             self.show_error(f"خطأ في عرض التقرير: {e}")
     
+
     def show_cut_lists_advanced(self):
         """عرض تقرير قوائم القطع المتقدم مع فلترة متقدمة"""
         if not self.report_manager:
             self.show_error("لم يتم تحميل نظام التقارير")
             return
-        
+
         # نافذة فلترة متقدمة للقطع
         filter_window = tk.Toplevel(self)
         filter_window.title("فلترة قوائم القطع المتقدمة")
         filter_window.geometry("500x650")
-        
+
         # مركز النافذة
         filter_window.update_idletasks()
         x = (filter_window.winfo_screenwidth() // 2) - (500 // 2)
         y = (filter_window.winfo_screenheight() // 2) - (650 // 2)
         filter_window.geometry(f"500x650+{x}+{y}")
-        
-        main_frame = tk.Frame(filter_window, padx=20, pady=20)
-        main_frame.pack(fill='both', expand=True)
-        
+
+        # إطار رئيسي مع Scrollbar
+        main_canvas = tk.Canvas(filter_window)
+        main_canvas.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(filter_window, orient="vertical", command=main_canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+
+        main_canvas.configure(yscrollcommand=scrollbar.set)
+        main_canvas.bind('<Configure>', lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all")))
+
+        main_frame = tk.Frame(main_canvas, padx=20, pady=20)
+        main_canvas.create_window((0, 0), window=main_frame, anchor="nw", width=460)
+
         tk.Label(main_frame, text="فلترة متقدمة - قوائم القطع", 
                 font=('Arial', 14, 'bold')).pack(pady=(0, 20))
-        
+
         # مجال الرصيد
         balance_frame = tk.LabelFrame(main_frame, text="مجال الرصيد للقطع", padx=10, pady=10)
         balance_frame.pack(fill='x', pady=10)
-        
+
         tk.Label(balance_frame, text="من:").grid(row=0, column=0, padx=5, pady=5)
         min_balance_entry = tk.Entry(balance_frame, width=15)
         min_balance_entry.insert(0, "-1000")
         min_balance_entry.grid(row=0, column=1, padx=5, pady=5)
-        
+
         tk.Label(balance_frame, text="إلى:").grid(row=0, column=2, padx=5, pady=5)
         max_balance_entry = tk.Entry(balance_frame, width=15)
         max_balance_entry.insert(0, "0")
         max_balance_entry.grid(row=0, column=3, padx=5, pady=5)
-        
+
         # أنواع العدادات
         meter_frame = tk.LabelFrame(main_frame, text="أنواع العدادات", padx=10, pady=10)
         meter_frame.pack(fill='x', pady=10)
-        
+
         meter_types = ['مولدة', 'علبة توزيع', 'رئيسية', 'زبون']
         meter_vars = {}
-        
+
         for i, meter_type in enumerate(meter_types):
             var = tk.BooleanVar(value=True if meter_type == 'زبون' else False)
             chk = tk.Checkbutton(meter_frame, text=meter_type, variable=var)
             chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
             meter_vars[meter_type] = var
-        
+
         # التصنيفات المالية المستثناة
         category_frame = tk.LabelFrame(main_frame, text="استبعاد التصنيفات", padx=10, pady=10)
         category_frame.pack(fill='x', pady=10)
-        
+
         categories = ['normal', 'free', 'vip', 'free_vip']
         category_names = {
             'normal': 'عادي',
@@ -276,7 +352,7 @@ class ReportUI(tk.Frame):
             'free_vip': 'مجاني + VIP'
         }
         category_vars = {}
-        
+
         for i, category in enumerate(categories):
             var = tk.BooleanVar(value=False)
             chk = tk.Checkbutton(category_frame, 
@@ -284,49 +360,53 @@ class ReportUI(tk.Frame):
                             variable=var)
             chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
             category_vars[category] = var
-        
+
         # القطاع
         sector_frame = tk.LabelFrame(main_frame, text="القطاع", padx=10, pady=10)
         sector_frame.pack(fill='x', pady=10)
-        
+
         tk.Label(sector_frame, text="اختر قطاع:").pack(side='left', padx=5)
-        
+
         sectors = self.report_manager.get_available_sectors()
         sector_options = [("الكل", None)]
         sector_options.extend([(s['name'], s['id']) for s in sectors])
-        
+
         sector_combo = ttk.Combobox(sector_frame, 
                                 values=[name for name, _ in sector_options],
                                 state='readonly', width=30)
         sector_combo.pack(side='left', padx=5)
         sector_combo.current(0)
-        
+
         # حالة القطع
         cut_status_frame = tk.LabelFrame(main_frame, text="حالة القطع", padx=10, pady=10)
         cut_status_frame.pack(fill='x', pady=10)
-        
+
         cut_status_var = tk.StringVar(value="all")
-        
+
         tk.Radiobutton(cut_status_frame, text="الكل", 
                     variable=cut_status_var, value="all").pack(anchor='w', pady=2)
         tk.Radiobutton(cut_status_frame, text="تم القطع فقط", 
                     variable=cut_status_var, value="cut").pack(anchor='w', pady=2)
         tk.Radiobutton(cut_status_frame, text="لم يتم القطع", 
                     variable=cut_status_var, value="not_cut").pack(anchor='w', pady=2)
-        
+
         # الترتيب
         sort_frame = tk.LabelFrame(main_frame, text="طريقة الترتيب", padx=10, pady=10)
         sort_frame.pack(fill='x', pady=10)
-        
+
         sort_var = tk.StringVar(value="balance_desc")
-        
+
         tk.Radiobutton(sort_frame, text="الرصيد تنازلياً (الأكبر فالأصغر)", 
                     variable=sort_var, value="balance_desc").pack(anchor='w', pady=2)
         tk.Radiobutton(sort_frame, text="الرصيد تصاعدياً (الأصغر فالأكبر)", 
                     variable=sort_var, value="balance_asc").pack(anchor='w', pady=2)
         tk.Radiobutton(sort_frame, text="الاسم أبجدياً", 
                     variable=sort_var, value="name").pack(anchor='w', pady=2)
-        
+
+        # أزرار التحكم في إطار سفلي منفصل
+        button_frame = tk.Frame(filter_window)
+        button_frame.pack(side="bottom", fill="x", padx=20, pady=10)
+
         def apply_filter():
             try:
                 # جمع البيانات
@@ -349,21 +429,22 @@ class ReportUI(tk.Frame):
                 filter_window.destroy()
                 self.clear_frames()
                 
-                # تطبيق الفلترة للقطع
-                try:
-                    report = self.report_manager.get_cut_lists_report(
-                        min_balance=min_balance,
-                        max_balance=max_balance,
-                        exclude_categories=exclude_categories,
-                        include_meter_types=include_meter_types,
-                        sector_id=sector_id,
-                        cut_status=cut_status,
-                        sort_by=sort_by
-                    )
-                except Exception as e:
-                    # إذا لم توجد الدالة، نستخدم الدالة الأساسية
-                    logger.warning(f"الدالة مع الفلاتر غير متوفرة: {e}")
-                    report = self.report_manager.get_cut_lists_report()
+                # تحويل include_meter_types إلى only_meter_type
+                only_meter_type = "زبون"  # القيمة الافتراضية
+                if include_meter_types:
+                    # إذا كان هناك أكثر من نوع، نستخدم أول نوع محدد
+                    only_meter_type = include_meter_types[0]
+                    # أو يمكننا دمج الأنواع (إذا كانت الدالة تدعم ذلك)
+                
+                # تطبيق الفلترة للقطع مع المعلمات الصحيحة
+                report = self.report_manager.get_cut_lists_report(
+                    min_balance=min_balance,
+                    max_balance=max_balance,
+                    exclude_categories=exclude_categories,
+                    only_meter_type=only_meter_type,
+                    box_id=sector_id,  # استخدام box_id بدلاً من sector_id
+                    sort_by=sort_by
+                )
                 
                 self.display_cut_lists_advanced(report)
                 self.current_report = report
@@ -377,24 +458,20 @@ class ReportUI(tk.Frame):
                 messagebox.showerror("خطأ", "قيم غير صحيحة. تأكد من إدخال أرقام صحيحة")
             except Exception as e:
                 self.show_error(f"خطأ في التصفية: {e}")
-        
-        # أزرار التحكم
-        btn_frame = tk.Frame(main_frame, pady=20)
-        btn_frame.pack(fill='x')
-        
-        tk.Button(btn_frame, text="تطبيق", command=apply_filter,
-                bg='#27ae60', fg='white', width=15).pack(side='right', padx=5)
-        
-        tk.Button(btn_frame, text="إلغاء", command=filter_window.destroy,
-                bg='#e74c3c', fg='white', width=15).pack(side='right', padx=5)
-        
-        tk.Button(btn_frame, text="إعادة تعيين", 
-                command=lambda: self.reset_filter_fields_cut(
-                    min_balance_entry, max_balance_entry,
-                    meter_vars, category_vars,
-                    sector_combo, cut_status_var, sort_var
-                ),
-                bg='#3498db', fg='white', width=15).pack(side='right', padx=5)
+
+        tk.Button(button_frame, text="تطبيق", command=apply_filter,
+            bg='#27ae60', fg='white', width=15).pack(side='right', padx=5)
+
+        tk.Button(button_frame, text="إلغاء", command=filter_window.destroy,
+            bg='#e74c3c', fg='white', width=15).pack(side='right', padx=5)
+
+        tk.Button(button_frame, text="إعادة تعيين",
+            command=lambda: self.reset_filter_fields_cut(
+                min_balance_entry, max_balance_entry,
+                meter_vars, category_vars,
+                sector_combo, cut_status_var, sort_var
+            ),
+            bg='#3498db', fg='white', width=15).pack(side='right', padx=5)
     
     def reset_filter_fields_cut(self, min_entry, max_entry, meter_vars, 
                                category_vars, sector_combo, cut_status_var, sort_var):
@@ -768,7 +845,7 @@ class ReportUI(tk.Frame):
         scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
         scrollbar_x.pack(side='bottom', fill='x')
         
-        tree = tttk.Treeview(tree_frame, 
+        tree = ttk.Treeview(tree_frame, 
                            yscrollcommand=scrollbar_y.set,
                            xscrollcommand=scrollbar_x.set,
                            columns=('الاسم', 'رقم العلبة', 'الرصيد', 'السحب', 'التأشيرة', 'الجديد', 'التصنيف', 'الهاتف', 'نوع العداد'))

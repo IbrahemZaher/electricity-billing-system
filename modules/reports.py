@@ -1504,114 +1504,114 @@ class ReportManager:
         """واجهة للدالة القديمة للحفاظ على التوافق"""
         return self.get_free_customers_by_sector_report_old()
 
-    # إضافة دوال التصدير إلى Excel
-def export_free_customers_to_excel(self, report_data: Dict[str, Any], filename: str = None) -> Tuple[bool, str]:
-    """تصدير تقرير الزبائن المجانيين إلى Excel"""
-    try:
-        if not filename:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"الزبائن_المجانيين_{timestamp}.xlsx"
-        
-        export_dir = "exports"
-        os.makedirs(export_dir, exist_ok=True)
-        filepath = os.path.join(export_dir, filename)
-        
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            # ورقة الإجماليات
-            summary_data = []
-            summary_data.append(['تقرير الزبائن المجانيين', report_data.get('report_title', '')])
-            summary_data.append(['تاريخ الإنشاء', report_data.get('generated_at', '')])
-            summary_data.append([''])
-            summary_data.append(['الإجماليات:'])
+        # إضافة دوال التصدير إلى Excel
+    def export_free_customers_to_excel(self, report_data: Dict[str, Any], filename: str = None) -> Tuple[bool, str]:
+        """تصدير تقرير الزبائن المجانيين إلى Excel"""
+        try:
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"الزبائن_المجانيين_{timestamp}.xlsx"
             
-            total = report_data.get('total', {})
-            summary_data.append(['عدد الزبائن المجانيين', f"{total.get('free_count', 0):,}"])
-            summary_data.append(['إجمالي الرصيد', f"{total.get('total_balance', 0):,.0f}"])
-            summary_data.append(['إجمالي السحب', f"{total.get('total_withdrawal', 0):,.0f}"])
-            summary_data.append(['إجمالي التأشيرة', f"{total.get('total_visa_balance', 0):,.0f}"])
-            summary_data.append(['الرصيد الجديد', f"{total.get('calculated_balance', 0):,.0f}"])
-            summary_data.append([''])
+            export_dir = "exports"
+            os.makedirs(export_dir, exist_ok=True)
+            filepath = os.path.join(export_dir, filename)
             
-            # إضافة الفلاتر
-            filters = report_data.get('filters', {})
-            summary_data.append(['الفلاتر المطبقة:'])
-            summary_data.append(['تضمين VIP', 'نعم' if filters.get('include_vip', True) else 'لا'])
-            summary_data.append(['القطاع', filters.get('sector_id', 'الكل')])
-            
-            df_summary = pd.DataFrame(summary_data)
-            df_summary.to_excel(writer, sheet_name='ملخص', index=False, header=False)
-            
-            # ورقة لكل قطاع
-            for sector_data in report_data.get('sectors', []):
-                sector_name = sector_data['sector_name']
-                customers = sector_data.get('customers', [])
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                # ورقة الإجماليات
+                summary_data = []
+                summary_data.append(['تقرير الزبائن المجانيين', report_data.get('report_title', '')])
+                summary_data.append(['تاريخ الإنشاء', report_data.get('generated_at', '')])
+                summary_data.append([''])
+                summary_data.append(['الإجماليات:'])
                 
-                if customers:
-                    # تحضير البيانات
-                    data_list = []
-                    for customer in customers:
-                        data_list.append([
-                            customer['name'],
-                            customer['box_number'],
-                            customer['current_balance'],
-                            customer['withdrawal_amount'],
-                            customer['visa_balance'],
-                            customer['current_balance'] - customer['withdrawal_amount'] + customer['visa_balance'],
-                            customer.get('financial_category', ''),
-                            customer.get('meter_type', ''),
-                            customer.get('phone_number', ''),
-                            customer.get('last_counter_reading', '')
-                        ])
+                total = report_data.get('total', {})
+                summary_data.append(['عدد الزبائن المجانيين', f"{total.get('free_count', 0):,}"])
+                summary_data.append(['إجمالي الرصيد', f"{total.get('total_balance', 0):,.0f}"])
+                summary_data.append(['إجمالي السحب', f"{total.get('total_withdrawal', 0):,.0f}"])
+                summary_data.append(['إجمالي التأشيرة', f"{total.get('total_visa_balance', 0):,.0f}"])
+                summary_data.append(['الرصيد الجديد', f"{total.get('calculated_balance', 0):,.0f}"])
+                summary_data.append([''])
+                
+                # إضافة الفلاتر
+                filters = report_data.get('filters', {})
+                summary_data.append(['الفلاتر المطبقة:'])
+                summary_data.append(['تضمين VIP', 'نعم' if filters.get('include_vip', True) else 'لا'])
+                summary_data.append(['القطاع', filters.get('sector_id', 'الكل')])
+                
+                df_summary = pd.DataFrame(summary_data)
+                df_summary.to_excel(writer, sheet_name='ملخص', index=False, header=False)
+                
+                # ورقة لكل قطاع
+                for sector_data in report_data.get('sectors', []):
+                    sector_name = sector_data['sector_name']
+                    customers = sector_data.get('customers', [])
                     
-                    # إنشاء DataFrame
-                    columns = [
-                        'اسم الزبون', 'رقم العلبة', 'الرصيد الحالي', 
-                        'مبلغ السحب', 'رصيد التأشيرة', 'الرصيد الجديد',
-                        'التصنيف المالي', 'نوع العداد', 'رقم الهاتف', 'آخر قراءة'
-                    ]
-                    
-                    df_sector = pd.DataFrame(data_list, columns=columns)
-                    
-                    # إضافة صف الإجمالي
-                    total_row = pd.DataFrame([[
-                        f"إجمالي {sector_name}",
-                        f"{sector_data['free_count']} زبون",
-                        sector_data['total_balance'],
-                        sector_data['total_withdrawal'],
-                        sector_data['total_visa_balance'],
-                        sector_data['calculated_balance'],
-                        '',
-                        '',
-                        '',
-                        ''
-                    ]], columns=columns)
-                    
-                    df_sector = pd.concat([df_sector, total_row], ignore_index=True)
-                    
-                    # حفظ في Excel
-                    sheet_name = sector_name[:31]
-                    df_sector.to_excel(writer, sheet_name=sheet_name, index=False)
+                    if customers:
+                        # تحضير البيانات
+                        data_list = []
+                        for customer in customers:
+                            data_list.append([
+                                customer['name'],
+                                customer['box_number'],
+                                customer['current_balance'],
+                                customer['withdrawal_amount'],
+                                customer['visa_balance'],
+                                customer['current_balance'] - customer['withdrawal_amount'] + customer['visa_balance'],
+                                customer.get('financial_category', ''),
+                                customer.get('meter_type', ''),
+                                customer.get('phone_number', ''),
+                                customer.get('last_counter_reading', '')
+                            ])
+                        
+                        # إنشاء DataFrame
+                        columns = [
+                            'اسم الزبون', 'رقم العلبة', 'الرصيد الحالي', 
+                            'مبلغ السحب', 'رصيد التأشيرة', 'الرصيد الجديد',
+                            'التصنيف المالي', 'نوع العداد', 'رقم الهاتف', 'آخر قراءة'
+                        ]
+                        
+                        df_sector = pd.DataFrame(data_list, columns=columns)
+                        
+                        # إضافة صف الإجمالي
+                        total_row = pd.DataFrame([[
+                            f"إجمالي {sector_name}",
+                            f"{sector_data['free_count']} زبون",
+                            sector_data['total_balance'],
+                            sector_data['total_withdrawal'],
+                            sector_data['total_visa_balance'],
+                            sector_data['calculated_balance'],
+                            '',
+                            '',
+                            '',
+                            ''
+                        ]], columns=columns)
+                        
+                        df_sector = pd.concat([df_sector, total_row], ignore_index=True)
+                        
+                        # حفظ في Excel
+                        sheet_name = sector_name[:31]
+                        df_sector.to_excel(writer, sheet_name=sheet_name, index=False)
+                
+                # تنسيق الأعمدة
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    for column in worksheet.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = min(max_length + 2, 50)
+                        worksheet.column_dimensions[column_letter].width = adjusted_width
             
-            # تنسيق الأعمدة
-            for sheet_name in writer.sheets:
-                worksheet = writer.sheets[sheet_name]
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if cell.value and len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-        
-        return True, filepath
-        
-    except Exception as e:
-        logger.error(f"خطأ في تصدير تقرير الزبائن المجانيين: {e}")
-        return False, str(e)
+            return True, filepath
+            
+        except Exception as e:
+            logger.error(f"خطأ في تصدير تقرير الزبائن المجانيين: {e}")
+            return False, str(e)
 
     def export_to_excel_generic(self, report_data: Dict[str, Any], report_type: str) -> Tuple[bool, str]:
         """دالة عامة لتصدير أي تقرير إلى Excel"""
@@ -1677,3 +1677,5 @@ def export_free_customers_to_excel(self, report_data: Dict[str, Any], filename: 
         except Exception as e:
             logger.error(f"خطأ في تصدير التقرير العام: {e}")
             return False, str(e)
+
+            

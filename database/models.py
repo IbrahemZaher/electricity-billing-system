@@ -190,23 +190,25 @@ class Models:
                 "CREATE INDEX IF NOT EXISTS idx_customers_box_number ON customers(box_number);",
                 "CREATE INDEX IF NOT EXISTS idx_customers_sector_id ON customers(sector_id);",
                 "CREATE INDEX IF NOT EXISTS idx_customers_is_active ON customers(is_active);",
-                
+                "CREATE INDEX IF NOT EXISTS idx_customers_parent_meter ON customers(parent_meter_id);",
+                "CREATE INDEX IF NOT EXISTS idx_customers_meter_type ON customers(meter_type);",
+
                 "CREATE INDEX IF NOT EXISTS idx_invoices_customer_id ON invoices(customer_id);",
                 "CREATE INDEX IF NOT EXISTS idx_invoices_payment_date ON invoices(payment_date);",
                 "CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON invoices(invoice_number);",
-                
+
                 "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);",
                 "CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);",
-                
+
                 "CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);",
                 "CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);"
             ]
-            
+
             for index_sql in indexes:
                 cursor.execute(index_sql)
-            
+
             logger.info("تم إنشاء الفهارس للبحث السريع")
-            
+
         except Exception as e:
             logger.error(f"خطأ في إنشاء الفهارس: {e}")
             raise
@@ -241,13 +243,15 @@ class Models:
             )
             """,
             
-            # جدول الزبائن
+            # جدول الزبائن - النسخة المحدثة
             """
             CREATE TABLE IF NOT EXISTS customers (
                 id SERIAL PRIMARY KEY,
                 sector_id INTEGER REFERENCES sectors(id),
                 box_number VARCHAR(20),
                 serial_number VARCHAR(20),
+                parent_meter_id INTEGER,  -- أضف هذا العمود
+                meter_type VARCHAR(50) DEFAULT 'زبون',  -- أضف هذا العمود
                 name VARCHAR(100) NOT NULL,
                 phone_number VARCHAR(20),
                 telegram_username VARCHAR(50),
@@ -485,6 +489,8 @@ class Models:
             self.update_customer_history_table()
             # تحديث جدول المستخدمين
             self.update_users_table()
+            # تحديث جدول الزبائن
+            self.update_customers_table()
             # إنشاء فهارس إضافية لجدول التاريخ بعد التحديث
             self.create_history_indexes()
             # تصحيح القيم النصية في الأعمدة الرقمية
@@ -1159,7 +1165,9 @@ class Models:
                     ('vip_reason', 'TEXT'),
                     ('vip_no_cut_days', 'INTEGER DEFAULT 0'),
                     ('vip_expiry_date', 'DATE'),
-                    ('vip_grace_period', 'INTEGER DEFAULT 0')
+                    ('vip_grace_period', 'INTEGER DEFAULT 0'),
+                    ('parent_meter_id', 'INTEGER'),
+                    ('meter_type', "VARCHAR(50) DEFAULT 'زبون'"),  # أضف هذا العمود
                 ]
                 
                 for column_name, column_type in new_columns:
