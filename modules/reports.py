@@ -1,4 +1,4 @@
-# modules/reports.py - النسخة المحسنة
+# modules/reports.py - النسخة المحسنة (بدون عمود الرصيد الجديد)
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
@@ -16,7 +16,6 @@ class ReportManager:
         self.customer_manager = None
 
     def _get_customer_manager(self):
-        """استيراد CustomerManager عند الحاجة"""
         if self.customer_manager is None:
             from modules.customers import CustomerManager
             self.customer_manager = CustomerManager()
@@ -25,13 +24,9 @@ class ReportManager:
     # ============== الوظائف القديمة من reports.py (الإصدار السابق) ==============
 
     def get_negative_balance_lists_report_old(self, financial_category: str = None, sector_id: int = None) -> Dict[str, Any]:
-        """
-        تقرير قوائم الكسر: الزبائن ذوو الرصيد السالب مرتبين من الأكبر إلى الأصغر لكل قطاع مع الفلترة.
-        """
         from modules.customers import CustomerManager
         cm = CustomerManager()
         data = cm.get_negative_balance_customers_by_sector(financial_category=financial_category, sector_id=sector_id)
-        # تجهيز ملخصات
         sectors_list = []
         total_count = 0
         total_balance = 0
@@ -47,21 +42,14 @@ class ReportManager:
             total_balance += sum(c['current_balance'] for c in customers)
         return {
             'sectors': sectors_list,
-            'total': {
-                'count': total_count,
-                'total_negative_balance': total_balance
-            },
+            'total': {'count': total_count, 'total_negative_balance': total_balance},
             'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
     def get_cut_lists_report_old(self, min_balance: float = 0, max_balance: float = -1000, exclude_categories: list = None) -> Dict[str, Any]:
-        """
-        تقرير قوائم القطع: لكل علبة قائمة زبائنها ذوي الرصيد السالب ضمن مجال محدد مع استثناءات التصنيف المالي.
-        """
         from modules.customers import CustomerManager
         cm = CustomerManager()
         data = cm.get_cut_lists_by_box(min_balance=min_balance, max_balance=max_balance, exclude_categories=exclude_categories)
-        # تجهيز ملخصات
         boxes_list = []
         total_customers = 0
         for box_id, info in data.items():
@@ -81,10 +69,8 @@ class ReportManager:
         }
 
     def get_free_customers_by_sector_report_old(self) -> Dict[str, Any]:
-        """تقرير الزبائن المجانيين - نسخة مبسطة جداً"""
         try:
             with db.get_cursor() as cursor:
-                # جلب الزبائن المجانيين فقط
                 cursor.execute("""
                     SELECT 
                         c.name,
@@ -100,16 +86,12 @@ class ReportManager:
                     AND c.is_active = TRUE
                     ORDER BY s.name, c.name
                 """)
-                
                 customers = cursor.fetchall()
-                
-                # تجميع حسب القطاع
                 sectors_dict = {}
                 for customer in customers:
                     sector = customer['sector_name'] or 'بدون قطاع'
                     if sector not in sectors_dict:
                         sectors_dict[sector] = []
-                    
                     sectors_dict[sector].append({
                         'name': customer['name'],
                         'box_number': customer['box_number'],
@@ -118,13 +100,10 @@ class ReportManager:
                         'visa_balance': customer['visa_balance'],
                         'phone_number': customer['phone_number']
                     })
-                
-                # تحويل إلى الصيغة المطلوبة
                 sectors_list = []
                 total_free_count = 0
                 total_balance = 0
                 total_visa_balance = 0
-                
                 for sector_name, customers_list in sectors_dict.items():
                     sectors_list.append({
                         'sector_name': sector_name,
@@ -133,11 +112,9 @@ class ReportManager:
                         'total_balance': sum(c['current_balance'] for c in customers_list),
                         'total_visa_balance': sum(c['visa_balance'] for c in customers_list)
                     })
-                    
                     total_free_count += len(customers_list)
                     total_balance += sum(c['current_balance'] for c in customers_list)
                     total_visa_balance += sum(c['visa_balance'] for c in customers_list)
-                
                 return {
                     'sectors': sectors_list,
                     'total': {
@@ -147,7 +124,6 @@ class ReportManager:
                     },
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
         except Exception as e:
             logger.error(f"خطأ في تقرير الزبائن المجانيين: {e}")
             return {
@@ -159,9 +135,6 @@ class ReportManager:
     # ============== تقارير الزبائن القديمة ==============
 
     def get_customer_balance_report(self, balance_type: str = "all") -> Dict[str, Any]:
-        """تقرير رصيد الزبائن
-        balance_type: all, negative, positive, zero
-        """
         try:
             with db.get_cursor() as cursor:
                 query = """
@@ -185,24 +158,18 @@ class ReportManager:
                 LEFT JOIN sectors s ON c.sector_id = s.id
                 WHERE c.is_active = TRUE
                 """
-                
                 if balance_type == "negative":
                     query += " AND c.current_balance < 0"
                 elif balance_type == "positive":
                     query += " AND c.current_balance > 0"
                 elif balance_type == "zero":
                     query += " AND c.current_balance = 0"
-                
                 query += " ORDER BY c.current_balance"
-                
                 cursor.execute(query)
                 customers = cursor.fetchall()
-                
-                # حساب الإجماليات
                 total_balance = 0
                 negative_total = 0
                 positive_total = 0
-                
                 for customer in customers:
                     balance = customer['current_balance']
                     total_balance += balance
@@ -210,7 +177,6 @@ class ReportManager:
                         negative_total += balance
                     elif balance > 0:
                         positive_total += balance
-                
                 return {
                     'customers': [dict(c) for c in customers],
                     'total_count': len(customers),
@@ -220,13 +186,11 @@ class ReportManager:
                     'report_type': balance_type,
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
         except Exception as e:
             logger.error(f"خطأ في توليد تقرير الرصيد: {e}")
             return {'error': str(e)}
 
     def get_customers_by_sector_report(self) -> Dict[str, Any]:
-        """تقرير توزيع الزبائن حسب القطاع"""
         try:
             with db.get_cursor() as cursor:
                 cursor.execute("""
@@ -245,14 +209,11 @@ class ReportManager:
                 GROUP BY s.id, s.name
                 ORDER BY customer_count DESC
                 """)
-                
                 sectors = cursor.fetchall()
-                
                 return {
                     'sectors': [dict(s) for s in sectors],
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
         except Exception as e:
             logger.error(f"خطأ في توليد تقرير القطاعات: {e}")
             return {'error': str(e)}
@@ -261,17 +222,12 @@ class ReportManager:
 
     def get_sales_report(self, start_date: str = None, end_date: str = None, 
                         group_by: str = 'daily') -> Dict[str, Any]:
-        """تقرير المبيعات
-        group_by: daily, monthly, yearly, sector
-        """
         try:
             if not start_date:
                 start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
             if not end_date:
                 end_date = datetime.now().strftime("%Y-%m-%d")
-            
             with db.get_cursor() as cursor:
-                # بناء الاستعلام حسب نوع التجميع
                 if group_by == 'daily':
                     group_clause = "DATE(i.payment_date)"
                     select_fields = "DATE(i.payment_date) as period"
@@ -284,7 +240,6 @@ class ReportManager:
                 elif group_by == 'sector':
                     group_clause = "s.id"
                     select_fields = "s.name as period"
-                
                 query = f"""
                 SELECT 
                     {select_fields},
@@ -298,20 +253,15 @@ class ReportManager:
                     MAX(i.total_amount) as max_amount
                 FROM invoices i
                 """
-                
                 if group_by == 'sector':
                     query += " LEFT JOIN sectors s ON i.sector_id = s.id"
-                
                 query += f"""
                 WHERE i.payment_date BETWEEN %s AND %s
                 GROUP BY {group_clause}
                 ORDER BY period
                 """
-                
                 cursor.execute(query, (start_date, end_date))
                 sales_data = cursor.fetchall()
-                
-                # حساب الإجماليات
                 cursor.execute("""
                 SELECT 
                     COUNT(i.id) as total_invoices,
@@ -322,32 +272,23 @@ class ReportManager:
                 FROM invoices i
                 WHERE i.payment_date BETWEEN %s AND %s
                 """, (start_date, end_date))
-                
                 totals = cursor.fetchone()
-                
                 return {
-                    'period': {
-                        'start_date': start_date,
-                        'end_date': end_date
-                    },
+                    'period': {'start_date': start_date, 'end_date': end_date},
                     'group_by': group_by,
                     'sales_data': [dict(d) for d in sales_data],
                     'totals': dict(totals),
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
         except Exception as e:
             logger.error(f"خطأ في توليد تقرير المبيعات: {e}")
             return {'error': str(e)}
 
     def get_daily_sales_summary(self, date: str = None) -> Dict[str, Any]:
-        """ملخص المبيعات اليومية"""
         try:
             if not date:
                 date = datetime.now().strftime("%Y-%m-%d")
-            
             with db.get_cursor() as cursor:
-                # بيانات اليوم
                 cursor.execute("""
                 SELECT 
                     COUNT(*) as invoice_count,
@@ -359,12 +300,8 @@ class ReportManager:
                 FROM invoices
                 WHERE payment_date = %s
                 """, (date,))
-                
                 today = cursor.fetchone()
-                
-                # بيانات الأمس للمقارنة
                 yesterday = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-                
                 cursor.execute("""
                 SELECT 
                     COUNT(*) as invoice_count,
@@ -372,16 +309,10 @@ class ReportManager:
                 FROM invoices
                 WHERE payment_date = %s
                 """, (yesterday,))
-                
                 yesterday_data = cursor.fetchone()
-                
-                # حساب نسبة التغير
+                change_percentage = 0
                 if yesterday_data and yesterday_data['total_amount']:
                     change_percentage = ((today['total_amount'] or 0) - yesterday_data['total_amount']) / yesterday_data['total_amount'] * 100
-                else:
-                    change_percentage = 0
-                
-                # أفضل 5 زبائن في اليوم
                 cursor.execute("""
                 SELECT 
                     c.name as customer_name,
@@ -396,9 +327,7 @@ class ReportManager:
                 ORDER BY total_amount DESC
                 LIMIT 5
                 """, (date,))
-                
                 top_customers = cursor.fetchall()
-                
                 return {
                     'date': date,
                     'today': dict(today),
@@ -407,7 +336,6 @@ class ReportManager:
                     'top_customers': [dict(c) for c in top_customers],
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
         except Exception as e:
             logger.error(f"خطأ في توليد ملخص المبيعات اليومية: {e}")
             return {'error': str(e)}
@@ -416,13 +344,11 @@ class ReportManager:
 
     def get_invoice_detailed_report(self, start_date: str = None, end_date: str = None,
                                 customer_id: int = None, sector_id: int = None) -> Dict[str, Any]:
-        """تقرير تفصيلي للفواتير"""
         try:
             if not start_date:
                 start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
             if not end_date:
                 end_date = datetime.now().strftime("%Y-%m-%d")
-            
             with db.get_cursor() as cursor:
                 query = """
                 SELECT 
@@ -449,32 +375,22 @@ class ReportManager:
                 LEFT JOIN users u ON i.user_id = u.id
                 WHERE i.payment_date BETWEEN %s AND %s
                 """
-                
                 params = [start_date, end_date]
-                
                 if customer_id:
                     query += " AND i.customer_id = %s"
                     params.append(customer_id)
-                
                 if sector_id:
                     query += " AND i.sector_id = %s"
                     params.append(sector_id)
-                
                 query += " ORDER BY i.payment_date DESC, i.payment_time DESC"
-                
                 cursor.execute(query, params)
                 invoices = cursor.fetchall()
-                
                 return {
-                    'period': {
-                        'start_date': start_date,
-                        'end_date': end_date
-                    },
+                    'period': {'start_date': start_date, 'end_date': end_date},
                     'invoices': [dict(i) for i in invoices],
                     'total_count': len(invoices),
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
         except Exception as e:
             logger.error(f"خطأ في توليد تقرير الفواتير: {e}")
             return {'error': str(e)}
@@ -482,44 +398,32 @@ class ReportManager:
     # ============== التقارير الإحصائية القديمة ==============
 
     def get_dashboard_statistics(self) -> Dict[str, Any]:
-        """إحصائيات لوحة التحكم"""
         try:
             with db.get_cursor() as cursor:
-                # إجمالي الزبائن
                 cursor.execute("SELECT COUNT(*) FROM customers WHERE is_active = TRUE")
                 total_customers = cursor.fetchone()['count']
-                
-                # الفواتير اليوم
                 today = datetime.now().strftime("%Y-%m-%d")
                 cursor.execute("""
                 SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
                 FROM invoices WHERE payment_date = %s
                 """, (today,))
                 today_result = cursor.fetchone()
-                
-                # الفواتير الشهر
                 first_day_of_month = datetime.now().replace(day=1).strftime("%Y-%m-%d")
                 cursor.execute("""
                 SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
                 FROM invoices WHERE payment_date >= %s
                 """, (first_day_of_month,))
                 month_result = cursor.fetchone()
-                
-                # الرصيد السالب
                 cursor.execute("""
                 SELECT COUNT(*), COALESCE(SUM(current_balance), 0) as total
                 FROM customers WHERE is_active = TRUE AND current_balance < 0
                 """)
                 negative_result = cursor.fetchone()
-                
-                # الرصيد الموجب
                 cursor.execute("""
                 SELECT COUNT(*), COALESCE(SUM(current_balance), 0) as total
                 FROM customers WHERE is_active = TRUE AND current_balance > 0
                 """)
                 positive_result = cursor.fetchone()
-                
-                # أفضل القطاعات أداءً
                 cursor.execute("""
                 SELECT s.name, COUNT(i.id) as invoice_count, 
                     COALESCE(SUM(i.total_amount), 0) as total_amount
@@ -531,7 +435,6 @@ class ReportManager:
                 LIMIT 5
                 """, (first_day_of_month,))
                 top_sectors = cursor.fetchall()
-                
                 return {
                     'total_customers': total_customers,
                     'today_invoices': today_result['count'],
@@ -545,13 +448,11 @@ class ReportManager:
                     'top_sectors': [dict(s) for s in top_sectors],
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
         except Exception as e:
             logger.error(f"خطأ في جلب إحصائيات لوحة التحكم: {e}")
             return self.get_sample_statistics()
 
     def get_sample_statistics(self) -> Dict[str, Any]:
-        """إرجاع إحصائيات تجريبية في حالة الخطأ"""
         return {
             'total_customers': 150,
             'today_invoices': 25,
@@ -566,7 +467,7 @@ class ReportManager:
             'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
-    # ============== الوظائف الجديدة المحسنة ==============
+    # ============== الوظائف الجديدة المحسنة (بدون الرصيد الجديد) ==============
 
     def get_negative_balance_lists_report(
         self, 
@@ -578,26 +479,15 @@ class ReportManager:
         sort_by: str = "balance_desc"
     ) -> Dict[str, Any]:
         """
-        تقرير قوائم الكسر المحسّن مع خيارات ديناميكية متعددة
-        
-        Args:
-            min_balance: الحد الأدنى للرصيد (سالب)
-            max_balance: الحد الأقصى للرصيد (سالب، الافتراضي 0)
-            exclude_categories: قائمة التصنيفات المالية المستثناة
-            include_meter_types: قائمة أنواع العدادات المطلوبة
-            sector_id: رقم القطاع المحدد
-            sort_by: طريقة الترتيب (balance_desc, balance_asc, name)
+        تقرير قوائم الكسر المحسّن - بدون حساب الرصيد الجديد
         """
         try:
-            # القيم الافتراضية
             if min_balance is None:
-                min_balance = -1000000  # قيمة كبيرة جداً لاستيعاب كل القيم
-            
+                min_balance = -1000000
             if exclude_categories is None:
                 exclude_categories = []
-            
             if include_meter_types is None:
-                include_meter_types = ["زبون"]  # فقط الزبائن افتراضياً
+                include_meter_types = ["زبون"]
             
             with db.get_cursor() as cursor:
                 query = """
@@ -625,29 +515,21 @@ class ReportManager:
                     AND c.current_balance < 0
                     AND c.current_balance BETWEEN %s AND %s
                 """
-                
                 params = [min_balance, max_balance]
-                
-                # فلترة حسب القطاع
                 if sector_id:
                     query += " AND c.sector_id = %s"
                     params.append(sector_id)
-                
-                # فلترة حسب التصنيفات المالية
                 if exclude_categories:
                     placeholders = ', '.join(['%s'] * len(exclude_categories))
                     query += f" AND c.financial_category NOT IN ({placeholders})"
                     params.extend(exclude_categories)
-                
-                # فلترة حسب أنواع العدادات
                 if include_meter_types:
                     placeholders = ', '.join(['%s'] * len(include_meter_types))
                     query += f" AND c.meter_type IN ({placeholders})"
                     params.extend(include_meter_types)
                 
-                # إضافة الترتيب
                 if sort_by == "balance_desc":
-                    query += " ORDER BY c.current_balance ASC"  # ASC لأن الرصيد سالب (-1000 < -100)
+                    query += " ORDER BY c.current_balance ASC"
                 elif sort_by == "balance_asc":
                     query += " ORDER BY c.current_balance DESC"
                 elif sort_by == "name":
@@ -658,12 +540,10 @@ class ReportManager:
                 cursor.execute(query, params)
                 customers = cursor.fetchall()
                 
-                # تجميع حسب القطاع
                 sectors_dict = {}
                 for customer in customers:
                     sector = customer['sector_name'] or 'بدون قطاع'
                     sector_id_val = customer['sector_id']
-                    
                     if sector not in sectors_dict:
                         sectors_dict[sector] = {
                             'sector_id': sector_id_val,
@@ -674,13 +554,11 @@ class ReportManager:
                             'customer_count': 0
                         }
                     
-                    # حساب رصيد الجديد بعد السحب والتأشيرة
                     new_balance = customer['current_balance']
                     withdrawal = customer['withdrawal_amount'] or 0
                     visa = customer['visa_balance'] or 0
-                    # الرصيد الجديد = الرصيد الحالي - السحب + التأشيرة
-                    calculated_new_balance = new_balance - withdrawal + visa
                     
+                    # ❌ تم حذف calculated_new_balance نهائياً
                     customer_dict = {
                         'id': customer['customer_id'],
                         'name': customer['customer_name'],
@@ -689,7 +567,6 @@ class ReportManager:
                         'current_balance': float(new_balance),
                         'withdrawal_amount': float(withdrawal),
                         'visa_balance': float(visa),
-                        'calculated_new_balance': float(calculated_new_balance),
                         'financial_category': customer['financial_category'],
                         'phone_number': customer['phone_number'],
                         'meter_type': customer['meter_type'],
@@ -703,18 +580,17 @@ class ReportManager:
                     sectors_dict[sector]['total_visa'] += visa
                     sectors_dict[sector]['customer_count'] += 1
                 
-                # تحويل إلى قائمة
                 sectors_list = []
                 grand_total = {
                     'customer_count': 0,
                     'total_balance': 0,
                     'total_withdrawal': 0,
                     'total_visa': 0,
-                    'total_calculated_balance': 0
+                    # ❌ تم حذف total_calculated_balance
                 }
                 
                 for sector_name, data in sectors_dict.items():
-                    if data['customers']:  # فقط القطاعات التي بها زبائن
+                    if data['customers']:
                         sectors_list.append({
                             'sector_name': sector_name,
                             'sector_id': data['sector_id'],
@@ -723,26 +599,19 @@ class ReportManager:
                             'total_balance': data['total_balance'],
                             'total_withdrawal': data['total_withdrawal'],
                             'total_visa': data['total_visa'],
-                            'total_calculated_balance': data['total_balance'] - data['total_withdrawal'] + data['total_visa']
+                            # ❌ تم حذف total_calculated_balance
                         })
-                        
                         grand_total['customer_count'] += data['customer_count']
                         grand_total['total_balance'] += data['total_balance']
                         grand_total['total_withdrawal'] += data['total_withdrawal']
                         grand_total['total_visa'] += data['total_visa']
-                        grand_total['total_calculated_balance'] += (data['total_balance'] - data['total_withdrawal'] + data['total_visa'])
                 
-                # حساب المتوسطات
                 if grand_total['customer_count'] > 0:
                     grand_total['average_balance'] = grand_total['total_balance'] / grand_total['customer_count']
                     grand_total['average_withdrawal'] = grand_total['total_withdrawal'] / grand_total['customer_count']
                     grand_total['average_visa'] = grand_total['total_visa'] / grand_total['customer_count']
                 else:
-                    grand_total.update({
-                        'average_balance': 0,
-                        'average_withdrawal': 0,
-                        'average_visa': 0
-                    })
+                    grand_total.update({'average_balance': 0, 'average_withdrawal': 0, 'average_visa': 0})
                 
                 return {
                     'sectors': sectors_list,
@@ -768,7 +637,7 @@ class ReportManager:
                     'total_balance': 0,
                     'total_withdrawal': 0,
                     'total_visa': 0,
-                    'total_calculated_balance': 0
+                    # ❌ تم حذف total_calculated_balance
                 },
                 'filters': {},
                 'error': str(e),
@@ -787,38 +656,21 @@ class ReportManager:
         sort_by: str = "balance_asc"
     ) -> Dict[str, Any]:
         """
-        تقرير قوائم القطع المحسّن مع خيارات ديناميكية متقدمة
-        
-        Args:
-            min_balance: الحد الأدنى للرصيد للقطع (سالب)
-            max_balance: الحد الأقصى للرصيد للقطع (سالب)
-            exclude_categories: تصنيفات مالية مستثناة
-            exclude_free: استبعاد الزبائن المجانيين
-            exclude_vip: استبعاد زبائن VIP
-            only_meter_type: نوع العداد المطلوب (افتراضي: زبون)
-            box_id: رقم علبة محددة
-            sort_by: طريقة الترتيب
+        تقرير قوائم القطع المحسّن - بدون حساب الرصيد الجديد
         """
         try:
-            # القيم الافتراضية
             if min_balance is None:
                 min_balance = -1000
-            
             if max_balance is None:
                 max_balance = 0
-            
             if exclude_categories is None:
                 exclude_categories = []
-            
-            # إضافة free و vip إذا كان الاستبعاد مفعلاً
             if exclude_free and 'free' not in exclude_categories:
                 exclude_categories.extend(['free', 'free_vip'])
-            
             if exclude_vip and 'vip' not in exclude_categories:
                 exclude_categories.extend(['vip', 'free_vip'])
             
             with db.get_cursor() as cursor:
-                # جلب جميع العلب (المولدات، علب التوزيع، الرئيسية)
                 query_boxes = """
                     SELECT 
                         c.id as box_id,
@@ -837,18 +689,14 @@ class ReportManager:
                     WHERE c.is_active = TRUE
                     AND c.meter_type IN ('مولدة', 'علبة توزيع', 'رئيسية')
                 """
-                
                 box_params = []
-                
                 if box_id:
                     query_boxes += " AND c.id = %s"
                     box_params.append(box_id)
-                
                 query_boxes += """
                     GROUP BY c.id, c.name, c.box_number, c.meter_type, c.sector_id, s.name
                     ORDER BY c.meter_type, c.name
                 """
-                
                 cursor.execute(query_boxes, box_params)
                 boxes = cursor.fetchall()
                 
@@ -859,13 +707,10 @@ class ReportManager:
                     'total_balance': 0,
                     'total_withdrawal': 0,
                     'total_visa': 0,
-                    'total_calculated_balance': 0
                 }
                 
                 for box in boxes:
-                    box_id = box['box_id']
-                    
-                    # جلب الزبائن التابعين لهذه العلبة مع الفلاتر
+                    box_id_val = box['box_id']
                     query_customers = """
                         SELECT 
                             c.id,
@@ -885,16 +730,13 @@ class ReportManager:
                         AND c.current_balance BETWEEN %s AND %s
                         AND c.meter_type = %s
                     """
+                    customer_params = [box_id_val, min_balance, max_balance, only_meter_type]
                     
-                    customer_params = [box_id, min_balance, max_balance, only_meter_type]
-                    
-                    # فلترة حسب التصنيفات المالية
                     if exclude_categories:
                         placeholders = ', '.join(['%s'] * len(exclude_categories))
                         query_customers += f" AND c.financial_category NOT IN ({placeholders})"
                         customer_params.extend(exclude_categories)
                     
-                    # إضافة الترتيب
                     if sort_by == "balance_asc":
                         query_customers += " ORDER BY c.current_balance ASC"
                     elif sort_by == "balance_desc":
@@ -907,7 +749,7 @@ class ReportManager:
                     cursor.execute(query_customers, customer_params)
                     customers = cursor.fetchall()
                     
-                    if customers:  # فقط العلب التي بها زبائن ضمن الشروط
+                    if customers:
                         customers_list = []
                         box_total_balance = 0
                         box_total_withdrawal = 0
@@ -917,8 +759,8 @@ class ReportManager:
                             balance = float(customer['current_balance'])
                             withdrawal = float(customer['withdrawal_amount'] or 0)
                             visa = float(customer['visa_balance'] or 0)
-                            calculated_new_balance = balance - withdrawal + visa
                             
+                            # ❌ تم حذف calculated_new_balance
                             customer_dict = {
                                 'id': customer['id'],
                                 'name': customer['name'],
@@ -927,7 +769,6 @@ class ReportManager:
                                 'current_balance': balance,
                                 'withdrawal_amount': withdrawal,
                                 'visa_balance': visa,
-                                'calculated_new_balance': calculated_new_balance,
                                 'financial_category': customer['financial_category'],
                                 'phone_number': customer['phone_number'],
                                 'meter_type': customer['meter_type'],
@@ -953,20 +794,16 @@ class ReportManager:
                             'box_total_balance': box_total_balance,
                             'box_total_withdrawal': box_total_withdrawal,
                             'box_total_visa': box_total_visa,
-                            'box_calculated_balance': box_total_balance - box_total_withdrawal + box_total_visa
+                            # ❌ تم حذف box_calculated_balance
                         }
                         
                         boxes_list.append(box_info)
-                        
-                        # تحديث الإجماليات
                         grand_total['total_boxes'] += 1
                         grand_total['total_customers'] += len(customers_list)
                         grand_total['total_balance'] += box_total_balance
                         grand_total['total_withdrawal'] += box_total_withdrawal
                         grand_total['total_visa'] += box_total_visa
-                        grand_total['total_calculated_balance'] += (box_total_balance - box_total_withdrawal + box_total_visa)
                 
-                # حساب المتوسطات
                 if grand_total['total_boxes'] > 0:
                     grand_total['average_customers_per_box'] = grand_total['total_customers'] / grand_total['total_boxes']
                     grand_total['average_balance_per_box'] = grand_total['total_balance'] / grand_total['total_boxes']
@@ -996,7 +833,9 @@ class ReportManager:
                 'grand_total': {
                     'total_boxes': 0,
                     'total_customers': 0,
-                    'total_balance': 0
+                    'total_balance': 0,
+                    'total_withdrawal': 0,
+                    'total_visa': 0,
                 },
                 'filters': {},
                 'error': str(e),
@@ -1006,22 +845,15 @@ class ReportManager:
     # ============== دوال مساعدة للتقرير ==============
 
     def get_available_sectors(self) -> List[Dict]:
-        """جلب جميع القطاعات المتاحة"""
         try:
             with db.get_cursor() as cursor:
-                cursor.execute("""
-                    SELECT id, name, code 
-                    FROM sectors 
-                    WHERE is_active = TRUE 
-                    ORDER BY name
-                """)
+                cursor.execute("SELECT id, name, code FROM sectors WHERE is_active = TRUE ORDER BY name")
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"خطأ في جلب القطاعات: {e}")
             return []
 
     def get_available_boxes(self, box_type: str = None) -> List[Dict]:
-        """جلب جميع العلب المتاحة"""
         try:
             with db.get_cursor() as cursor:
                 query = """
@@ -1030,52 +862,42 @@ class ReportManager:
                     WHERE is_active = TRUE 
                     AND meter_type IN ('مولدة', 'علبة توزيع', 'رئيسية')
                 """
-                
                 params = []
                 if box_type:
                     query += " AND meter_type = %s"
                     params.append(box_type)
-                
                 query += " ORDER BY meter_type, name"
                 cursor.execute(query, params)
-                
                 boxes = cursor.fetchall()
-                
-                # جلب أسماء القطاعات
                 result = []
                 for box in boxes:
                     box_dict = dict(box)
                     if box_dict['sector_id']:
-                        cursor.execute("SELECT name FROM sectors WHERE id = %s", 
-                                    (box_dict['sector_id'],))
+                        cursor.execute("SELECT name FROM sectors WHERE id = %s", (box_dict['sector_id'],))
                         sector = cursor.fetchone()
                         box_dict['sector_name'] = sector['name'] if sector else ''
                     else:
                         box_dict['sector_name'] = ''
-                    
                     result.append(box_dict)
-                
                 return result
         except Exception as e:
             logger.error(f"خطأ في جلب العلب: {e}")
             return []
 
     def get_financial_categories(self) -> List[str]:
-        """جلب جميع التصنيفات المالية المتاحة"""
         return ['normal', 'free', 'vip', 'free_vip']
 
     def get_meter_types(self) -> List[str]:
-        """جلب جميع أنواع العدادات"""
         return ['مولدة', 'علبة توزيع', 'رئيسية', 'زبون']
 
-    # ============== دوال التصدير ==============
+    # ============== دوال التصدير (بدون عمود الرصيد الجديد) ==============
 
     def export_negative_balance_report_to_excel(
         self, 
         report_data: Dict[str, Any],
         filename: str = None
     ) -> Tuple[bool, str]:
-        """تصدير تقرير قوائم الكسر إلى Excel"""
+        """تصدير تقرير قوائم الكسر إلى Excel - بدون عمود الرصيد الجديد"""
         try:
             if not filename:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1098,10 +920,9 @@ class ReportManager:
                 summary_data.append(['إجمالي الرصيد', f"{grand_total.get('total_balance', 0):,.0f}"])
                 summary_data.append(['إجمالي السحب', f"{grand_total.get('total_withdrawal', 0):,.0f}"])
                 summary_data.append(['إجمالي التأشيرة', f"{grand_total.get('total_visa', 0):,.0f}"])
-                summary_data.append(['الرصيد الجديد', f"{grand_total.get('total_calculated_balance', 0):,.0f}"])
+                # ❌ تم حذف صف الرصيد الجديد
                 summary_data.append([''])
                 
-                # إضافة الفلاتر
                 filters = report_data.get('filters', {})
                 summary_data.append(['الفلاتر المطبقة:'])
                 summary_data.append(['الحد الأدنى للرصيد', filters.get('min_balance', 'غير محدد')])
@@ -1116,9 +937,7 @@ class ReportManager:
                 for sector_data in report_data.get('sectors', []):
                     sector_name = sector_data['sector_name']
                     customers = sector_data.get('customers', [])
-                    
                     if customers:
-                        # تحضير البيانات
                         data_list = []
                         for customer in customers:
                             data_list.append([
@@ -1128,24 +947,23 @@ class ReportManager:
                                 customer['current_balance'],
                                 customer['withdrawal_amount'],
                                 customer['visa_balance'],
-                                customer['calculated_new_balance'],
+                                # ❌ تم حذف القيمة السابعة (calculated_new_balance)
                                 customer['financial_category'],
                                 customer['meter_type'],
                                 customer['phone_number'],
                                 customer['parent_info']
                             ])
                         
-                        # إنشاء DataFrame
                         columns = [
                             'اسم الزبون', 'رقم العلبة', 'رقم المسلسل',
                             'الرصيد الحالي', 'مبلغ السحب', 'رصيد التأشيرة',
-                            'الرصيد الجديد', 'التصنيف المالي', 'نوع العداد',
+                            # ❌ تم حذف 'الرصيد الجديد'
+                            'التصنيف المالي', 'نوع العداد',
                             'رقم الهاتف', 'العلبة الأم'
                         ]
                         
                         df_sector = pd.DataFrame(data_list, columns=columns)
                         
-                        # إضافة صف الإجمالي
                         total_row = pd.DataFrame([[
                             f"إجمالي {sector_name}",
                             f"{sector_data['customer_count']} زبون",
@@ -1153,7 +971,7 @@ class ReportManager:
                             sector_data['total_balance'],
                             sector_data['total_withdrawal'],
                             sector_data['total_visa'],
-                            sector_data['total_calculated_balance'],
+                            # ❌ تم حذف total_calculated_balance
                             '',
                             '',
                             '',
@@ -1161,9 +979,7 @@ class ReportManager:
                         ]], columns=columns)
                         
                         df_sector = pd.concat([df_sector, total_row], ignore_index=True)
-                        
-                        # حفظ في Excel (تحديد اسم الورقة)
-                        sheet_name = sector_name[:31]  # Excel يسمح بحد أقصى 31 حرفاً
+                        sheet_name = sector_name[:31]
                         df_sector.to_excel(writer, sheet_name=sheet_name, index=False)
                 
                 # تنسيق الأعمدة
@@ -1192,7 +1008,7 @@ class ReportManager:
         report_data: Dict[str, Any],
         filename: str = None
     ) -> Tuple[bool, str]:
-        """تصدير تقرير قوائم القطع إلى Excel"""
+        """تصدير تقرير قوائم القطع إلى Excel - بدون عمود الرصيد الجديد"""
         try:
             if not filename:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1216,10 +1032,9 @@ class ReportManager:
                 summary_data.append(['إجمالي الرصيد', f"{grand_total.get('total_balance', 0):,.0f}"])
                 summary_data.append(['إجمالي السحب', f"{grand_total.get('total_withdrawal', 0):,.0f}"])
                 summary_data.append(['إجمالي التأشيرة', f"{grand_total.get('total_visa', 0):,.0f}"])
-                summary_data.append(['الرصيد الجديد', f"{grand_total.get('total_calculated_balance', 0):,.0f}"])
+                # ❌ تم حذف صف الرصيد الجديد
                 summary_data.append([''])
                 
-                # إضافة الفلاتر
                 filters = report_data.get('filters', {})
                 summary_data.append(['الفلاتر المطبقة:'])
                 summary_data.append(['الحد الأدنى للرصيد', filters.get('min_balance', -1000)])
@@ -1235,9 +1050,7 @@ class ReportManager:
                 for box_data in report_data.get('boxes', []):
                     box_name = box_data['box_name']
                     customers = box_data.get('customers', [])
-                    
                     if customers:
-                        # تحضير البيانات
                         data_list = []
                         for customer in customers:
                             data_list.append([
@@ -1247,23 +1060,22 @@ class ReportManager:
                                 customer['current_balance'],
                                 customer['withdrawal_amount'],
                                 customer['visa_balance'],
-                                customer['calculated_new_balance'],
+                                # ❌ تم حذف calculated_new_balance
                                 customer['financial_category'],
                                 customer['meter_type'],
                                 customer['phone_number']
                             ])
                         
-                        # إنشاء DataFrame
                         columns = [
                             'اسم الزبون', 'رقم العلبة', 'رقم المسلسل',
                             'الرصيد الحالي', 'مبلغ السحب', 'رصيد التأشيرة',
-                            'الرصيد الجديد', 'التصنيف المالي', 'نوع العداد',
+                            # ❌ تم حذف 'الرصيد الجديد'
+                            'التصنيف المالي', 'نوع العداد',
                             'رقم الهاتف'
                         ]
                         
                         df_box = pd.DataFrame(data_list, columns=columns)
                         
-                        # إضافة صف الإجمالي
                         total_row = pd.DataFrame([[
                             f"إجمالي {box_name}",
                             f"{box_data['filtered_customer_count']} زبون",
@@ -1271,7 +1083,7 @@ class ReportManager:
                             box_data['box_total_balance'],
                             box_data['box_total_withdrawal'],
                             box_data['box_total_visa'],
-                            box_data['box_calculated_balance'],
+                            # ❌ تم حذف box_calculated_balance
                             '',
                             '',
                             ''
@@ -1279,7 +1091,6 @@ class ReportManager:
                         
                         df_box = pd.concat([df_box, total_row], ignore_index=True)
                         
-                        # إضافة معلومات العلبة
                         info_rows = [
                             ['معلومات العلبة:'],
                             ['اسم العلبة', box_data['box_name']],
@@ -1294,8 +1105,6 @@ class ReportManager:
                         ]
                         
                         df_info = pd.DataFrame(info_rows)
-                        
-                        # حفظ في Excel
                         sheet_name = f"{box_name}_{box_data['box_number']}"[:31]
                         df_info.to_excel(writer, sheet_name=sheet_name, 
                                     index=False, header=False, startrow=0)
@@ -1323,58 +1132,6 @@ class ReportManager:
             logger.error(f"خطأ في تصدير تقرير القطع: {e}")
             return False, str(e)
 
-    # ============== تصدير التقارير القديمة ==============
-
-    def export_report_to_excel(self, report_data: Dict[str, Any], report_type: str) -> str:
-        """تصدير التقرير إلى ملف Excel (للتوافق مع الوظائف القديمة)"""
-        try:
-            import pandas as pd
-            import os
-            
-            # إنشاء مجلد التصدير إذا لم يكن موجوداً
-            export_dir = "exports"
-            os.makedirs(export_dir, exist_ok=True)
-            
-            # اسم الملف
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{export_dir}/{report_type}_{timestamp}.xlsx"
-            
-            # تحويل البيانات إلى DataFrame
-            df = pd.DataFrame()
-            
-            if 'customers' in report_data:
-                df = pd.DataFrame(report_data['customers'])
-            elif 'sales_data' in report_data:
-                df = pd.DataFrame(report_data['sales_data'])
-            elif 'invoices' in report_data:
-                df = pd.DataFrame(report_data['invoices'])
-            elif 'sectors' in report_data:
-                df = pd.DataFrame(report_data['sectors'])
-            
-            # حفظ في Excel
-            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Report', index=False)
-                
-                # تنسيق الأعمدة
-                worksheet = writer.sheets['Report']
-                for column in worksheet.columns:
-                    max_length = 0
-                    column_letter = column[0].column_letter
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
-                    adjusted_width = min(max_length + 2, 50)
-                    worksheet.column_dimensions[column_letter].width = adjusted_width
-            
-            return filename
-            
-        except Exception as e:
-            logger.error(f"خطأ في تصدير التقرير: {e}")
-            return ""
-
     # ============== تقارير أخرى محسّنة ==============
 
     def get_free_customers_by_sector_report(
@@ -1382,10 +1139,9 @@ class ReportManager:
         include_vip: bool = True,
         sector_id: int = None
     ) -> Dict[str, Any]:
-        """تقرير الزبائن المجانيين المحسّن"""
+        """تقرير الزبائن المجانيين المحسّن - بدون الرصيد الجديد"""
         try:
             with db.get_cursor() as cursor:
-                # بناء الاستعلام
                 categories = ["'free'"]
                 if include_vip:
                     categories.append("'free_vip'")
@@ -1419,7 +1175,6 @@ class ReportManager:
                 cursor.execute(query, params)
                 customers = cursor.fetchall()
                 
-                # تجميع حسب القطاع
                 sectors_dict = {}
                 for customer in customers:
                     sector = customer['sector_name'] or 'بدون قطاع'
@@ -1438,7 +1193,6 @@ class ReportManager:
                         'last_counter_reading': customer['last_counter_reading']
                     })
                 
-                # تحويل إلى الصيغة المطلوبة
                 sectors_list = []
                 total_free_count = 0
                 total_balance = 0
@@ -1457,7 +1211,7 @@ class ReportManager:
                         'total_balance': sector_total_balance,
                         'total_withdrawal': sector_total_withdrawal,
                         'total_visa_balance': sector_total_visa,
-                        'calculated_balance': sector_total_balance - sector_total_withdrawal + sector_total_visa
+                        # ❌ تم حذف calculated_balance
                     })
                     
                     total_free_count += len(customers_list)
@@ -1472,7 +1226,7 @@ class ReportManager:
                         'total_balance': total_balance,
                         'total_withdrawal': total_withdrawal,
                         'total_visa_balance': total_visa_balance,
-                        'calculated_balance': total_balance - total_withdrawal + total_visa_balance
+                        # ❌ تم حذف calculated_balance
                     },
                     'filters': {
                         'include_vip': include_vip,
@@ -1490,23 +1244,12 @@ class ReportManager:
                 'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
-    # ============== واجهات للوظائف القديمة للحفاظ على التوافق ==============
-
-    def get_negative_balance_lists_report_old_interface(self, financial_category: str = None, sector_id: int = None):
-        """واجهة للدالة القديمة للحفاظ على التوافق"""
-        return self.get_negative_balance_lists_report_old(financial_category, sector_id)
-
-    def get_cut_lists_report_old_interface(self, min_balance: float = 0, max_balance: float = -1000, exclude_categories: list = None):
-        """واجهة للدالة القديمة للحفاظ على التوافق"""
-        return self.get_cut_lists_report_old(min_balance, max_balance, exclude_categories)
-
-    def get_free_customers_by_sector_report_old_interface(self):
-        """واجهة للدالة القديمة للحفاظ على التوافق"""
-        return self.get_free_customers_by_sector_report_old()
-
-        # إضافة دوال التصدير إلى Excel
-    def export_free_customers_to_excel(self, report_data: Dict[str, Any], filename: str = None) -> Tuple[bool, str]:
-        """تصدير تقرير الزبائن المجانيين إلى Excel"""
+    def export_free_customers_to_excel(
+        self, 
+        report_data: Dict[str, Any],
+        filename: str = None
+    ) -> Tuple[bool, str]:
+        """تصدير تقرير الزبائن المجانيين إلى Excel - بدون عمود الرصيد الجديد"""
         try:
             if not filename:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1529,10 +1272,9 @@ class ReportManager:
                 summary_data.append(['إجمالي الرصيد', f"{total.get('total_balance', 0):,.0f}"])
                 summary_data.append(['إجمالي السحب', f"{total.get('total_withdrawal', 0):,.0f}"])
                 summary_data.append(['إجمالي التأشيرة', f"{total.get('total_visa_balance', 0):,.0f}"])
-                summary_data.append(['الرصيد الجديد', f"{total.get('calculated_balance', 0):,.0f}"])
+                # ❌ تم حذف صف الرصيد الجديد
                 summary_data.append([''])
                 
-                # إضافة الفلاتر
                 filters = report_data.get('filters', {})
                 summary_data.append(['الفلاتر المطبقة:'])
                 summary_data.append(['تضمين VIP', 'نعم' if filters.get('include_vip', True) else 'لا'])
@@ -1545,9 +1287,7 @@ class ReportManager:
                 for sector_data in report_data.get('sectors', []):
                     sector_name = sector_data['sector_name']
                     customers = sector_data.get('customers', [])
-                    
                     if customers:
-                        # تحضير البيانات
                         data_list = []
                         for customer in customers:
                             data_list.append([
@@ -1556,30 +1296,29 @@ class ReportManager:
                                 customer['current_balance'],
                                 customer['withdrawal_amount'],
                                 customer['visa_balance'],
-                                customer['current_balance'] - customer['withdrawal_amount'] + customer['visa_balance'],
+                                # ❌ تم حذف الرصيد الجديد (لم يعد يُحسب)
                                 customer.get('financial_category', ''),
                                 customer.get('meter_type', ''),
                                 customer.get('phone_number', ''),
                                 customer.get('last_counter_reading', '')
                             ])
                         
-                        # إنشاء DataFrame
                         columns = [
                             'اسم الزبون', 'رقم العلبة', 'الرصيد الحالي', 
-                            'مبلغ السحب', 'رصيد التأشيرة', 'الرصيد الجديد',
+                            'مبلغ السحب', 'رصيد التأشيرة',
+                            # ❌ تم حذف 'الرصيد الجديد'
                             'التصنيف المالي', 'نوع العداد', 'رقم الهاتف', 'آخر قراءة'
                         ]
                         
                         df_sector = pd.DataFrame(data_list, columns=columns)
                         
-                        # إضافة صف الإجمالي
                         total_row = pd.DataFrame([[
                             f"إجمالي {sector_name}",
                             f"{sector_data['free_count']} زبون",
                             sector_data['total_balance'],
                             sector_data['total_withdrawal'],
                             sector_data['total_visa_balance'],
-                            sector_data['calculated_balance'],
+                            # ❌ تم حذف calculated_balance
                             '',
                             '',
                             '',
@@ -1587,8 +1326,6 @@ class ReportManager:
                         ]], columns=columns)
                         
                         df_sector = pd.concat([df_sector, total_row], ignore_index=True)
-                        
-                        # حفظ في Excel
                         sheet_name = sector_name[:31]
                         df_sector.to_excel(writer, sheet_name=sheet_name, index=False)
                 
@@ -1614,33 +1351,27 @@ class ReportManager:
             return False, str(e)
 
     def export_to_excel_generic(self, report_data: Dict[str, Any], report_type: str) -> Tuple[bool, str]:
-        """دالة عامة لتصدير أي تقرير إلى Excel"""
+        """دالة عامة لتصدير أي تقرير إلى Excel (بدون تعديل لأنها لا تحتوي على الرصيد الجديد)"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{report_type}_{timestamp}.xlsx"
-            
             export_dir = "exports"
             os.makedirs(export_dir, exist_ok=True)
             filepath = os.path.join(export_dir, filename)
             
             with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                # تحديد نوع التقرير وتحويله إلى DataFrame
                 if report_type == "sales":
                     if 'sales_data' in report_data:
                         df = pd.DataFrame(report_data['sales_data'])
                         df.to_excel(writer, sheet_name='المبيعات', index=False)
-                    
                     if 'totals' in report_data:
                         totals_df = pd.DataFrame([report_data['totals']])
                         totals_df.to_excel(writer, sheet_name='الإجماليات', index=False)
-                
                 elif report_type == "invoices":
                     if 'invoices' in report_data:
                         df = pd.DataFrame(report_data['invoices'])
                         df.to_excel(writer, sheet_name='الفواتير', index=False)
-                
                 elif report_type == "dashboard":
-                    # إنشاء ورقة للإحصائيات
                     stats_data = [
                         ['إجمالي الزبائن', report_data.get('total_customers', 0)],
                         ['فواتير اليوم', f"{report_data.get('today_invoices', 0)} - {report_data.get('today_amount', 0):,.0f} ك.و"],
@@ -1650,10 +1381,8 @@ class ReportManager:
                         ['', ''],
                         ['أفضل القطاعات أداءً:', '']
                     ]
-                    
                     for sector in report_data.get('top_sectors', []):
                         stats_data.append([sector['name'], f"{sector['invoice_count']} فاتورة - {sector['total_amount']:,.0f} ك.و"])
-                    
                     df = pd.DataFrame(stats_data)
                     df.to_excel(writer, sheet_name='الإحصائيات', index=False, header=False)
                 
@@ -1673,9 +1402,17 @@ class ReportManager:
                         worksheet.column_dimensions[column_letter].width = adjusted_width
             
             return True, filepath
-            
         except Exception as e:
             logger.error(f"خطأ في تصدير التقرير العام: {e}")
             return False, str(e)
 
-            
+    # ============== واجهات للوظائف القديمة للحفاظ على التوافق ==============
+
+    def get_negative_balance_lists_report_old_interface(self, financial_category: str = None, sector_id: int = None):
+        return self.get_negative_balance_lists_report_old(financial_category, sector_id)
+
+    def get_cut_lists_report_old_interface(self, min_balance: float = 0, max_balance: float = -1000, exclude_categories: list = None):
+        return self.get_cut_lists_report_old(min_balance, max_balance, exclude_categories)
+
+    def get_free_customers_by_sector_report_old_interface(self):
+        return self.get_free_customers_by_sector_report_old()
