@@ -1688,3 +1688,249 @@ class ReportManager:
 
     def get_free_customers_by_sector_report_old_interface(self):
         return self.get_free_customers_by_sector_report_old()
+
+            # ============== تقرير جبايات المحاسب ==============
+
+    def get_accountant_collections_report(
+        self,
+        accountant_id: Optional[int] = None,
+        start_datetime: Optional[str] = None,
+        end_datetime: Optional[str] = None,
+        detailed: bool = True
+    ) -> Dict[str, Any]:
+        """
+        تقرير جبايات المحاسب (فواتير محصلة) خلال فترة زمنية.
+        - إذا تم تحديد accountant_id: يُرجع بيانات المحاسب مع فواتيره.
+        - إذا لم يتم تحديد: يُرجع قائمة بكل الفواتير مع بيانات المحاسبين.
+        """
+        try:
+            with db.get_cursor() as cursor:
+                # 1. جلب الفواتير مع بيانات المحاسب والزبون (تفاصيل كاملة)
+                invoices_query = """
+                    SELECT 
+                        i.id,
+                        i.invoice_number,
+                        i.payment_date,
+                        i.payment_time,
+                        i.customer_id,
+                        c.name AS customer_name,
+                        i.user_id AS accountant_id,
+                        u.full_name AS accountant_name,
+                        i.kilowatt_amount,
+                        i.free_kilowatt,
+                        i.discount,
+                        i.total_amount,
+                        i.payment_method,
+                        i.receipt_number,
+                        i.book_number
+                    FROM invoices i
+                    JOIN users u ON i.user_id = u.id
+                    LEFT JOIN customers c ON i.customer_id = c.id
+                    WHERE i.status = 'active'
+                """
+                invoices_params = []
+
+                # إضافة شروط التاريخ
+                if start_datetime:
+                    invoices_query += " AND (i.payment_date + i.payment_time) >= %s"
+                    invoices_params.append(start_datetime)
+                if end_datetime:
+                    invoices_query += " AND (i.payment_date + i.payment_time) <= %s"
+                    invoices_params.append(end_datetime)
+                if accountant_id:
+                    invoices_query += " AND i.user_id = %s"
+                    invoices_params.append(accountant_id)
+
+                invoices_query += " ORDER BY i.payment_date DESC, i.payment_time DESC"
+
+                cursor.execute(invoices_query, invoices_params)
+                invoices = cursor.fetchall()
+                invoices_list = [dict(inv) for inv in invoices]
+
+                # 2. حساب المجاميع لكل محاسب (للملخص)
+                # نستخدم نفس الشروط ولكن مع GROUP BY
+                summary_query = """
+                    SELECT 
+                        u.id AS accountant_id,
+                        u.full_name AS accountant_name,
+                        COUNT(i.id) AS invoice_count,
+                        COALESCE(SUM(i.total_amount), 0) AS total_collected,
+                        COALESCE(SUM(i.kilowatt_amount), 0) AS total_kilowatts,
+                        COALESCE(SUM(i.free_kilowatt), 0) AS total_free_kilowatts,
+                        COALESCE(SUM(i.discount), 0) AS total_discount,
+                        JSONB_BUILD_OBJECT(
+                            'cash', COALESCE(SUM(CASE WHEN i.payment_method = 'cash' THEN i.total_amount ELSE 0 END), 0),
+                            'visa', COALESCE(SUM(CASE WHEN i.payment_method = 'visa' THEN i.total_amount ELSE 0 END), 0),
+                            'other', COALESCE(SUM(CASE WHEN i.payment_method NOT IN ('cash', 'visa') OR i.payment_method IS NULL THEN i.total_amount ELSE 0 END), 0)
+                        ) AS breakdown_by_method
+                    FROM invoices i
+                    JOIN users u ON i.user_id = u.id
+                    WHERE i.status = 'active'
+                """
+                summary_params = []
+
+                # نفس الشروط بنفس الترتيب
+                if start_datetime:
+                    summary_query += " AND (i.payment_date + i.payment_time) >= %s"
+                    summary_params.append(start_datetime)
+                if end_datetime:
+                    summary_query += " AND (i.payment_date + i.payment_time) <= %s"
+                    summary_params.append(end_datetime)
+                if accountant_id:
+                    summary_query += " AND i.user_id = %s"
+                    summary_params.append(accountant_id)
+
+                summary_query += " GROUP BY u.id, u.full_name ORDER BY u.full_name"
+
+                cursor.execute(summary_query, summary_params)
+                summaries = cursor.fetchall()
+                summaries_list = [dict(s) for s in summaries]
+
+                # بناء النتيجة
+                result = {
+                    'report_title': 'تقرير جبايات المحاسبين (مفصل)',
+                    'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'start_datetime': start_datetime,
+                    'end_datetime': end_datetime,
+                    'invoices': invoices_list,
+                    'summaries': summaries_list,
+                }
+
+                if accountant_id and summaries_list:
+                    # إذا كان محاسب واحد، ندمج بياناته مع الفواتير لسهولة العرض
+                    result.update(summaries_list[0])
+                    result['accountant_name'] = summaries_list[0]['accountant_name']
+                    result['accountant_id'] = accountant_id
+
+                # إجماليات عامة
+                result['total_all'] = sum(s['total_collected'] for s in summaries_list)
+                result['total_kilowatts_all'] = sum(s['total_kilowatts'] for s in summaries_list)
+                result['total_free_all'] = sum(s['total_free_kilowatts'] for s in summaries_list)
+                result['total_discount_all'] = sum(s['total_discount'] for s in summaries_list)
+
+                return result
+
+        except Exception as e:
+            logger.error(f"خطأ في تقرير جبايات المحاسب: {e}")
+            return {
+                'error': str(e),
+                'report_title': 'تقرير جبايات المحاسب',
+                'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+    def get_accountants_list(self) -> List[Dict[str, Any]]:
+        """جلب قائمة المحاسبين (المستخدمين النشطين)"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, full_name, username
+                    FROM users
+                    WHERE is_active = TRUE
+                    ORDER BY full_name
+                """)
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"خطأ في جلب قائمة المحاسبين: {e}")
+            return []
+
+    def export_accountant_collections_to_excel(
+        self,
+        report_data: Dict[str, Any],
+        filename: str = None
+    ) -> Tuple[bool, str]:
+        """تصدير تقرير جبايات المحاسب إلى Excel (نسخة مفصلة)"""
+        try:
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"جبايات_المحاسب_{timestamp}.xlsx"
+
+            export_dir = "exports"
+            os.makedirs(export_dir, exist_ok=True)
+            filepath = os.path.join(export_dir, filename)
+
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                # ورقة الفواتير (التفاصيل)
+                if report_data.get('invoices'):
+                    df_invoices = pd.DataFrame(report_data['invoices'])
+                    # ترجمة الأعمدة واختيار الحقول المطلوبة
+                    columns_map = {
+                        'invoice_number': 'رقم الفاتورة',
+                        'payment_date': 'التاريخ',
+                        'payment_time': 'الوقت',
+                        'customer_name': 'الزبون',
+                        'accountant_name': 'المحاسب',
+                        'kilowatt_amount': 'الكيلوات',
+                        'free_kilowatt': 'المجاني',
+                        'discount': 'الحسم',
+                        'total_amount': 'المبلغ',
+                        'payment_method': 'طريقة الدفع',
+                        'receipt_number': 'رقم الوصل',
+                        'book_number': 'رقم الدفتر'
+                    }
+                    # اختيار الأعمدة الموجودة
+                    available_cols = {k: v for k, v in columns_map.items() if k in df_invoices.columns}
+                    df_invoices = df_invoices[list(available_cols.keys())].rename(columns=available_cols)
+                    df_invoices.to_excel(writer, sheet_name='الفواتير', index=False)
+
+                # ورقة ملخص المحاسبين
+                if report_data.get('summaries'):
+                    df_summary = pd.DataFrame(report_data['summaries'])
+                    summary_cols = {
+                        'accountant_name': 'المحاسب',
+                        'invoice_count': 'عدد الفواتير',
+                        'total_kilowatts': 'الكيلوات',
+                        'total_free_kilowatts': 'المجاني',
+                        'total_discount': 'الحسم',
+                        'total_collected': 'الإجمالي',
+                        'breakdown_by_method': 'تفاصيل الدفع'
+                    }
+                    # استخراج تفاصيل الدفع من JSON
+                    if 'breakdown_by_method' in df_summary.columns:
+                        df_summary['نقداً'] = df_summary['breakdown_by_method'].apply(lambda x: x.get('cash', 0))
+                        df_summary['بطاقة'] = df_summary['breakdown_by_method'].apply(lambda x: x.get('visa', 0))
+                        df_summary['أخرى'] = df_summary['breakdown_by_method'].apply(lambda x: x.get('other', 0))
+                        # إضافة الأعمدة الجديدة للقائمة
+                        summary_cols.update({
+                            'نقداً': 'نقداً',
+                            'بطاقة': 'بطاقة',
+                            'أخرى': 'أخرى'
+                        })
+
+                    available_sum_cols = {k: v for k, v in summary_cols.items() if k in df_summary.columns}
+                    df_summary = df_summary[list(available_sum_cols.keys())].rename(columns=available_sum_cols)
+                    df_summary.to_excel(writer, sheet_name='ملخص المحاسبين', index=False)
+
+                # ورقة معلومات التقرير
+                info_data = [
+                    ['تقرير جبايات المحاسبين', report_data.get('report_title', '')],
+                    ['تاريخ التوليد', report_data.get('generated_at', '')],
+                    ['من تاريخ', report_data.get('start_datetime', '')],
+                    ['إلى تاريخ', report_data.get('end_datetime', '')],
+                    ['إجمالي الفواتير', len(report_data.get('invoices', []))],
+                    ['إجمالي الكيلوات', f"{report_data.get('total_kilowatts_all', 0):,.0f}"],
+                    ['إجمالي المجاني', f"{report_data.get('total_free_all', 0):,.0f}"],
+                    ['إجمالي الحسم', f"{report_data.get('total_discount_all', 0):,.0f}"],
+                    ['الإجمالي العام', f"{report_data.get('total_all', 0):,.0f}"],
+                ]
+                df_info = pd.DataFrame(info_data)
+                df_info.to_excel(writer, sheet_name='معلومات', index=False, header=False)
+
+                # تنسيق الأعمدة
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    for column in worksheet.columns:
+                        max_length = 0
+                        col_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        worksheet.column_dimensions[col_letter].width = min(max_length + 2, 50)
+
+            return True, filepath
+
+        except Exception as e:
+            logger.error(f"خطأ في تصدير تقرير جبايات المحاسب: {e}")
+            return False, str(e)

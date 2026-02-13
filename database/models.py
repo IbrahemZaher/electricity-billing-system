@@ -21,7 +21,8 @@ class Models:
                     ('free_kilowatt', 'DECIMAL(10, 2) DEFAULT 0'),
                     ('visa_application', 'VARCHAR(100)'),
                     ('customer_withdrawal', 'VARCHAR(100)'),
-                    ('notes', 'TEXT')
+                    ('notes', 'TEXT'),
+                    ('payment_method', "VARCHAR(20) DEFAULT 'cash'")   # العمود الجديد
                 ]
                 
                 for column_name, column_type in columns_to_add:
@@ -201,7 +202,8 @@ class Models:
                 "CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);",
 
                 "CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);",
-                "CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);"
+                "CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);",
+                "CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);"
             ]
 
             for index_sql in indexes:
@@ -580,6 +582,7 @@ class Models:
             ('reports.sectors', 'تقارير القطاعات', 'reports'),
             ('reports.export', 'تصدير التقارير', 'reports'),
             ('waste_analysis.view', 'عرض تحليل الهدر', 'reports'),
+            ('reports.view_collections', 'عرض تقرير جبايات المحاسب', 'reports'),
             
             # فئة النظام
             ('system.manage_users', 'إدارة المستخدمين', 'system'),
@@ -625,7 +628,7 @@ class Models:
                 'customers.view_details', 'invoices.view',
                'invoices.print', 'reports.view', 'reports.dashboard',
                 'reports.customers', 'reports.balance', 'reports.sales', 'system.import_data',
-                'system.export_data'
+                'system.export_data','reports.view_collections'
             ],
             
             'cashier': [

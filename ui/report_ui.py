@@ -114,6 +114,7 @@ class ReportUI(tk.Frame):
             ("💰 تقرير المبيعات", self.show_sales_report),
             ("🧾 تقرير الفواتير", self.show_invoice_report),
             ("🖨️ أوراق التأشيرات", self.show_visa_report),   # إضافة الزر الجديد
+                        ("💰 جبايات المحاسب", self.show_accountant_collections_report),   # إضافة الزر الجديد
         ]
         
         for report_name, command in reports:
@@ -1073,8 +1074,12 @@ class ReportUI(tk.Frame):
                 success, filepath = self.report_manager.export_to_excel_generic(
                     self.current_report, report_type
                 )
-            elif report_type == "visa_report":   # إضافة حالة جديدة
+            elif report_type == "visa_report":
                 success, filepath = self.report_manager.export_visa_report_to_excel(
+                    self.current_report, filename
+                )
+            elif report_type == "accountant_collections":   # إضافة هذا الفرع
+                success, filepath = self.report_manager.export_accountant_collections_to_excel(
                     self.current_report, filename
                 )
             else:
@@ -1250,3 +1255,194 @@ class ReportUI(tk.Frame):
     
     def show_free_customers_advanced_filter(self):
         messagebox.showinfo("فلترة", "فلترة الزبائن المجانيين المتقدمة قريباً")
+
+            # ============== تقرير جبايات المحاسب ==============
+
+    def show_accountant_collections_report(self):
+        """عرض تقرير جبايات المحاسب مع نافذة اختيار الفترة والمحاسب"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+
+        # نافذة الفلترة
+        filter_window = tk.Toplevel(self)
+        filter_window.title("تقرير جبايات المحاسب")
+        filter_window.geometry("500x400")
+        filter_window.resizable(False, False)
+
+        main_frame = tk.Frame(filter_window, padx=20, pady=20)
+        main_frame.pack(fill='both', expand=True)
+
+        tk.Label(main_frame, text="تقرير جبايات المحاسب", 
+                font=('Arial', 14, 'bold')).pack(pady=(0, 20))
+
+        # حقل تاريخ البدء
+        tk.Label(main_frame, text="تاريخ البداية (YYYY-MM-DD HH:MM:SS):").pack(anchor='w')
+        start_entry = tk.Entry(main_frame, width=30)
+        start_entry.insert(0, datetime.now().strftime("%Y-%m-%d 00:00:00"))
+        start_entry.pack(fill='x', pady=5)
+
+        # حقل تاريخ النهاية
+        tk.Label(main_frame, text="تاريخ النهاية (YYYY-MM-DD HH:MM:SS):").pack(anchor='w')
+        end_entry = tk.Entry(main_frame, width=30)
+        end_entry.insert(0, datetime.now().strftime("%Y-%m-%d 23:59:59"))
+        end_entry.pack(fill='x', pady=5)
+
+        # اختيار المحاسب (اختياري)
+        tk.Label(main_frame, text="المحاسب (اختياري):").pack(anchor='w')
+        accountants = self.report_manager.get_accountants_list()
+        accountant_names = ['الكل'] + [acc['full_name'] for acc in accountants]
+        accountant_dict = {acc['full_name']: acc['id'] for acc in accountants}
+        accountant_var = tk.StringVar(value='الكل')
+        accountant_combo = ttk.Combobox(main_frame, textvariable=accountant_var,
+                                        values=accountant_names, state='readonly')
+        accountant_combo.pack(fill='x', pady=5)
+
+        def apply_filter():
+            try:
+                start = start_entry.get().strip()
+                end = end_entry.get().strip()
+                selected_name = accountant_var.get()
+                acc_id = accountant_dict.get(selected_name) if selected_name != 'الكل' else None
+
+                filter_window.destroy()
+                self.clear_frames()
+
+                report = self.report_manager.get_accountant_collections_report(
+                    accountant_id=acc_id,
+                    start_datetime=start if start else None,
+                    end_datetime=end if end else None
+                )
+
+                self.display_accountant_collections_report(report)
+                self.current_report = report
+                self.current_report_type = "accountant_collections"
+                self.export_excel_btn.config(state='normal')
+                self.filter_btn.config(state='disabled')
+                self.setup_export_options("accountant_collections")
+                self.update_status("تم توليد تقرير جبايات المحاسب")
+
+            except Exception as e:
+                self.show_error(f"خطأ في تطبيق الفلترة: {e}")
+
+        # أزرار التحكم
+        btn_frame = tk.Frame(main_frame, pady=20)
+        btn_frame.pack(fill='x')
+        tk.Button(btn_frame, text="تطبيق", command=apply_filter,
+                 bg='#27ae60', fg='white', width=15).pack(side='right', padx=5)
+        tk.Button(btn_frame, text="إلغاء", command=filter_window.destroy,
+                 bg='#e74c3c', fg='white', width=15).pack(side='right', padx=5)
+
+    def display_accountant_collections_report(self, report):
+        """عرض تقرير جبايات المحاسب بشكل مفصل (كل فاتورة في صف)"""
+        frame = tk.Frame(self.results_frame)
+        frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # معلومات التقرير
+        info_frame = tk.LabelFrame(frame, text="معلومات التقرير", padx=10, pady=10)
+        info_frame.pack(fill='x', pady=(0, 10))
+
+        tk.Label(info_frame, text=f"عنوان التقرير: {report.get('report_title', '')}", 
+                anchor='w').pack(fill='x')
+        tk.Label(info_frame, text=f"تاريخ الإنشاء: {report.get('generated_at', '')}", 
+                anchor='w').pack(fill='x')
+        tk.Label(info_frame, text=f"الفترة: من {report.get('start_datetime', '')} إلى {report.get('end_datetime', '')}", 
+                anchor='w').pack(fill='x')
+
+        # ملخص سريع
+        if 'accountant_name' in report:
+            summary_text = f"المحاسب: {report['accountant_name']} | "
+        else:
+            summary_text = ""
+        summary_text += (f"عدد الفواتير: {len(report.get('invoices', [])):,} | "
+                        f"إجمالي الكيلوات: {report.get('total_kilowatts_all',0):,.0f} | "
+                        f"المجاني: {report.get('total_free_all',0):,.0f} | "
+                        f"الحسم: {report.get('total_discount_all',0):,.0f} | "
+                        f"الإجمالي: {report.get('total_all',0):,.0f}")
+        tk.Label(info_frame, text=summary_text, font=('Arial', 10, 'bold'),
+                fg='#2c3e50').pack(anchor='w', pady=5)
+
+        # جدول الفواتير
+        tree_frame = tk.Frame(frame)
+        tree_frame.pack(fill='both', expand=True)
+
+        scrollbar_y = ttk.Scrollbar(tree_frame)
+        scrollbar_y.pack(side='right', fill='y')
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
+
+        # تحديد الأعمدة بناءً على وجود عدة محاسبين
+        if 'accountant_name' in report:
+            columns = ('رقم الفاتورة', 'التاريخ', 'الوقت', 'الزبون', 'الكيلوات', 'المجاني', 'الحسم', 'المبلغ', 'رقم الوصل')
+        else:
+            columns = ('المحاسب', 'رقم الفاتورة', 'التاريخ', 'الوقت', 'الزبون', 'الكيلوات', 'المجاني', 'الحسم', 'المبلغ', 'رقم الوصل')
+
+        tree = ttk.Treeview(tree_frame,
+                        yscrollcommand=scrollbar_y.set,
+                        xscrollcommand=scrollbar_x.set,
+                        columns=columns)
+        scrollbar_y.config(command=tree.yview)
+        scrollbar_x.config(command=tree.xview)
+
+        tree.heading('#0', text='')
+        tree.column('#0', width=0, stretch=False)
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=100)
+
+        # تعبئة الفواتير
+        for inv in report.get('invoices', []):
+            if 'accountant_name' in report:
+                values = (
+                    inv['invoice_number'],
+                    inv['payment_date'],
+                    inv['payment_time'],
+                    inv.get('customer_name', ''),
+                    f"{inv.get('kilowatt_amount', 0):,.0f}",
+                    f"{inv.get('free_kilowatt', 0):,.0f}",
+                    f"{inv.get('discount', 0):,.0f}",
+                    f"{inv['total_amount']:,.0f}",
+                    inv.get('receipt_number', '')
+                )
+            else:
+                values = (
+                    inv.get('accountant_name', ''),
+                    inv['invoice_number'],
+                    inv['payment_date'],
+                    inv['payment_time'],
+                    inv.get('customer_name', ''),
+                    f"{inv.get('kilowatt_amount', 0):,.0f}",
+                    f"{inv.get('free_kilowatt', 0):,.0f}",
+                    f"{inv.get('discount', 0):,.0f}",
+                    f"{inv['total_amount']:,.0f}",
+                    inv.get('receipt_number', '')
+                )
+            tree.insert('', 'end', values=values)
+
+        tree.pack(fill='both', expand=True)
+
+        # عرض ملخص المحاسبين بشكل منفصل (اختياري) - يمكن إضافته في تبويب آخر أو كجدول صغير
+        if 'summaries' in report and len(report['summaries']) > 1:
+            summary_frame = tk.LabelFrame(frame, text="ملخص المحاسبين", padx=10, pady=10)
+            summary_frame.pack(fill='x', pady=10)
+
+            # إنشاء جدول صغير للملخص
+            summary_tree = ttk.Treeview(summary_frame,
+                                        columns=('المحاسب', 'عدد الفواتير', 'الكيلوات', 'المجاني', 'الحسم', 'الإجمالي'),
+                                        height=5)
+            summary_tree.heading('#0', text='')
+            summary_tree.column('#0', width=0)
+            for col in summary_tree['columns']:
+                summary_tree.heading(col, text=col)
+                summary_tree.column(col, width=100)
+
+            for summ in report['summaries']:
+                summary_tree.insert('', 'end', values=(
+                    summ['accountant_name'],
+                    f"{summ['invoice_count']:,}",
+                    f"{summ.get('total_kilowatts',0):,.0f}",
+                    f"{summ.get('total_free_kilowatts',0):,.0f}",
+                    f"{summ.get('total_discount',0):,.0f}",
+                    f"{summ['total_collected']:,.0f}"
+                ))
+            summary_tree.pack(fill='x')
