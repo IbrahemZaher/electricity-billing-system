@@ -1,4 +1,4 @@
-# ui/report_ui.py - الإصدار المعدل (بدون عمود الرصيد الجديد)
+# ui/report_ui.py - الإصدار المعدل (بدون عمود الرصيد الجديد + إضافة تقرير أوراق التأشيرات)
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
@@ -7,6 +7,7 @@ import os
 import webbrowser
 
 logger = logging.getLogger(__name__)
+
 
 
 class ReportUI(tk.Frame):
@@ -111,7 +112,8 @@ class ReportUI(tk.Frame):
             ("🆓 الزبائن المجانيين (متقدم)", self.show_free_customers_advanced),
             ("📊 إحصائيات عامة", self.show_dashboard_statistics),
             ("💰 تقرير المبيعات", self.show_sales_report),
-            ("🧾 تقرير الفواتير", self.show_invoice_report)
+            ("🧾 تقرير الفواتير", self.show_invoice_report),
+            ("🖨️ أوراق التأشيرات", self.show_visa_report),   # إضافة الزر الجديد
         ]
         
         for report_name, command in reports:
@@ -868,6 +870,140 @@ class ReportUI(tk.Frame):
         text_widget.insert('1.0', content)
         text_widget.config(state='disabled')
     
+    # ============== دوال تقرير أوراق التأشيرات الجديدة ==============
+
+    def show_visa_report(self):
+        """عرض تقرير أوراق التأشيرات"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+        
+        # يمكن إضافة فلترة بسيطة باختيار القطاع (اختياري)
+        response = messagebox.askquestion("فلترة", 
+            "هل تريد تطبيق فلترة حسب قطاع معين؟\n\nنعم: اختر قطاعاً\nلا: جميع القطاعات",
+            icon='question')
+        
+        sector_id = None
+        if response == 'yes':
+            # نافذة اختيار قطاع
+            sector_window = tk.Toplevel(self)
+            sector_window.title("اختر قطاع")
+            sector_window.geometry("300x150")
+            tk.Label(sector_window, text="القطاع:").pack(pady=10)
+            
+            sectors = self.report_manager.get_available_sectors()
+            sector_names = ['الكل'] + [s['name'] for s in sectors]
+            sector_var = tk.StringVar()
+            sector_combo = ttk.Combobox(sector_window, textvariable=sector_var,
+                                        values=sector_names, state='readonly')
+            sector_combo.pack(pady=5)
+            sector_combo.current(0)
+            
+            def on_select():
+                nonlocal sector_id
+                selected = sector_var.get()
+                if selected != 'الكل':
+                    for s in sectors:
+                        if s['name'] == selected:
+                            sector_id = s['id']
+                            break
+                sector_window.destroy()
+                self._generate_visa_report(sector_id)
+            
+            tk.Button(sector_window, text="تطبيق", command=on_select,
+                     bg='#27ae60', fg='white').pack(pady=10)
+        else:
+            self._generate_visa_report(None)
+
+    def _generate_visa_report(self, sector_id):
+        """توليد وعرض تقرير أوراق التأشيرات"""
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_visa_sheets_report(sector_id=sector_id)
+            self.display_visa_report(report)
+            self.current_report = report
+            self.current_report_type = "visa_report"
+            self.export_excel_btn.config(state='normal')
+            self.filter_btn.config(state='disabled')  # لا حاجة لفلترة إضافية حالياً
+            self.setup_export_options("visa_report")
+            self.update_status("تم توليد تقرير أوراق التأشيرات")
+        except Exception as e:
+            self.show_error(f"خطأ في عرض التقرير: {e}")
+
+    def display_visa_report(self, report):
+        """عرض تقرير أوراق التأشيرات في شجرة (Treeview) مع تجميع هرمي"""
+        frame = tk.Frame(self.results_frame)
+        frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # معلومات التقرير
+        info_frame = tk.LabelFrame(frame, text="معلومات التقرير", padx=10, pady=10)
+        info_frame.pack(fill='x', pady=(0, 10))
+        tk.Label(info_frame, text=f"عنوان التقرير: {report.get('report_title', '')}", 
+                anchor='w').pack(fill='x')
+        tk.Label(info_frame, text=f"تاريخ الإنشاء: {report.get('generated_at', '')}", 
+                anchor='w').pack(fill='x')
+        
+        # إنشاء شجرة للعرض
+        tree_frame = tk.Frame(frame)
+        tree_frame.pack(fill='both', expand=True)
+        
+        scrollbar_y = ttk.Scrollbar(tree_frame)
+        scrollbar_y.pack(side='right', fill='y')
+        scrollbar_x = ttk.Scrollbar(tree_frame, orient='horizontal')
+        scrollbar_x.pack(side='bottom', fill='x')
+        
+        # الأعمدة: اسم الزبون، النوع، التأشيرة، 3 أعمدة تاريخ
+        tree = ttk.Treeview(tree_frame, 
+                           yscrollcommand=scrollbar_y.set,
+                           xscrollcommand=scrollbar_x.set,
+                           columns=('name', 'type', 'visa', 'date1', 'date2', 'date3'))
+        
+        scrollbar_y.config(command=tree.yview)
+        scrollbar_x.config(command=tree.xview)
+        
+        # رؤوس الأعمدة
+        tree.heading('#0', text='القطاع / العلبة الأم')
+        tree.column('#0', width=250)
+        
+        tree.heading('name', text='اسم الزبون')
+        tree.column('name', width=200)
+        tree.heading('type', text='نوع الزبون')
+        tree.column('type', width=100)
+        tree.heading('visa', text='رصيد التأشيرة')
+        tree.column('visa', width=120)
+        for i, col in enumerate(['date1', 'date2', 'date3'], start=1):
+            tree.heading(col, text=f'التاريخ {i}')
+            tree.column(col, width=80, anchor='center')
+        
+        # تعبئة البيانات
+        for sector in report.get('sectors', []):
+            sector_id = tree.insert('', 'end', 
+                                   text=f"قطاع: {sector['sector_name']} (إجمالي: {sector['total_customers']} زبون، تأشيرات: {sector['total_visa']:,.0f})",
+                                   values=('', '', '', '', '', ''))
+            
+            for parent in sector.get('parents', []):
+                parent_id = tree.insert(sector_id, 'end',
+                                       text=f"⬤ {parent['parent_name']}",
+                                       values=('', '', '', '', '', ''))
+                
+                for customer in parent.get('customers', []):
+                    tree.insert(parent_id, 'end', text='',
+                              values=(customer['name'],
+                                     customer['financial_category'],
+                                     f"{customer['visa_balance']:,.0f}",
+                                     '', '', ''))
+        
+        tree.pack(fill='both', expand=True)
+        
+        # إجماليات
+        grand_total = report.get('grand_total', {})
+        total_frame = tk.LabelFrame(frame, text="الإجماليات", padx=10, pady=10)
+        total_frame.pack(fill='x', pady=10)
+        tk.Label(total_frame, 
+                text=f"إجمالي عدد الزبائن: {grand_total.get('total_customers', 0):,} | "
+                     f"إجمالي رصيد التأشيرات: {grand_total.get('total_visa', 0):,.0f}",
+                font=('Arial', 10, 'bold')).pack()
+    
     # ============== دوال مساعدة ==============
     
     def clear_frames(self):
@@ -936,6 +1072,10 @@ class ReportUI(tk.Frame):
             elif report_type in ["sales", "invoices", "dashboard"]:
                 success, filepath = self.report_manager.export_to_excel_generic(
                     self.current_report, report_type
+                )
+            elif report_type == "visa_report":   # إضافة حالة جديدة
+                success, filepath = self.report_manager.export_visa_report_to_excel(
+                    self.current_report, filename
                 )
             else:
                 messagebox.showwarning("تحذير", "نوع التقرير غير مدعوم للتصدير")

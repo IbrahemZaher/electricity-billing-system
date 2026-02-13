@@ -1,4 +1,4 @@
-# modules/reports.py - النسخة المحسنة (بدون عمود الرصيد الجديد)
+# modules/reports.py - النسخة المحسنة (بدون عمود الرصيد الجديد + إضافة تقرير أوراق التأشيرات)
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
@@ -7,6 +7,7 @@ import pandas as pd
 import os
 
 logger = logging.getLogger(__name__)
+
 
 
 class ReportManager:
@@ -842,6 +843,205 @@ class ReportManager:
                 'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
+    # ============== تقارير جديدة: أوراق التأشيرات ==============
+
+    def get_visa_sheets_report(self, sector_id: int = None) -> Dict[str, Any]:
+        """
+        تقرير أوراق التأشيرات - عرض هرمي كامل (مولدة ← علب توزيع ← عدادات رئيسية ← زبائن)
+        مع إدراج الزبائن الذين ليس لهم أب تحت عقدة "بدون أب".
+        """
+        try:
+            with db.get_cursor() as cursor:
+                # استعلام عودي لبناء الشجرة مع تحويل الأنواع لضمان التوافق
+                query = """
+                    WITH RECURSIVE meter_tree AS (
+                        -- 1. العقد الجذرية: عدادات بدون أب (من الأنواع المسموح بها)
+                        SELECT 
+                            id,
+                            name,
+                            meter_type,
+                            financial_category,
+                            visa_balance,
+                            box_number,
+                            serial_number,
+                            parent_meter_id,
+                            sector_id,
+                            0 AS level,
+                            ARRAY[id] AS path,
+                            ARRAY[name]::VARCHAR[] AS path_names,
+                            ARRAY[meter_type]::VARCHAR[] AS path_types
+                        FROM customers
+                        WHERE is_active = TRUE
+                        AND parent_meter_id IS NULL
+                        AND meter_type IN ('مولدة', 'علبة توزيع', 'رئيسية')
+                        AND (sector_id = %s OR %s IS NULL)
+                        
+                        UNION ALL
+                        
+                        -- 2. الأبناء المباشرون (عدادات فرعية أو زبائن)
+                        SELECT 
+                            c.id,
+                            c.name,
+                            c.meter_type,
+                            c.financial_category,
+                            c.visa_balance,
+                            c.box_number,
+                            c.serial_number,
+                            c.parent_meter_id,
+                            c.sector_id,
+                            mt.level + 1,
+                            mt.path || c.id,
+                            (mt.path_names || c.name)::VARCHAR[],
+                            (mt.path_types || c.meter_type)::VARCHAR[]
+                        FROM customers c
+                        INNER JOIN meter_tree mt ON c.parent_meter_id = mt.id
+                        WHERE c.is_active = TRUE
+                        AND c.meter_type IN ('علبة توزيع', 'رئيسية', 'زبون')
+                    )
+                    -- جلب جميع العقد مع اسم القطاع
+                    SELECT 
+                        mt.*,
+                        s.name as sector_name
+                    FROM meter_tree mt
+                    LEFT JOIN sectors s ON mt.sector_id = s.id
+                    ORDER BY 
+                        COALESCE(s.name, 'بدون قطاع'), 
+                        mt.path
+                """
+                params = [sector_id, sector_id]  # لشرط IS NULL
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+
+                # ---- إضافة الزبائن الذين ليس لهم أب (لأنهم لم يدخلوا في العودية) ----
+                extra_query = """
+                    SELECT 
+                        c.id,
+                        c.name,
+                        c.meter_type,
+                        c.financial_category,
+                        c.visa_balance,
+                        c.box_number,
+                        c.serial_number,
+                        c.parent_meter_id,
+                        c.sector_id,
+                        0 AS level,
+                        ARRAY[c.id] AS path,
+                        ARRAY[c.name]::VARCHAR[] AS path_names,
+                        ARRAY[c.meter_type]::VARCHAR[] AS path_types,
+                        s.name as sector_name
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.is_active = TRUE
+                    AND c.meter_type = 'زبون'
+                    AND c.parent_meter_id IS NULL
+                    AND (c.sector_id = %s OR %s IS NULL)
+                """
+                cursor.execute(extra_query, [sector_id, sector_id])
+                extra_rows = cursor.fetchall()
+                rows.extend(extra_rows)
+
+            # بناء الشجرة في الذاكرة
+            nodes_by_id = {}
+            root_nodes = []
+
+            for row in rows:
+                node = dict(row)
+                node['children'] = []
+                nodes_by_id[node['id']] = node
+                if node['parent_meter_id'] is None:
+                    root_nodes.append(node)
+
+            # ربط الأبناء بالآباء
+            for node in nodes_by_id.values():
+                parent_id = node['parent_meter_id']
+                if parent_id and parent_id in nodes_by_id:
+                    nodes_by_id[parent_id]['children'].append(node)
+
+            # تجميع حسب القطاع
+            sectors_dict = {}
+            for root in root_nodes:
+                sector_name = root.get('sector_name') or 'بدون قطاع'
+                if sector_name not in sectors_dict:
+                    sectors_dict[sector_name] = {
+                        'sector_id': root['sector_id'],
+                        'roots': [],
+                        'total_customers': 0,
+                        'total_visa': 0.0
+                    }
+                sectors_dict[sector_name]['roots'].append(root)
+
+            # دالة مساعدة لحساب الإحصائيات
+            def count_customers(node):
+                if node['meter_type'] == 'زبون':
+                    return 1, float(node['visa_balance'] or 0)
+                total_c = 0
+                total_v = 0.0
+                for child in node['children']:
+                    c, v = count_customers(child)
+                    total_c += c
+                    total_v += v
+                return total_c, total_v
+
+            for sector_data in sectors_dict.values():
+                for root in sector_data['roots']:
+                    c, v = count_customers(root)
+                    sector_data['total_customers'] += c
+                    sector_data['total_visa'] += v
+
+            # ترتيب القطاعات أبجدياً
+            sectors_list = []
+            for sector_name in sorted(sectors_dict.keys()):
+                data = sectors_dict[sector_name]
+                sectors_list.append({
+                    'sector_name': sector_name,
+                    'sector_id': data['sector_id'],
+                    'roots': data['roots'],
+                    'total_customers': data['total_customers'],
+                    'total_visa': data['total_visa']
+                })
+
+            grand_total = {
+                'total_customers': sum(s['total_customers'] for s in sectors_list),
+                'total_visa': sum(s['total_visa'] for s in sectors_list)
+            }
+
+            return {
+                'sectors': sectors_list,
+                'grand_total': grand_total,
+                'filters': {'sector_id': sector_id},
+                'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'report_title': 'تقرير أوراق التأشيرات (هرمي كامل)'
+            }
+
+        except Exception as e:
+            logger.error(f"خطأ في تقرير أوراق التأشيرات: {e}", exc_info=True)
+            return {
+                'sectors': [],
+                'grand_total': {'total_customers': 0, 'total_visa': 0},
+                'filters': {},
+                'error': str(e),
+                'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }            
+
+    def _get_category_name(self, category_code: str) -> str:
+        """تحويل رمز التصنيف المالي إلى اسم عربي"""
+        categories = {
+            'normal': 'عادي',
+            'free': 'مجاني',
+            'vip': 'VIP',
+            'free_vip': 'مجاني+VIP'
+        }
+        return categories.get(category_code, category_code or 'غير محدد')
+
+    def _get_parent_sort_order(self, parent_type: str) -> int:
+        """إعطاء أولوية ترتيب لأنواع العلبات الأم"""
+        order = {
+            'مولدة': 1,
+            'علبة توزيع': 2,
+            'رئيسية': 3
+        }
+        return order.get(parent_type, 4)
+
     # ============== دوال مساعدة للتقرير ==============
 
     def get_available_sectors(self) -> List[Dict]:
@@ -1132,6 +1332,78 @@ class ReportManager:
             logger.error(f"خطأ في تصدير تقرير القطع: {e}")
             return False, str(e)
 
+    def export_visa_report_to_excel(self, report_data: Dict[str, Any], filename: str = None) -> Tuple[bool, str]:
+        try:
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"اوراق_التأشيرات_{timestamp}.xlsx"
+
+            export_dir = "exports"
+            os.makedirs(export_dir, exist_ok=True)
+            filepath = os.path.join(export_dir, filename)
+
+            # تجميع جميع العقد (وليس فقط الزبائن) مع مسارها الهرمي
+            nodes_data = []
+
+            def collect_nodes(node, path_parts):
+                # بناء المسار الكامل لهذه العقدة
+                current_path = path_parts + [node.get('name', '')]  # نضيف اسم العقدة الحالية للمسار
+                path_str = ' ← '.join(current_path)
+                
+                # معلومات العقدة
+                node_name = node.get('name', '')
+                meter_type = node.get('meter_type', '')
+                financial_cat = node.get('financial_category', '')
+                visa_balance = float(node.get('visa_balance') or 0)
+                
+                # نوع الزبون (للعدادات غير الزبون نضع المكافئ، أو نتركه فارغاً؟ النموذج وضع "عادي" للمولدة أيضاً. يبدو أنهم يعتبرون التصنيف المالي لكل الأصول. لذا نعرض التصنيف المالي كما هو.)
+                customer_type = self._get_category_name(financial_cat) if financial_cat else ''
+                
+                # إضافة صف لهذه العقدة
+                nodes_data.append({
+                    'المسار الهرمي': path_str,
+                    'اسم الزبون': node_name,
+                    'نوع العداد': meter_type,
+                    'نوع الزبون': customer_type,
+                    'رصيد التأشيرة': visa_balance,
+                    'التاريخ1': '',
+                    'التاريخ2': '',
+                    'التاريخ3': ''
+                })
+                
+                # ثم معالجة الأبناء بنفس المسار (بدون إضافة العقدة الحالية مرة أخرى لأننا أضفناها للمسار)
+                for child in node.get('children', []):
+                    collect_nodes(child, current_path)  # نمرر current_path كمسار أساسي للأبناء
+
+            for sector in report_data.get('sectors', []):
+                sector_name = sector['sector_name']
+                for root in sector.get('roots', []):
+                    # نبدأ المسار ب "قطاع: sector_name" ثم نضيف الجذر
+                    collect_nodes(root, [f"قطاع: {sector_name}"])
+
+            # ترتيب البيانات حسب المسار لضمان التسلسل الهرمي (اختياري)
+            # df = pd.DataFrame(nodes_data)
+            # يمكن ترتيبها حسب المسار، لكن المسار نصي وقد لا يرتب جيداً، نكتفي بترتيب الإدراج الطبيعي.
+
+            df = pd.DataFrame(nodes_data)
+
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='أوراق التأشيرات', index=False)
+                worksheet = writer.sheets['أوراق التأشيرات']
+                worksheet.column_dimensions['A'].width = 70  # المسار
+                worksheet.column_dimensions['B'].width = 25  # اسم الزبون
+                worksheet.column_dimensions['C'].width = 15  # نوع العداد
+                worksheet.column_dimensions['D'].width = 15  # نوع الزبون
+                worksheet.column_dimensions['E'].width = 18  # رصيد التأشيرة
+                for col in ['F', 'G', 'H']:
+                    worksheet.column_dimensions[col].width = 15
+
+            return True, filepath
+
+        except Exception as e:
+            logger.error(f"خطأ في تصدير تقرير أوراق التأشيرات: {e}")
+            return False, str(e)
+                                    
     # ============== تقارير أخرى محسّنة ==============
 
     def get_free_customers_by_sector_report(
