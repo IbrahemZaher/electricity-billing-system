@@ -1,4 +1,10 @@
 # ui/main_window.py
+import subprocess
+from database.connection import db
+from database.models import models
+from modules.archive import ArchiveManager
+from config.settings import DATABASE_CONFIG
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
@@ -119,7 +125,31 @@ class MainWindow:
         self.content_frame.pack(side='left', fill='both', expand=True)
     
     def create_sidebar_buttons(self):
-        """إنشاء أزرار الشريط الجانبي"""
+        """إنشاء أزرار الشريط الجانبي مع إمكانية التمرير"""
+        # إطار للتمرير (Canvas + Scrollbar)
+        canvas = tk.Canvas(self.sidebar_frame, bg='#34495e', highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.sidebar_frame, orient="vertical", command=canvas.yview)
+        self.scrollable_frame = ttk.Frame(canvas, style='Sidebar.TFrame')
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=self.sidebar_frame.winfo_width())
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # ربط عجلة الفأرة بالتمرير
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # وضع Canvas و Scrollbar في الشريط الجانبي
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # قائمة الأزرار
         modules = [
             ("🏠 الرئيسية", "dashboard"),
             ("👥 الزبائن", "customers"),
@@ -127,7 +157,7 @@ class MainWindow:
             ("📊 التقارير", "reports"),
             ("💰 المحاسبة", "accounting"),
             ("🗃️ الأرشيف", "archive"),
-            ("⚡ تحليل الهدر", "waste_analysis"),  # أضف هذا السطر
+            ("⚡ تحليل الهدر", "waste_analysis"),
             ("👤 المستخدمين", "users"),
             ("📝 سجل النشاط", "activity_log"),
             ("⚙️ الإعدادات", "settings"),
@@ -136,12 +166,17 @@ class MainWindow:
         ]
         
         for i, (text, command) in enumerate(modules):
-            btn = ttk.Button(self.sidebar_frame,
-                        text=text,
-                        style='Sidebar.TButton',
-                        command=lambda cmd=command: self.handle_sidebar_click(cmd))
+            btn = ttk.Button(self.scrollable_frame,
+                            text=text,
+                            style='Sidebar.TButton',
+                            command=lambda cmd=command: self.handle_sidebar_click(cmd))
             btn.pack(fill='x', padx=10, pady=5, ipady=10)
-
+        
+        # تحديث عرض الإطار الداخلي عند تغيير حجم الشريط الجانبي
+        def _configure_canvas(event):
+            canvas.itemconfig(1, width=event.width)  # 1 هو معرف النافذة التي أنشأناها
+        
+        canvas.bind('<Configure>', _configure_canvas)
 
     # تحديث دالة handle_sidebar_click:
     def handle_sidebar_click(self, command):
@@ -635,7 +670,7 @@ class MainWindow:
             result = archive.perform_backup()
             
             if result.get('success'):
-                messagebox.showinfo("نجاح", result['message'])
+                messagebox.showinfo("نجاح", "تم إنشاء النسخة الاحتياطية بنجاح")
             else:
                 messagebox.showerror("خطأ", result.get('error', 'فشل النسخ الاحتياطي'))
                 
@@ -673,12 +708,11 @@ class MainWindow:
         # قائمة أدوات
         tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="أدوات", menu=tools_menu)
-        tools_menu.add_command(label="إدارة الصلاحيات", 
-                            command=self.show_permission_settings)
+        tools_menu.add_command(label="🔧 قواعد البيانات", command=self.show_database_management)
+        tools_menu.add_command(label="إدارة الصلاحيات", command=self.show_permission_settings)
+        tools_menu.add_command(label="تشخيص مشكلة الصلاحيات", command=self.debug_permission_issue)
 
-        # في setup_menu، أضف:
-        tools_menu.add_command(label="تشخيص مشكلة الصلاحيات", 
-                            command=self.debug_permission_issue)                            
+                                   
         
         # قائمة مساعدة
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -976,7 +1010,172 @@ class MainWindow:
                     text="يتم تطوير نظام متكامل لتحليل الهدر في الطاقة الكهربائية\nسيتم إضافته قريباً",
                     font=('Arial', 14),
                     bg='white', fg='#7f8c8d')
-        msg.pack(pady=50)                    
+        msg.pack(pady=50)
+
+
+       
+        # ...  الخاصة ب قواعد البيانتا باقي القوائم ...
+
+    def show_database_management(self):
+        """عرض نافذة إدارة قاعدة البيانات"""
+        win = tk.Toplevel(self.root)
+        win.title("إدارة قاعدة البيانات")
+        win.geometry("500x400")
+        win.transient(self.root)
+        win.grab_set()
+        
+        # إطار رئيسي
+        main_frame = ttk.Frame(win, padding="20")
+        main_frame.pack(fill='both', expand=True)
+        
+        # تحذير أمان
+        warning_label = tk.Label(main_frame, 
+                                text="⚠️ تحذير: هذه العمليات خطيرة ولا يمكن التراجع عنها",
+                                fg='red', font=('Arial', 10, 'bold'))
+        warning_label.pack(pady=(0,20))
+        
+        # إطار العمليات
+        ops_frame = ttk.Frame(main_frame)
+        ops_frame.pack(fill='both', expand=True)
+        
+        # زر حذف كامل
+        ttk.Button(ops_frame, text="🗑️ حذف كامل لقاعدة البيانات",
+                command=self.confirm_full_database_deletion).pack(fill='x', pady=5)
+        
+        # زر تصفير القيم
+        ttk.Button(ops_frame, text="🔄 تصفير جميع القيم",
+                command=self.confirm_reset_all_data).pack(fill='x', pady=5)
+        
+        # زر استعادة من ملف
+        ttk.Button(ops_frame, text="📂 استعادة قاعدة البيانات من ملف",
+                command=self.restore_database_from_file).pack(fill='x', pady=5)
+        
+        # زر إغلاق
+        ttk.Button(ops_frame, text="إغلاق", command=win.destroy).pack(pady=20)
+
+    def confirm_full_database_deletion(self):
+        """تأكيد حذف قاعدة البيانات بالكامل (حذف الجداول وإعادة إنشائها)"""
+        if not messagebox.askyesno("تأكيد", "هل أنت متأكد من رغبتك في حذف قاعدة البيانات بالكامل؟\nسيتم فقدان جميع البيانات!", icon='warning'):
+            return
+        
+        # طلب كلمة مرور إضافية للأمان
+        password = tk.simpledialog.askstring("كلمة المرور", "أدخل كلمة المرور لتأكيد العملية:", show='*')
+        if password != "admin123":  # يمكنك تغيير كلمة المرور أو جلبها من الإعدادات
+            messagebox.showerror("خطأ", "كلمة المرور غير صحيحة")
+            return
+        
+        try:
+            with db.get_cursor() as cursor:
+                # حذف جميع الجداول (ترتيب يعتمد على العلاقات)
+                cursor.execute("""
+                    DROP TABLE IF EXISTS customer_history CASCADE;
+                    DROP TABLE IF EXISTS invoices CASCADE;
+                    DROP TABLE IF EXISTS customers CASCADE;
+                    DROP TABLE IF EXISTS sectors CASCADE;
+                    DROP TABLE IF EXISTS users CASCADE;
+                    DROP TABLE IF EXISTS settings CASCADE;
+                    DROP TABLE IF EXISTS activity_logs CASCADE;
+                    DROP TABLE IF EXISTS invoice_archive CASCADE;
+                    DROP TABLE IF EXISTS permissions_catalog CASCADE;
+                    DROP TABLE IF EXISTS role_permissions CASCADE;
+                    DROP TABLE IF EXISTS user_permissions CASCADE;
+                    DROP TABLE IF EXISTS customer_financial_logs CASCADE;
+                """)
+                # إعادة إنشاء الجداول
+                models.create_tables()
+            messagebox.showinfo("نجاح", "تم حذف قاعدة البيانات وإعادة إنشائها بنجاح")
+        except Exception as e:
+            logger.error(f"خطأ في حذف قاعدة البيانات: {e}")
+            messagebox.showerror("خطأ", f"فشل في حذف قاعدة البيانات: {str(e)}")
+
+    def confirm_reset_all_data(self):
+        """تأكيد تصفير جميع البيانات (حذف المحتوى فقط)"""
+        if not messagebox.askyesno("تأكيد", "هل أنت متأكد من رغبتك في تصفير جميع البيانات؟\nسيتم حذف جميع السجلات!", icon='warning'):
+            return
+        
+        password = tk.simpledialog.askstring("كلمة المرور", "أدخل كلمة المرور لتأكيد العملية:", show='*')
+        if password != "admin123":
+            messagebox.showerror("خطأ", "كلمة المرور غير صحيحة")
+            return
+        
+        try:
+            with db.get_cursor() as cursor:
+                # تعطيل قيود المفاتيح الخارجية مؤقتاً
+                cursor.execute("SET session_replication_role = 'replica';")
+                
+                # حذف البيانات من جميع الجداول (مع إعادة تعيين التسلسلات)
+                tables = [
+                    'customer_history', 'invoices', 'customers', 'sectors',
+                    'activity_logs', 'invoice_archive', 'customer_financial_logs',
+                    'user_permissions', 'role_permissions', 'permissions_catalog',
+                    'settings', 'users'
+                ]
+                for table in tables:
+                    cursor.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY CASCADE;")
+                
+                # إعادة تفعيل القيود
+                cursor.execute("SET session_replication_role = 'origin';")
+                
+                # إعادة إدخال البيانات الأساسية (المستخدم admin، القطاعات، الصلاحيات)
+                models.seed_initial_data(cursor)
+                
+            messagebox.showinfo("نجاح", "تم تصفير جميع البيانات وإعادة تعيين القيم الافتراضية بنجاح")
+        except Exception as e:
+            logger.error(f"خطأ في تصفير البيانات: {e}")
+            messagebox.showerror("خطأ", f"فشل في تصفير البيانات: {str(e)}")
+
+    def restore_database_from_file(self):
+        """استعادة قاعدة البيانات من ملف نسخة احتياطية"""
+        # اختيار الملف
+        filename = filedialog.askopenfilename(
+            title="اختر ملف النسخة الاحتياطية",
+            filetypes=[
+                ("ملفات النسخ الاحتياطي", "*.backup *.sql *.backup.gpg"),
+                ("جميع الملفات", "*.*")
+            ]
+        )
+        if not filename:
+            return
+        
+        # تأكيد
+        if not messagebox.askyesno("تأكيد", "سيتم استبدال قاعدة البيانات الحالية بالكامل. هل أنت متأكد؟", icon='warning'):
+            return
+        
+        password = tk.simpledialog.askstring("كلمة المرور", "أدخل كلمة المرور لتأكيد العملية:", show='*')
+        if password != "admin123":
+            messagebox.showerror("خطأ", "كلمة المرور غير صحيحة")
+            return
+        
+        try:
+            # محاولة استخدام ArchiveManager إذا كان الملف من نوع .backup
+            if filename.endswith('.backup') or filename.endswith('.backup.gpg'):
+                manager = ArchiveManager()
+                result = manager.restore_backup(filename)
+                if result.get('success'):
+                    messagebox.showinfo("نجاح", "تمت استعادة قاعدة البيانات بنجاح")
+                else:
+                    messagebox.showerror("خطأ", result.get('error', 'فشل الاستعادة'))
+            else:
+                # استعادة باستخدام psql (ملفات .sql)
+                # بناء أمر الاستعادة
+                pg_env = os.environ.copy()
+                pg_env['PGPASSWORD'] = DATABASE_CONFIG['password']
+                cmd = [
+                    'psql',
+                    '-h', DATABASE_CONFIG['host'],
+                    '-p', str(DATABASE_CONFIG['port']),
+                    '-U', DATABASE_CONFIG['user'],
+                    '-d', DATABASE_CONFIG['database'],
+                    '-f', filename
+                ]
+                result = subprocess.run(cmd, env=pg_env, capture_output=True, text=True)
+                if result.returncode == 0:
+                    messagebox.showinfo("نجاح", "تمت استعادة قاعدة البيانات من ملف SQL بنجاح")
+                else:
+                    messagebox.showerror("خطأ", f"فشل الاستعادة:\n{result.stderr}")
+        except Exception as e:
+            logger.error(f"خطأ في استعادة قاعدة البيانات: {e}")
+            messagebox.showerror("خطأ", f"فشل الاستعادة: {str(e)}")                    
     
     def show_help(self):
         """عرض دليل المستخدم"""

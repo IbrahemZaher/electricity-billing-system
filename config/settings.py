@@ -13,13 +13,6 @@ for directory in [DATA_DIR, LOG_DIR, BACKUP_DIR]:
     directory.mkdir(exist_ok=True)
 
 # إعدادات قاعدة البيانات
-DATABASE_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432'),
-    'database': os.getenv('DB_NAME', 'electricity_billing'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', '521990')
-}
 
 # المفتاح السري للتشفير
 SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here-change-in-production')
@@ -35,6 +28,14 @@ PRINTER_CONFIG = {
     'port': 9100,
     'timeout': 10,
     'paper_width': 570
+}
+
+DATABASE_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': os.getenv('DB_PORT', '5432'),
+    'database': os.getenv('DB_NAME', 'electricity_billing'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', '521990')
 }
 
 # الصلاحيات الافتراضية
@@ -70,14 +71,50 @@ DEFAULT_PERMISSIONS = {
     }
 }
 
-# إعدادات النسخ الاحتياطي
+# config/settings.py (الإضافات الجديدة)
+
+# إعدادات النسخ الاحتياطي (المعدلة)
 BACKUP_CONFIG = {
     'local_backup_path': str(BACKUP_DIR),
     'remote_backup_paths': [
-        r"\\10.10.0.1\D\backups",
-        r"\\10.10.0.6\D\backups"
+        #r"\\10.10.0.1\D\backups",
+        #r"\\10.10.0.6\D\backups"
     ],
-    'backup_interval_hours': 24
+    'backup_interval_hours': 24,
+
+    # إعدادات جديدة للنسخ الاحتياطي المتقدم
+    'wal_archive_path': str(BASE_DIR / 'wal_archive'),      # مسار أرشيف WAL
+    'recovery_target_time': None,                           # وقت الاستعادة الافتراضي (اختياري)
+    'retention_policy': {
+        'daily': 30,          # احتفاظ بالنسخ اليومية لمدة 30 يوم
+        'weekly': 12,         # احتفاظ بالنسخ الأسبوعية لمدة 12 أسبوع
+        'monthly': 12,        # احتفاظ بالنسخ الشهرية لمدة 12 شهر
+    },
+    'encryption': {
+        'enabled': False,
+        'method': 'gpg',      # أو 'openssl'
+        'public_key_path': str(BASE_DIR / 'keys' / 'backup_public.asc'),
+        'recipient': 'backup@example.com',  # لمفتاح GPG
+    },
+    'notification': {
+        'enabled': False,
+        'email': {
+            'smtp_server': 'smtp.gmail.com',
+            'smtp_port': 587,
+            'username': 'user@gmail.com',
+            'password': 'app_password',
+            'from_addr': 'user@gmail.com',
+            'to_addrs': ['admin@example.com']
+        },
+        'slack_webhook': 'https://hooks.slack.com/services/...',  # اختياري
+    },
+    'verification': {
+        'enabled': True,
+        'verify_after_backup': True,          # التحقق من سلامة النسخة بعد إنشائها
+        'verify_random_sample': True,         # استرجاع عينة عشوائية للتحقق
+        'sample_size': 10,                    # عدد السجلات العشوائية للاسترجاع
+    },
+    'parallel_backup': True,                  # تشغيل النسخ المتوازية (لأدوات متعددة)
 }
 
 # إعدادات الأداء
