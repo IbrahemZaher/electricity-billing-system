@@ -192,38 +192,36 @@ class CustomerUI(tk.Frame):
         balance_combo.set('الكل')
         balance_combo.pack(side='left', padx=5)
         balance_combo.bind('<<ComboboxSelected>>', self.on_filter_changed)
-    
+        
     def create_customer_tree(self):
-        """إنشاء شجرة عرض الزبائن مع الحقول الجديدة"""
-        # إطار يحتوي على الشجرة وشريط التمرير
+        """إنشاء شجرة عرض الزبائن مع دعم العرض الهرمي"""
         tree_frame = tk.Frame(self)
         tree_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
-        # شريط تمرير عمودي
         v_scrollbar = ttk.Scrollbar(tree_frame, orient='vertical')
         v_scrollbar.pack(side='right', fill='y')
-        
-        # شريط تمرير أفقي
         h_scrollbar = ttk.Scrollbar(tree_frame, orient='horizontal')
         h_scrollbar.pack(side='bottom', fill='x')
         
-        # إنشاء الشجرة
-        columns = ('id', 'name', 'sector', 'meter_type', 'parent', 'box', 'serial', 'balance', 'phone', 'visa', 'status')
-        
+        # الأعمدة (باستثناء الاسم الذي سيكون في العمود #0)
+        columns = ('id', 'sector', 'meter_type', 'parent', 'box', 'serial', 'balance', 'phone', 'visa', 'status')
         self.tree = ttk.Treeview(tree_frame, columns=columns,
                                 yscrollcommand=v_scrollbar.set,
                                 xscrollcommand=h_scrollbar.set,
                                 selectmode='browse',
-                                show='headings',
+                                show='tree headings',  # هام: يعرض عمود الشجرة
                                 height=20)
         
         v_scrollbar.config(command=self.tree.yview)
         h_scrollbar.config(command=self.tree.xview)
         
-        # تعريف رؤوس الأعمدة
+        # رأس العمود الأول (الشجرة) - لعرض الاسم
+        self.tree.heading('#0', text='اسم الزبون')
+        self.tree.column('#0', width=200)
+        
+        # تعريف بقية الأعمدة
         columns_config = [
             ('id', 'ID', 50, 'center'),
-            ('name', 'اسم الزبون', 180, 'w'),
             ('sector', 'القطاع', 100, 'center'),
             ('meter_type', 'نوع العداد', 100, 'center'),
             ('parent', 'العلبة الأم', 120, 'center'),
@@ -241,16 +239,16 @@ class CustomerUI(tk.Frame):
         
         self.tree.pack(fill='both', expand=True)
         
-        # إضافة تنسيقات للألوان
+        # تنسيقات الألوان
         self.tree.tag_configure('negative', foreground='#e74c3c')
         self.tree.tag_configure('positive', foreground='#27ae60')
         self.tree.tag_configure('zero', foreground='#7f8c8d')
         self.tree.tag_configure('inactive', foreground='#95a5a6')
         
-        # ربط الأحداث
         self.tree.bind('<Double-Button-1>', self.on_double_click)
         self.tree.bind('<<TreeviewSelect>>', self.on_selection_changed)
-    
+        
+
     def create_statusbar(self):
         """إنشاء شريط الحالة السفلي"""
         self.statusbar = tk.Frame(self, bg='#34495e', height=30)
@@ -270,147 +268,122 @@ class CustomerUI(tk.Frame):
                                    bg='#34495e', fg='#bdc3c7',
                                    font=('Arial', 9))
         self.stats_label.pack(side='right', padx=10)
-            
+                
     def load_customers(self, search_term="", sector_id=None, meter_type_filter="الكل", 
                     balance_filter="الكل", financial_filter="الكل"):
-        """تحميل قائمة الزبائن مع إمكانية البحث والتصفية"""
+        """تحميل قائمة الزبائن بالترتيب الهرمي مع دعم البحث"""
         if not self.customer_manager:
             self.show_error_message("مدير الزبائن غير متاح")
             return
-        
+
         # مسح البيانات الحالية
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
+
         try:
-            # جلب الزبائن من قاعدة البيانات
-            customers = self.customer_manager.search_customers(
-                search_term=search_term,
-                sector_id=sector_id
-            )
-            
-            # تطبيق فلتر نوع العداد
-            if meter_type_filter != "الكل":
-                customers = [c for c in customers if c.get('meter_type', 'زبون') == meter_type_filter]
-            
-            # تطبيق فلتر الرصيد
-            if balance_filter == "سالب فقط":
-                customers = [c for c in customers if c.get('current_balance', 0) < 0]
-            elif balance_filter == "موجب فقط":
-                customers = [c for c in customers if c.get('current_balance', 0) > 0]
-            elif balance_filter == "صفر فقط":
-                customers = [c for c in customers if c.get('current_balance', 0) == 0]
-            
-            # تطبيق فلتر التصنيف المالي
-            if financial_filter != "الكل":
-                financial_map = {
-                    'عادي': 'normal',
-                    'مجاني': 'free',
-                    'VIP': 'vip',
-                    'مجاني+VIP': 'free_vip'
-                }
-                target_category = financial_map.get(financial_filter)
-                if target_category:
-                    customers = [c for c in customers if c.get('financial_category') == target_category]
-            
-            # إضافة الزبائن إلى الشجرة
-            customer_count = 0
-            balance_stats = {'negative': 0, 'positive': 0, 'zero': 0, 'total_balance': 0}
-            meter_type_stats = {'مولدة': 0, 'علبة توزيع': 0, 'رئيسية': 0, 'زبون': 0}
-            financial_stats = {'normal': 0, 'free': 0, 'vip': 0, 'free_vip': 0}
-            
-            for customer in customers:
-                customer_id = customer['id']
-                name = customer['name']
-                sector = customer.get('sector_name', 'غير محدد')
-                meter_type = customer.get('meter_type', 'زبون')
-                financial_category = customer.get('financial_category', 'normal')
-                
-                # تحديث إحصائيات التصنيف المالي
-                if financial_category in financial_stats:
-                    financial_stats[financial_category] += 1
-                
-                # =========== استخدام parent_display مباشرة من بيانات الزبون ===========
-                # تأكد من وجود parent_display في البيانات
-                parent_display = customer.get('parent_display', '')
-                
-                # إذا لم يكن موجوداً، حاول بناؤه
-                if not parent_display:
-                    parent_meter = customer.get('parent_name', '')
-                    parent_box = customer.get('parent_box_number', '')
-                    parent_type = customer.get('parent_meter_type', '')
-                    
-                    if parent_box and parent_type and parent_meter:
-                        parent_display = f"{parent_box} ({parent_type}) - {parent_meter}"
-                    elif parent_box and parent_meter:
-                        parent_display = f"{parent_box} - {parent_meter}"
-                    elif parent_meter:
-                        parent_display = parent_meter
-                    elif parent_box:
-                        parent_display = f"علبة {parent_box}"
+            # تحديد sector_id من شريط الفلتر إذا لم يُمرر
+            if sector_id is None:
+                sector_name = self.sector_var.get()
+                if sector_name and sector_name != 'الكل':
+                    for s in self.sectors:
+                        if s['name'] == sector_name:
+                            sector_id = s['id']
+                            break
+
+            # جلب جميع العقد بالترتيب الهرمي
+            nodes = self.customer_manager.get_customer_hierarchy(sector_id=sector_id)
+
+            # تطبيق البحث إذا وجد
+            if search_term:
+                search_term_lower = search_term.lower()
+                # 1. تحديد العقد المطابقة للبحث
+                matching_ids = set()
+                for node in nodes:
+                    # البحث في الحقول المختلفة
+                    if (search_term_lower in node['name'].lower() or
+                        search_term_lower in node.get('box_number', '').lower() or
+                        search_term_lower in node.get('serial_number', '').lower() or
+                        search_term_lower in node.get('phone_number', '').lower()):
+                        matching_ids.add(node['id'])
+
+                # 2. تحديد الآباء اللازمين لإظهار السياق
+                visible_ids = set(matching_ids)
+                # إضافة الآباء بشكل متكرر
+                for node in nodes:
+                    if node['id'] in matching_ids:
+                        parent_id = node.get('parent_meter_id')
+                        while parent_id:
+                            visible_ids.add(parent_id)
+                            # البحث عن بيانات الأب
+                            parent_node = next((n for n in nodes if n['id'] == parent_id), None)
+                            if parent_node:
+                                parent_id = parent_node.get('parent_meter_id')
+                            else:
+                                break
+
+                # تصفية العقد لتبقى فقط المرئية
+                nodes = [node for node in nodes if node['id'] in visible_ids]
+
+            # تطبيق الفلاتر الأخرى (مثل نوع العداد وحالة الرصيد)
+            # يمكن إضافتها هنا إذا لزم الأمر
+
+            # بناء قاموس للأبناء حسب معرّف الأب
+            children_by_parent = {}
+            for node in nodes:
+                parent_id = node.get('parent_meter_id')
+                children_by_parent.setdefault(parent_id, []).append(node)
+
+            # دالة تكرارية لإدراج العقدة وأبنائها
+            def insert_node(parent_node, parent_iid=''):
+                parent_id = parent_node['id'] if parent_node else None
+                for node in children_by_parent.get(parent_id, []):
+                    # تحديد اللون بناءً على الرصيد
+                    tags = []
+                    balance = node.get('current_balance', 0)
+                    if balance < 0:
+                        tags.append('negative')
+                    elif balance > 0:
+                        tags.append('positive')
                     else:
-                        parent_display = ''
-                # =========== نهاية التعديل ===========
-                
-                box = customer.get('box_number', '')
-                serial = customer.get('serial_number', '')
-                balance = customer.get('current_balance', 0)
-                phone = customer.get('phone_number', '')
-                visa = customer.get('visa_balance', 0)
-                is_active = customer.get('is_active', True)
-                
-                # تحديث إحصائيات نوع العداد
-                if meter_type in meter_type_stats:
-                    meter_type_stats[meter_type] += 1
-                
-                # تحديد اللون بناءً على الرصيد
-                tags = []
-                if balance < 0:
-                    tags.append('negative')
-                    balance_stats['negative'] += 1
-                elif balance > 0:
-                    tags.append('positive')
-                    balance_stats['positive'] += 1
-                else:
-                    tags.append('zero')
-                    balance_stats['zero'] += 1
-                
-                if not is_active:
-                    tags.append('inactive')
-                
-                balance_stats['total_balance'] += balance
-                
-                # إضافة الزبون للشجرة
-                self.tree.insert("", "end", values=(
-                    customer_id,
-                    name,
-                    sector,
-                    meter_type,
-                    parent_display,  # استخدام parent_display مباشرة
-                    box,
-                    serial,
-                    f"{balance:,.0f} كيلو واط",
-                    phone,
-                    f"{visa:,.0f}",
-                    "نشط" if is_active else "غير نشط"
-                ), tags=tuple(tags))
-                
-                customer_count += 1
-            
-            # تحديث شريط الحالة
-            self.status_label.config(text=f"عدد الزبائن: {customer_count}")
-            
+                        tags.append('zero')
+                    if not node.get('is_active', True):
+                        tags.append('inactive')
+
+                    # إدراج العقدة
+                    iid = self.tree.insert(
+                        parent_iid, 'end',
+                        text=node['name'],
+                        values=(
+                            node['id'],
+                            node.get('sector_name', ''),
+                            node['meter_type'],
+                            '',  # parent_display (يظهر من الهيكل)
+                            node.get('box_number', ''),
+                            node.get('serial_number', ''),
+                            f"{balance:,.0f} ك.و",
+                            node.get('phone_number', ''),
+                            f"{node.get('visa_balance', 0):,.0f}",
+                            "نشط" if node.get('is_active', True) else "غير نشط"
+                        ),
+                        tags=tuple(tags)
+                    )
+                    # إدراج الأبناء
+                    insert_node(node, iid)
+
+            # البدء من العقد الجذرية
+            insert_node(None)
+
+            # توسيع كل العقد لرؤية النتائج (اختياري)
+            self.tree.see('')
+
             # تحديث الإحصائيات
-            stats_text = (f"مولدة: {meter_type_stats['مولدة']} | "
-                        f"علبة توزيع: {meter_type_stats['علبة توزيع']} | "
-                        f"رئيسية: {meter_type_stats['رئيسية']} | "
-                        f"زبون: {meter_type_stats['زبون']}")
-            self.stats_label.config(text=stats_text)
-            
+            customer_count = len([n for n in nodes if n['meter_type'] == 'زبون'])
+            self.status_label.config(text=f"عدد الزبائن: {customer_count}")
+            self.stats_label.config(text=f"تم تحميل {len(nodes)} عقدة" + (" (نتائج بحث)" if search_term else ""))
+
         except Exception as e:
             logger.error(f"خطأ في تحميل الزبائن: {e}")
-            self.show_error_message(f"خطأ في تحميل البيانات: {str(e)}")
-            
+            self.show_error_message(f"خطأ في تحميل البيانات: {str(e)}")            
 
     def on_search_changed(self, event=None):
         """عند تغيير نص البحث"""

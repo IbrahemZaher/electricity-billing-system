@@ -1486,6 +1486,98 @@ class CustomerManager:
             logger.error(f"خطأ في جلب الشجرة الهرمية: {e}")
             return None
 
+
+    def get_customer_hierarchy(self, sector_id: int = None) -> List[Dict]:
+        """
+        جلب جميع العدادات (زبائن، مولدة، علب توزيع، رئيسية) بترتيب هرمي (عمق أول)
+        يطابق ترتيب عمود "المسار الهرمي" في تقرير Excel.
+        """
+        try:
+            with db.get_cursor() as cursor:
+                # استعلام عودي لبناء الشجرة والمسار
+                query = """
+                    WITH RECURSIVE customer_tree AS (
+                        -- 1. العقد الجذرية (بدون أب)
+                        SELECT 
+                            c.id,
+                            c.name,
+                            c.meter_type,
+                            c.financial_category,
+                            c.visa_balance,
+                            c.current_balance,
+                            c.withdrawal_amount,
+                            c.box_number,
+                            c.serial_number,
+                            c.phone_number,
+                            c.parent_meter_id,
+                            c.sector_id,
+                            c.is_active,
+                            s.name as sector_name,
+                            0 AS level,
+                            ARRAY[c.name]::VARCHAR[] AS path_names,
+                            ARRAY[c.meter_type]::VARCHAR[] AS path_types
+                        FROM customers c
+                        LEFT JOIN sectors s ON c.sector_id = s.id
+                        WHERE c.parent_meter_id IS NULL
+                        AND c.is_active = TRUE
+                        AND (c.sector_id = %s OR %s IS NULL)
+                        
+                        UNION ALL
+                        
+                        -- 2. الأبناء
+                        SELECT 
+                            c.id,
+                            c.name,
+                            c.meter_type,
+                            c.financial_category,
+                            c.visa_balance,
+                            c.current_balance,
+                            c.withdrawal_amount,
+                            c.box_number,
+                            c.serial_number,
+                            c.phone_number,
+                            c.parent_meter_id,
+                            c.sector_id,
+                            c.is_active,
+                            s.name as sector_name,
+                            ct.level + 1,
+                            ct.path_names || c.name,
+                            ct.path_types || c.meter_type
+                        FROM customers c
+                        INNER JOIN customer_tree ct ON c.parent_meter_id = ct.id
+                        LEFT JOIN sectors s ON c.sector_id = s.id
+                        WHERE c.is_active = TRUE
+                    )
+                    SELECT 
+                        id,
+                        name,
+                        meter_type,
+                        financial_category,
+                        visa_balance,
+                        current_balance,
+                        withdrawal_amount,
+                        box_number,
+                        serial_number,
+                        phone_number,
+                        parent_meter_id,
+                        sector_id,
+                        sector_name,
+                        is_active,
+                        level,
+                        path_names,
+                        path_types,
+                        array_to_string(path_names, ' ← ') as path_display
+                    FROM customer_tree
+                    ORDER BY path_names  -- ترتيب عمق أول (نفس ترتيب Excel)
+                """
+                cursor.execute(query, (sector_id, sector_id))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"خطأ في جلب التسلسل الهرمي: {e}")
+            return []
+
+
     def get_customer_balance_by_sector(self) -> Dict:
         """
         حساب لنا وعلينا لكل قطاع بدقة عالية:
