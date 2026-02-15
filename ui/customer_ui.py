@@ -116,20 +116,26 @@ class CustomerUI(tk.Frame):
                             padx=10, pady=4)
                 btn.pack(side='left', padx=3)
         
+        # زر إدارة الأبناء (جديد)
+        if has_permission('customers.manage_children'):
+            btn = tk.Button(buttons_frame, text="👥 إدارة الأبناء", command=self.manage_children,
+                            bg='#f39c12', fg='white',
+                            font=('Arial', 9),
+                            padx=10, pady=4, cursor='hand2')
+            btn.pack(side='left', padx=3)
+        else:
+            btn = tk.Button(buttons_frame, text="👥 إدارة الأبناء",
+                            state='disabled',
+                            bg='#95a5a6', fg='white',
+                            font=('Arial', 9),
+                            padx=10, pady=4)
+            btn.pack(side='left', padx=3)
+        
         # زر إحصائيات لنا وعلينا
         stats_btn = tk.Button(buttons_frame, text="📊 لنا/علينا", command=self.show_balance_stats,
-                              bg="#34495e", fg="white", font=("Arial", 9), padx=10, pady=4, cursor='hand2')
+                            bg="#34495e", fg="white", font=("Arial", 9), padx=10, pady=4, cursor='hand2')
         stats_btn.pack(side='left', padx=3)
         
-        # تحديث حجم Canvas
-        def configure_canvas(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-            canvas.itemconfig(canvas_window, width=max(buttons_frame.winfo_reqwidth(), canvas.winfo_width()))
-        
-        buttons_frame.bind("<Configure>", configure_canvas)
-        canvas.bind("<Configure>", configure_canvas)
-        
-
         # تحديث حجم Canvas
         def configure_canvas(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -978,4 +984,33 @@ class CustomerUI(tk.Frame):
         tk.Button(btn_frame, text="إغلاق", 
                 command=window.destroy,
                 bg='#95a5a6', fg='white',
-                font=('Arial', 10)).pack(side='left', padx=5)
+                    font=('Arial', 10)).pack(side='left', padx=5)
+
+    def manage_children(self):
+        """فتح نافذة إدارة الأبناء للوالد المحدد"""
+        customer_id = self.get_selected_customer_id()
+        if not customer_id:
+            messagebox.showwarning("تحذير", "يرجى تحديد والد (مولدة/علبة توزيع/رئيسية) أولاً")
+            return
+        
+        try:
+            # جلب بيانات الوالد
+            parent = self.customer_manager.get_customer(customer_id)
+            if not parent:
+                messagebox.showerror("خطأ", "الوالد غير موجود")
+                return
+            
+            # التحقق من أن هذا العدد يمكن أن يكون أباً
+            if parent['meter_type'] not in ['مولدة', 'علبة توزيع', 'رئيسية']:
+                messagebox.showwarning("تحذير", "هذا العنصر ليس من الأنواع التي يمكن أن تكون أباً (مولدة/علبة توزيع/رئيسية)")
+                return
+            
+            from ui.manage_children import ManageChildrenDialog
+            ManageChildrenDialog(self, self.customer_manager, parent, self.user_data.get('id', 1))
+            
+        except ImportError as e:
+            logger.error(f"خطأ في تحميل وحدة إدارة الأبناء: {e}")
+            messagebox.showerror("خطأ", "لا يمكن تحميل وحدة إدارة الأبناء")
+        except Exception as e:
+            logger.error(f"خطأ في فتح إدارة الأبناء: {e}")
+            messagebox.showerror("خطأ", f"فشل فتح النافذة: {str(e)}")                

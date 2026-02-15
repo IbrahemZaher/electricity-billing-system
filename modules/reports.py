@@ -650,10 +650,9 @@ class ReportManager:
         min_balance: float = None,
         max_balance: float = 0,
         exclude_categories: List[str] = None,
-        exclude_free: bool = True,
-        exclude_vip: bool = True,
         only_meter_type: str = "زبون",
-        box_id: int = None,
+        box_id: int = None,          # للفلترة بمعرف علبة معينة
+        sector_id: int = None,       # الفلترة حسب القطاع
         sort_by: str = "balance_asc"
     ) -> Dict[str, Any]:
         """
@@ -666,12 +665,9 @@ class ReportManager:
                 max_balance = 0
             if exclude_categories is None:
                 exclude_categories = []
-            if exclude_free and 'free' not in exclude_categories:
-                exclude_categories.extend(['free', 'free_vip'])
-            if exclude_vip and 'vip' not in exclude_categories:
-                exclude_categories.extend(['vip', 'free_vip'])
             
             with db.get_cursor() as cursor:
+                # استعلام العلب الأم مع إمكانية فلترة حسب القطاع
                 query_boxes = """
                     SELECT 
                         c.id as box_id,
@@ -694,12 +690,17 @@ class ReportManager:
                 if box_id:
                     query_boxes += " AND c.id = %s"
                     box_params.append(box_id)
+                if sector_id:
+                    query_boxes += " AND c.sector_id = %s"
+                    box_params.append(sector_id)
                 query_boxes += """
                     GROUP BY c.id, c.name, c.box_number, c.meter_type, c.sector_id, s.name
                     ORDER BY c.meter_type, c.name
                 """
                 cursor.execute(query_boxes, box_params)
                 boxes = cursor.fetchall()
+                
+                # باقي الكود كما هو...
                 
                 boxes_list = []
                 grand_total = {
@@ -761,7 +762,6 @@ class ReportManager:
                             withdrawal = float(customer['withdrawal_amount'] or 0)
                             visa = float(customer['visa_balance'] or 0)
                             
-                            # ❌ تم حذف calculated_new_balance
                             customer_dict = {
                                 'id': customer['id'],
                                 'name': customer['name'],
@@ -795,7 +795,6 @@ class ReportManager:
                             'box_total_balance': box_total_balance,
                             'box_total_withdrawal': box_total_withdrawal,
                             'box_total_visa': box_total_visa,
-                            # ❌ تم حذف box_calculated_balance
                         }
                         
                         boxes_list.append(box_info)
@@ -817,8 +816,6 @@ class ReportManager:
                         'min_balance': min_balance,
                         'max_balance': max_balance,
                         'exclude_categories': exclude_categories,
-                        'exclude_free': exclude_free,
-                        'exclude_vip': exclude_vip,
                         'only_meter_type': only_meter_type,
                         'box_id': box_id,
                         'sort_by': sort_by

@@ -72,10 +72,9 @@ class CustomerDetails:
         notebook.add(hierarchy_tab, text='العلاقات الهرمية')
 
         # معلومات التصنيف المالي
-        financial_tab = ttk.Frame(notebook)
-        self.create_financial_info_tab(financial_tab)
-        notebook.add(financial_tab, text='التصنيف المالي')
-        
+        financial_cat_tab = ttk.Frame(notebook)
+        self.create_financial_category_tab(financial_cat_tab)   # استدعاء الدالة الجديدة
+        notebook.add(financial_cat_tab, text='التصنيف المالي')        
         # أزرار التحكم
         self.create_buttons()
     
@@ -524,7 +523,7 @@ class CustomerDetails:
 
 
     # إضافة دالة جديدة
-    def create_financial_info_tab(self, parent):
+    def create_financial_category_tab(self, parent):
         """إنشاء تبويب معلومات التصنيف المالي"""
         canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
         scrollbar = ttk.Scrollbar(parent, orient='vertical', command=canvas.yview)

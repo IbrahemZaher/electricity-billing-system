@@ -1748,4 +1748,165 @@ class CustomerManager:
                 
         except Exception as e:
             logger.error(f"خطأ في جلب قوائم الكسر المتقدمة: {e}")
-            return {}            
+            return {}  
+                
+    def get_potential_children(self, parent_id: int) -> List[Dict]:
+        """
+        جلب قائمة الزبائن المحتملين ليكونوا أبناء لوالد معين.
+        يتم تحديدهم حسب:
+        - نفس القطاع
+        - نوع العدد المسموح به حسب نوع الوالد
+        - إظهار ما إذا كانوا أبناءً حاليين لهذا الوالد أم لا
+        """
+        try:
+            with db.get_cursor() as cursor:
+                # جلب معلومات الوالد (النوع والقطاع)
+                cursor.execute("""
+                    SELECT meter_type, sector_id FROM customers 
+                    WHERE id = %s AND is_active = TRUE
+                """, (parent_id,))
+                parent = cursor.fetchone()
+                if not parent:
+                    return []
+                
+                parent_type = parent['meter_type']
+                sector_id = parent['sector_id']
+                
+                # تحديد أنواع الأبناء المسموح بها
+                allowed_child_types = []
+                if parent_type == 'مولدة':
+                    allowed_child_types = ['علبة توزيع', 'رئيسية', 'زبون']
+                elif parent_type == 'علبة توزيع':
+                    allowed_child_types = ['رئيسية', 'زبون']
+                elif parent_type == 'رئيسية':
+                    allowed_child_types = ['زبون']
+                else:
+                    return []  # الزبون لا يمكن أن يكون أباً
+                
+                # جلب جميع الزبائن في نفس القطاع من الأنواع المسموح بها
+                cursor.execute("""
+                    SELECT 
+                        id, name, box_number, serial_number, meter_type,
+                        current_balance, phone_number,
+                        (parent_meter_id = %s) as is_current_child
+                    FROM customers
+                    WHERE sector_id = %s
+                    AND meter_type = ANY(%s)
+                    AND is_active = TRUE
+                    AND id != %s  -- لا ندرج الوالد نفسه
+                    ORDER BY 
+                        box_number ASC NULLS LAST,
+                        serial_number ASC NULLS LAST
+                """, (parent_id, sector_id, allowed_child_types, parent_id))
+                
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب الأبناء المحتملين: {e}")
+            return []
+
+            
+    def update_children(self, parent_id: int, child_ids: List[int], user_id: int) -> Dict:
+        """
+        تحديث أبناء والد معين:
+        - تعيين parent_meter_id = parent_id لكل ابن في child_ids
+        - إعادة تعيين parent_meter_id = NULL للأبناء الذين كانوا تابعين لهذا الوالد سابقاً ولم يعدوا في القائمة
+        """
+        try:
+            with db.get_cursor() as cursor:
+                # التحقق من وجود الوالد
+                cursor.execute("SELECT meter_type, sector_id FROM customers WHERE id = %s AND is_active = TRUE", (parent_id,))
+                parent = cursor.fetchone()
+                if not parent:
+                    return {'success': False, 'error': 'الوالد غير موجود'}
+                
+                # تحديد أنواع الأبناء المسموح بها (للتحقق)
+                allowed_child_types = []
+                if parent['meter_type'] == 'مولدة':
+                    allowed_child_types = ['علبة توزيع', 'رئيسية', 'زبون']
+                elif parent['meter_type'] == 'علبة توزيع':
+                    allowed_child_types = ['رئيسية', 'زبون']
+                elif parent['meter_type'] == 'رئيسية':
+                    allowed_child_types = ['زبون']
+                else:
+                    return {'success': False, 'error': 'هذا النوع لا يمكن أن يكون أباً'}
+                
+                # 1. تحديث الأبناء المحددين (جدد أو قدامى)
+                if child_ids:
+                    # التحقق من أن جميع child_ids موجودة ومن نفس القطاع ومن الأنواع المسموحة
+                    cursor.execute("""
+                        SELECT id, meter_type FROM customers 
+                        WHERE id = ANY(%s) AND sector_id = %s AND is_active = TRUE
+                    """, (child_ids, parent['sector_id']))
+                    valid_children = cursor.fetchall()
+                    valid_ids = [c['id'] for c in valid_children]
+                    
+                    # التحقق من الأنواع
+                    for child in valid_children:
+                        if child['meter_type'] not in allowed_child_types:
+                            return {
+                                'success': False,
+                                'error': f'الزبون {child["id"]} من نوع {child["meter_type"]} غير مسموح به لهذا الوالد'
+                            }
+                    
+                    # تعيين parent_meter_id للقائمة
+                    cursor.execute("""
+                        UPDATE customers 
+                        SET parent_meter_id = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ANY(%s)
+                    """, (parent_id, valid_ids))
+                    
+                    # تسجيل العملية لكل ابن
+                    for child_id in valid_ids:
+                        cursor.execute("""
+                            INSERT INTO customer_history 
+                            (customer_id, action_type, transaction_type, 
+                            details, notes, created_by, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        """, (
+                            child_id,
+                            'child_update',
+                            'parent_change',
+                            f'تم تعيين العداد {parent_id} كوالد',
+                            f'تحديد كابن للوالد {parent_id}',
+                            user_id
+                        ))
+                
+                # 2. إزالة الأبناء السابقين الذين لم يعدوا في القائمة
+                cursor.execute("""
+                    UPDATE customers 
+                    SET parent_meter_id = NULL, updated_at = CURRENT_TIMESTAMP
+                    WHERE parent_meter_id = %s AND id != ALL(%s)
+                """, (parent_id, child_ids if child_ids else [-1]))
+                
+                # تسجيل العملية للأبناء الذين تمت إزالتهم
+                cursor.execute("""
+                    SELECT id FROM customers 
+                    WHERE parent_meter_id IS NULL AND updated_at = CURRENT_TIMESTAMP
+                """)
+                removed = cursor.fetchall()
+                for child in removed:
+                    cursor.execute("""
+                        INSERT INTO customer_history 
+                        (customer_id, action_type, transaction_type, 
+                        details, notes, created_by, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    """, (
+                        child['id'],
+                        'child_update',
+                        'parent_removed',
+                        f'تم إزالة العلاقة مع الوالد {parent_id}',
+                        'إزالة من الأبناء',
+                        user_id
+                    ))
+                
+                logger.info(f"تم تحديث أبناء الوالد {parent_id}: {len(child_ids)} ابن جديد، {len(removed)} تمت إزالتهم")
+                return {
+                    'success': True,
+                    'message': f"تم تحديث الأبناء بنجاح: {len(child_ids)} ابن تمت إضافتهم/تأكيدهم، {len(removed)} تمت إزالتهم"
+                }
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحديث الأبناء: {e}")
+            return {'success': False, 'error': str(e)}                                

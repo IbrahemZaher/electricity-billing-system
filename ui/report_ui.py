@@ -403,7 +403,7 @@ class ReportUI(tk.Frame):
                     max_balance=max_balance,
                     exclude_categories=exclude_categories,
                     only_meter_type=only_meter_type,
-                    box_id=sector_id,
+                    sector_id=sector_id,   # استخدم sector_id بدلاً من box_id
                     sort_by=sort_by
                 )
                 
@@ -1119,18 +1119,30 @@ class ReportUI(tk.Frame):
     def show_negative_balance_advanced_filter(self):
         filter_window = tk.Toplevel(self)
         filter_window.title("فلترة متقدمة - قوائم الكسر")
-        filter_window.geometry("500x600")
+        filter_window.geometry("500x650")
         
         filter_window.update_idletasks()
         x = (filter_window.winfo_screenwidth() // 2) - (500 // 2)
-        y = (filter_window.winfo_screenheight() // 2) - (600 // 2)
-        filter_window.geometry(f"500x600+{x}+{y}")
+        y = (filter_window.winfo_screenheight() // 2) - (650 // 2)
+        filter_window.geometry(f"500x650+{x}+{y}")
         
-        main_frame = tk.Frame(filter_window, padx=20, pady=20)
-        main_frame.pack(fill='both', expand=True)
+        # إنشاء canvas مع scrollbar للمحتوى القابل للتمرير
+        main_canvas = tk.Canvas(filter_window)
+        main_canvas.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = ttk.Scrollbar(filter_window, orient="vertical", command=main_canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        
+        main_canvas.configure(yscrollcommand=scrollbar.set)
+        main_canvas.bind('<Configure>', lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all")))
+        
+        main_frame = tk.Frame(main_canvas, padx=20, pady=20)
+        main_canvas.create_window((0, 0), window=main_frame, anchor="nw", width=460)
+        
         tk.Label(main_frame, text="فلترة متقدمة - قوائم الكسر", 
                 font=('Arial', 14, 'bold')).pack(pady=(0, 20))
         
+        # مجال الرصيد
         balance_frame = tk.LabelFrame(main_frame, text="مجال الرصيد", padx=10, pady=10)
         balance_frame.pack(fill='x', pady=10)
         tk.Label(balance_frame, text="من:").grid(row=0, column=0, padx=5, pady=5)
@@ -1142,6 +1154,7 @@ class ReportUI(tk.Frame):
         max_balance_entry.insert(0, "0")
         max_balance_entry.grid(row=0, column=3, padx=5, pady=5)
         
+        # أنواع العدادات
         meter_frame = tk.LabelFrame(main_frame, text="أنواع العدادات", padx=10, pady=10)
         meter_frame.pack(fill='x', pady=10)
         meter_types = ['مولدة', 'علبة توزيع', 'رئيسية', 'زبون']
@@ -1152,6 +1165,7 @@ class ReportUI(tk.Frame):
             chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
             meter_vars[meter_type] = var
         
+        # التصنيفات المالية المستثناة
         category_frame = tk.LabelFrame(main_frame, text="استبعاد التصنيفات", padx=10, pady=10)
         category_frame.pack(fill='x', pady=10)
         categories = ['normal', 'free', 'vip', 'free_vip']
@@ -1170,6 +1184,7 @@ class ReportUI(tk.Frame):
             chk.grid(row=i//2, column=i%2, sticky='w', padx=10, pady=5)
             category_vars[category] = var
         
+        # القطاع
         sector_frame = tk.LabelFrame(main_frame, text="القطاع", padx=10, pady=10)
         sector_frame.pack(fill='x', pady=10)
         tk.Label(sector_frame, text="اختر قطاع:").pack(side='left', padx=5)
@@ -1182,6 +1197,7 @@ class ReportUI(tk.Frame):
         sector_combo.pack(side='left', padx=5)
         sector_combo.current(0)
         
+        # طريقة الترتيب
         sort_frame = tk.LabelFrame(main_frame, text="طريقة الترتيب", padx=10, pady=10)
         sort_frame.pack(fill='x', pady=10)
         sort_var = tk.StringVar(value="balance_desc")
@@ -1191,6 +1207,10 @@ class ReportUI(tk.Frame):
                     variable=sort_var, value="balance_asc").pack(anchor='w', pady=2)
         tk.Radiobutton(sort_frame, text="الاسم أبجدياً", 
                     variable=sort_var, value="name").pack(anchor='w', pady=2)
+        
+        # إطار الأزرار في الأسفل (خارج الـ canvas)
+        button_frame = tk.Frame(filter_window)
+        button_frame.pack(side="bottom", fill="x", padx=20, pady=10)
         
         def apply_filter():
             try:
@@ -1227,17 +1247,16 @@ class ReportUI(tk.Frame):
             except Exception as e:
                 self.show_error(f"خطأ في التصفية: {e}")
         
-        btn_frame = tk.Frame(main_frame, pady=20)
-        btn_frame.pack(fill='x')
-        tk.Button(btn_frame, text="تطبيق", command=apply_filter,
+        tk.Button(button_frame, text="تطبيق", command=apply_filter,
                 bg='#27ae60', fg='white', width=15).pack(side='right', padx=5)
-        tk.Button(btn_frame, text="إلغاء", command=filter_window.destroy,
+        tk.Button(button_frame, text="إلغاء", command=filter_window.destroy,
                 bg='#e74c3c', fg='white', width=15).pack(side='right', padx=5)
-        tk.Button(btn_frame, text="إعادة تعيين", 
+        tk.Button(button_frame, text="إعادة تعيين", 
                 command=lambda: self.reset_filter_fields(min_balance_entry, max_balance_entry,
                                                         meter_vars, category_vars,
                                                         sector_combo, sort_var),
                 bg='#3498db', fg='white', width=15).pack(side='right', padx=5)
+
 
     def reset_filter_fields(self, min_balance_entry, max_balance_entry, 
                           meter_vars, category_vars, sector_combo, sort_var):
