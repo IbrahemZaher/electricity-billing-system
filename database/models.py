@@ -22,7 +22,8 @@ class Models:
                     ('visa_application', 'VARCHAR(100)'),
                     ('customer_withdrawal', 'VARCHAR(100)'),
                     ('notes', 'TEXT'),
-                    ('payment_method', "VARCHAR(20) DEFAULT 'cash'")   # العمود الجديد
+                    ('payment_method', "VARCHAR(20) DEFAULT 'cash'"),
+                    ('updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')   # ← أضف هذا السطر   # العمود الجديد
                 ]
                 
                 for column_name, column_type in columns_to_add:

@@ -89,10 +89,10 @@ class FastOperations:
         except Exception as e:
             logger.error(f"خطأ في جلب بيانات الزبون: {e}")
             return {}
-            
+                
     @staticmethod
     def fast_process_invoice(customer_id: int, **kwargs):
-        """معالجة فاتورة سريعة"""
+        """معالجة فاتورة سريعة مع تسجيل في customer_history"""
         try:
             # استقبال البيانات الجديدة
             kilowatt_amount = float(kwargs.get('kilowatt_amount', 0))
@@ -100,9 +100,9 @@ class FastOperations:
             price_per_kilo = float(kwargs.get('price_per_kilo', 7200))
             discount = float(kwargs.get('discount', 0))
             user_id = kwargs.get('user_id', 1)
-            
+
             with db.get_cursor() as cursor:
-                # جلب بيانات الزبون
+                # جلب بيانات الزبون مع FOR UPDATE
                 cursor.execute("""
                     SELECT
                         c.current_balance,
@@ -115,22 +115,22 @@ class FastOperations:
                     WHERE c.id = %s AND c.is_active = TRUE
                     FOR UPDATE
                 """, (customer_id,))
-                
+
                 customer = cursor.fetchone()
                 if not customer:
                     return {"success": False, "error": "الزبون غير موجود"}
-                
+
                 previous_reading = float(customer['last_counter_reading'] or 0)
                 current_balance = float(customer['current_balance'] or 0)
-                
+
                 # الحسابات الجديدة
                 new_reading = previous_reading + kilowatt_amount + free_kilowatt
                 new_balance = current_balance + kilowatt_amount + free_kilowatt
                 total_amount = (kilowatt_amount * price_per_kilo) - discount
-                
+
                 # إنشاء رقم فاتورة
                 invoice_number = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}-{customer_id}"
-                
+
                 # تحديث بيانات الزبون
                 cursor.execute("""
                     UPDATE customers
@@ -140,7 +140,7 @@ class FastOperations:
                     WHERE id = %s
                     RETURNING *
                 """, (float(new_balance), float(new_reading), customer_id))
-                
+
                 # إدخال الفاتورة
                 cursor.execute("""
                     INSERT INTO invoices (
@@ -165,15 +165,36 @@ class FastOperations:
                     kwargs.get('customer_withdrawal', ''),
                     float(new_balance)
                 ))
-                
+
                 invoice_id = cursor.fetchone()['id']
-                
+
+                # ✅ تسجيل الحدث في customer_history
+                cursor.execute("""
+                    INSERT INTO customer_history 
+                    (customer_id, action_type, transaction_type, 
+                    old_value, new_value, amount,
+                    current_balance_before, current_balance_after,
+                    notes, created_by, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """, (
+                    customer_id,
+                    'invoice_created',            # action_type
+                    'payment',                     # transaction_type
+                    current_balance,                # old_value (الرصيد قبل)
+                    new_balance,                     # new_value (الرصيد بعد)
+                    total_amount,                     # amount
+                    current_balance,                  # current_balance_before
+                    new_balance,                       # current_balance_after
+                    f"فاتورة سريعة #{invoice_number} للزبون {customer['name']}",
+                    user_id                            # created_by
+                ))
+
                 # تسجيل النشاط
                 cursor.execute("""
                     INSERT INTO activity_logs (user_id, action_type, description)
                     VALUES (%s, 'fast_invoice', %s)
                 """, (user_id, f"فاتورة سريعة #{invoice_number} للزبون {customer['name']}"))
-                
+
                 return {
                     "success": True,
                     "invoice_id": invoice_id,
@@ -187,7 +208,7 @@ class FastOperations:
                     "new_balance": new_balance,
                     "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
-                    
+
         except Exception as e:
             logger.error(f"خطأ في المعالجة السريعة: {e}")
             return {"success": False, "error": str(e)}
