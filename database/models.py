@@ -542,12 +542,22 @@ class Models:
                 ON CONFLICT (name) DO NOTHING
             """, (name, code))
         
-        # إضافة المستخدم الإداري الافتراضي
+        # استيراد auth داخل الدالة لتجنب الاستيرادات الدائرية
+        from auth.authentication import auth
+        # إضافة المستخدم الإداري الافتراضي (كلمة المرور: admin)
+        admin_password = 'admin'
+        admin_hash = auth.hash_password(admin_password)
         cursor.execute("""
             INSERT INTO users (username, password_hash, full_name, role, permissions)
-            VALUES ('admin', 'scrypt:32768:8:1$wFnfT6hB9u3xKXqg$afb5fb045f9afab01e2036b5b7b7d4c6c9c6b2e7e6f7a8b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3', 'المسؤول العام', 'admin', '{"all": true}')
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (username) DO NOTHING
-        """)
+        """, (
+            'admin',
+            admin_hash,  # ✅ استخدام الهاش المولد ديناميكياً
+            'المسؤول العام',
+            'admin',
+            '{"all": true}'
+        ))
         
         # إضافة الصلاحيات إلى الكتالوج
         permissions_data = [
@@ -608,6 +618,9 @@ class Models:
             ('customers.view_financial_reports', 'عرض تقارير التصنيفات المالية', 'reports'),
             ('invoices.apply_free_discount', 'تطبيق خصم المجاني', 'invoices'),
             ('system.manage_vip_protection', 'إدارة حماية VIP', 'system'),
+            # أضف هذا السطر في permissions_data ضمن seed_initial_data
+            ('customers.manage_children', 'إدارة الأبناء (العدادات التابعة)', 'customers'),
+            ('customers.view_balance_stats', 'عرض إحصائيات لنا/علينا', 'customers'),
         ]
 
         for permission_key, name, category in permissions_data:

@@ -106,13 +106,15 @@ class InvoicePrinter:
                      font=self.font_normal, fill="black", anchor="ra")
             y += 45
             
-            # الدفتر والوصل
-            book_receipt = self.process_text(f"الدفتر: {invoice_data.get('book_number', '')} | الوصل: {invoice_data.get('receipt_number', '')}")
-            w_br = draw.textlength(book_receipt, font=self.font_normal)
-            draw.text(((self.paper_width - w_br) / 2, y), book_receipt,
-                     font=self.font_normal, fill="black")
-            y += 45
-            
+            # [رقم الفاتورة]{dir="rtl"}
+            invoice_number = invoice_data.get('invoice_number', '')
+            if invoice_number:
+                invoice_text = self.process_text(f"[رقم الفاتورة]: {invoice_number}")
+                w_inv = draw.textlength(invoice_text, font=self.font_normal)
+                draw.text(((self.paper_width - w_inv) / 2, y), invoice_text,
+                        font=self.font_normal, fill="black")
+                y += 45
+
             y = self.draw_separator(draw, y)
             y += 10
             

@@ -74,6 +74,8 @@ class FastPrinter:
             self.printer.set(align='right')
             self.printer.textln(f"التاريخ: {datetime.now().strftime('%Y/%m/%d')}\n")
             self.printer.textln(f"الوقت: {datetime.now().strftime('%H:%M:%S')}\n")
+            if invoice_data.get('invoice_number'):
+                self.printer.textln(f"[رقم الفاتورة]: {invoice_data.get('invoice_number')}")
             
             self.printer.textln("-" * 32 + "\n")
             

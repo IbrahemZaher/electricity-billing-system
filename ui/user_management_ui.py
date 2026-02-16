@@ -11,7 +11,7 @@ from auth.permissions import has_permission, require_permission
 from database.connection import db  # تغيير هنا
 from auth.permission_engine import permission_engine  # تغيير هنا
 import psycopg2
-
+from auth.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +355,6 @@ class UsersUI:
 
     def edit_user(self):
         """تعديل مستخدم"""
-        # التحقق من الصلاحية
         try:
             require_permission('system.manage_users')
         except PermissionError as e:
@@ -372,7 +371,7 @@ class UsersUI:
 
         # جلب البيانات الحالية للمستخدم من قاعدة البيانات
         try:
-            with db.get_cursor() as cursor:  # تغيير هنا
+            with db.get_cursor() as cursor:
                 cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
                 current_user = cursor.fetchone()
         except Exception as e:
@@ -383,10 +382,11 @@ class UsersUI:
         # نافذة التعديل
         top = tk.Toplevel(self.parent)
         top.title("تعديل مستخدم")
-        top.geometry("400x300")
+        top.geometry("400x400")  # زيادة الارتفاع لاستيعاب حقلي كلمة المرور
         top.transient(self.parent)
         top.grab_set()
 
+        # حقول النموذج
         ttk.Label(top, text="اسم المستخدم:*").pack(pady=5)
         entry_username = ttk.Entry(top)
         entry_username.insert(0, current_user['username'])
@@ -405,16 +405,28 @@ class UsersUI:
         ttk.Label(top, text="الدور:*").pack(pady=5)
         role_var = tk.StringVar()
         role_combo = ttk.Combobox(top, textvariable=role_var,
-                                  values=['admin', 'accountant', 'cashier', 'viewer'])
+                                values=['admin', 'accountant', 'cashier', 'viewer'])
         role_combo.set(current_user['role'])
         role_combo.pack(pady=5)
+
+        # حقول كلمة المرور الجديدة (اختيارية)
+        ttk.Label(top, text="كلمة المرور الجديدة (اتركها فارغة لعدم التغيير):").pack(pady=5)
+        entry_password = ttk.Entry(top, show="*")
+        entry_password.pack(pady=5)
+
+        ttk.Label(top, text="تأكيد كلمة المرور الجديدة:").pack(pady=5)
+        entry_password_confirm = ttk.Entry(top, show="*")
+        entry_password_confirm.pack(pady=5)
 
         def submit():
             username = entry_username.get().strip()
             full_name = entry_fullname.get().strip()
             email = entry_email.get().strip()
             role = role_var.get()
+            password = entry_password.get().strip()
+            password_confirm = entry_password_confirm.get().strip()
 
+            # التحقق من الحقول المطلوبة
             if not username or not role:
                 messagebox.showerror("خطأ", "جميع الحقول المميزة ب * إلزامية")
                 return
@@ -422,6 +434,19 @@ class UsersUI:
             if role not in ('admin', 'accountant', 'cashier', 'viewer'):
                 messagebox.showerror("خطأ", "الدور غير صالح")
                 return
+
+            # التحقق من كلمة المرور إذا تم إدخالها
+            new_password_hash = None
+            if password or password_confirm:
+                if password != password_confirm:
+                    messagebox.showerror("خطأ", "كلمة المرور غير متطابقة")
+                    return
+                if len(password) < 6:
+                    messagebox.showerror("خطأ", "كلمة المرور قصيرة جدًا (6 أحرف على الأقل)")
+                    return
+                # تشفير كلمة المرور الجديدة
+                from auth.authentication import auth
+                new_password_hash = auth.hash_password(password)
 
             # snapshot قبل التعديل
             before_snapshot = {
@@ -432,12 +457,23 @@ class UsersUI:
             }
 
             try:
-                with db.get_cursor() as cursor:  # تغيير هنا
-                    cursor.execute("""
-                        UPDATE users SET username=%s, full_name=%s, role=%s, email=%s, 
-                        updated_at=CURRENT_TIMESTAMP
-                        WHERE id = %s
-                    """, (username, full_name, role, email, user_id))
+                with db.get_cursor() as cursor:
+                    if new_password_hash:
+                        # تحديث مع تغيير كلمة المرور
+                        cursor.execute("""
+                            UPDATE users 
+                            SET username=%s, full_name=%s, role=%s, email=%s, password_hash=%s,
+                                updated_at=CURRENT_TIMESTAMP
+                            WHERE id = %s
+                        """, (username, full_name, role, email, new_password_hash, user_id))
+                    else:
+                        # تحديث بدون تغيير كلمة المرور
+                        cursor.execute("""
+                            UPDATE users 
+                            SET username=%s, full_name=%s, role=%s, email=%s,
+                                updated_at=CURRENT_TIMESTAMP
+                            WHERE id = %s
+                        """, (username, full_name, role, email, user_id))
                     cursor.connection.commit()
             except Exception as e:
                 logger.error(f"خطأ في تعديل المستخدم: {e}", exc_info=True)
@@ -451,6 +487,7 @@ class UsersUI:
 
             # مسح كاش الصلاحيات للمستخدم
             try:
+                from auth.permission_engine import permission_engine
                 permission_engine.clear_cache(user_id)
             except Exception:
                 logger.exception("فشل مسح كاش الصلاحيات")
@@ -470,8 +507,9 @@ class UsersUI:
 
             # تسجيل النشاط مع snapshots
             try:
+                from auth.authentication import auth
                 auth.log_activity(
-                    auth.current_user_id,
+                    Session.current_user['id'] if Session.is_authenticated() else 1,
                     'edit_user',
                     f'تم تعديل المستخدم {user_id}',
                     ip_address=None,
@@ -483,6 +521,7 @@ class UsersUI:
                 logger.exception("فشل تسجيل النشاط بعد التعديل")
 
         ttk.Button(top, text="حفظ", command=submit).pack(pady=20)
+        
 
     def delete_user(self):
         """حذف (تعطيل) مستخدم"""

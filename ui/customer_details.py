@@ -628,14 +628,14 @@ class CustomerDetails:
                                    relief='ridge', anchor='w', padx=10, pady=2).pack(side='left', fill='x', expand=True)
                     
                     # زر إدارة التصنيف
-                    if hasattr(self.parent, 'user_data'):
-                        manage_btn = tk.Button(content_frame,
-                                             text="⚙️ إدارة التصنيف المالي",
-                                             command=self.open_financial_manager,
-                                             bg='#9b59b6', fg='white',
-                                             font=('Arial', 11),
-                                             padx=20, pady=10, cursor='hand2')
-                        manage_btn.pack(pady=20)
+                    #if hasattr(self.parent, 'user_data'):
+                    #    manage_btn = tk.Button(content_frame,
+                    #                         text="⚙️ إدارة التصنيف المالي",
+                    #                         command=self.open_financial_manager,
+                    #                         bg='#9b59b6', fg='white',
+                    #                         font=('Arial', 11),
+                    #                        padx=20, pady=10, cursor='hand2')
+                    #    manage_btn.pack(pady=20)
         
         except Exception as e:
             logger.error(f"خطأ في تحميل بيانات التصنيف المالي: {e}")
