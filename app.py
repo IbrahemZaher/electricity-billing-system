@@ -4,19 +4,31 @@ import logging
 import sys
 import os
 
-# إعداد سجل الأخطاء
+# ⭐⭐⭐ تحديد المسار الأساسي (يدعم وضع التطوير والتجميع) ⭐⭐⭐
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ⭐⭐⭐ إنشاء مجلد السجلات تلقائياً ⭐⭐⭐
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+
+LOG_FILE = os.path.join(LOG_DIR, 'application.log')
+
+# إعداد سجل الأخطاء باستخدام المسار المطلق
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/application.log'),
+        logging.FileHandler(LOG_FILE),
         logging.StreamHandler()
     ]
 )
 
 logger = logging.getLogger(__name__)
 
-# إضافة المسارات للمكتبات
+# إضافة المسارات للمكتبات (يبقى كما هو لضمان توافق الوحدات)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def main():

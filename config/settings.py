@@ -1,18 +1,37 @@
 # config/settings.py
+import sys
 import os
 from pathlib import Path
 
+def get_base_path():
+    """إرجاع المسار الأساسي للمشروع سواء كان في وضع التطوير أو بعد التعبئة"""
+    if getattr(sys, 'frozen', False):
+        # إذا كان التطبيق مجمداً (أي exe)
+        return Path(sys.executable).parent
+    else:
+        # وضع التطوير العادي
+        return Path(__file__).resolve().parent.parent
+
 # مسارات الملفات
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = get_base_path()
 DATA_DIR = BASE_DIR / 'data'
 LOG_DIR = BASE_DIR / 'logs'
 BACKUP_DIR = BASE_DIR / 'backups'
+WAL_ARCHIVE_DIR = BASE_DIR / 'wal_archive'
+KEYS_DIR = BASE_DIR / 'keys'
 
-# إنشاء المجلدات
-for directory in [DATA_DIR, LOG_DIR, BACKUP_DIR]:
+# إنشاء المجلدات (تأكد من وجودها)
+for directory in [DATA_DIR, LOG_DIR, BACKUP_DIR, WAL_ARCHIVE_DIR, KEYS_DIR]:
     directory.mkdir(exist_ok=True)
 
 # إعدادات قاعدة البيانات
+DATABASE_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': os.getenv('DB_PORT', '5432'),
+    'database': os.getenv('DB_NAME', 'electricity_billing'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', '521990')
+}
 
 # المفتاح السري للتشفير
 SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here-change-in-production')
@@ -30,21 +49,14 @@ PRINTER_CONFIG = {
     'paper_width': 570
 }
 
-DATABASE_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432'),
-    'database': os.getenv('DB_NAME', 'electricity_billing'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', '521990')
-}
-
 # الصلاحيات الافتراضية
 DEFAULT_PERMISSIONS = {
     'admin': {
         'all': True,
         'manage_import': True,
         'system.advanced_export': True,
-        'delete_all_customers': True    },
+        'delete_all_customers': True
+    },
     'manager': {
         'view_customers': True,
         'add_customers': True,
@@ -59,7 +71,7 @@ DEFAULT_PERMISSIONS = {
         'manage_users': False,
         'view_activity_log': True,
         'system.advanced_export': True,
-        'manage_import': True  # ← أضف هذا السطر
+        'manage_import': True
     },
     'accountant': {
         'view_customers': True,
@@ -71,30 +83,28 @@ DEFAULT_PERMISSIONS = {
     }
 }
 
-# config/settings.py (الإضافات الجديدة)
-
 # إعدادات النسخ الاحتياطي (المعدلة)
 BACKUP_CONFIG = {
     'local_backup_path': str(BACKUP_DIR),
     'remote_backup_paths': [
-        #r"\\10.10.0.1\D\backups",
-        #r"\\10.10.0.6\D\backups"
+        # r"\\10.10.0.1\D\backups",
+        # r"\\10.10.0.6\D\backups"
     ],
     'backup_interval_hours': 24,
 
     # إعدادات جديدة للنسخ الاحتياطي المتقدم
-    'wal_archive_path': str(BASE_DIR / 'wal_archive'),      # مسار أرشيف WAL
-    'recovery_target_time': None,                           # وقت الاستعادة الافتراضي (اختياري)
+    'wal_archive_path': str(WAL_ARCHIVE_DIR),
+    'recovery_target_time': None,
     'retention_policy': {
-        'daily': 30,          # احتفاظ بالنسخ اليومية لمدة 30 يوم
-        'weekly': 12,         # احتفاظ بالنسخ الأسبوعية لمدة 12 أسبوع
-        'monthly': 12,        # احتفاظ بالنسخ الشهرية لمدة 12 شهر
+        'daily': 30,
+        'weekly': 12,
+        'monthly': 12,
     },
     'encryption': {
         'enabled': False,
-        'method': 'gpg',      # أو 'openssl'
-        'public_key_path': str(BASE_DIR / 'keys' / 'backup_public.asc'),
-        'recipient': 'backup@example.com',  # لمفتاح GPG
+        'method': 'gpg',
+        'public_key_path': str(KEYS_DIR / 'backup_public.asc'),
+        'recipient': 'backup@example.com',
     },
     'notification': {
         'enabled': False,
@@ -106,24 +116,24 @@ BACKUP_CONFIG = {
             'from_addr': 'user@gmail.com',
             'to_addrs': ['admin@example.com']
         },
-        'slack_webhook': 'https://hooks.slack.com/services/...',  # اختياري
+        'slack_webhook': 'https://hooks.slack.com/services/...',
     },
     'verification': {
         'enabled': True,
-        'verify_after_backup': True,          # التحقق من سلامة النسخة بعد إنشائها
-        'verify_random_sample': True,         # استرجاع عينة عشوائية للتحقق
-        'sample_size': 10,                    # عدد السجلات العشوائية للاسترجاع
+        'verify_after_backup': True,
+        'verify_random_sample': True,
+        'sample_size': 10,
     },
-    'parallel_backup': True,                  # تشغيل النسخ المتوازية (لأدوات متعددة)
+    'parallel_backup': True,
 }
 
 # إعدادات الأداء
 PERFORMANCE_SETTINGS = {
-    'fast_search_limit': 50,  # عدد نتائج البحث
-    'auto_save_interval': 60,  # ثانية للحفظ التلقائي
-    'cache_customers': True,   # تخزين مؤقت للزبائن
-    'parallel_backup': True,   # نسخ احتياطي موازي
-    'fast_printing': True,     # طباعة سريعة
+    'fast_search_limit': 50,
+    'auto_save_interval': 60,
+    'cache_customers': True,
+    'parallel_backup': True,
+    'fast_printing': True,
 }
 
 # إعدادات الاتصال

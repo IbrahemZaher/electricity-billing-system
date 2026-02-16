@@ -175,7 +175,7 @@ class InvoicePreview:
         • القراءة السابقة: {float(self.invoice_data.get('previous_reading', 0)):,.0f}
         • القراءة الجديدة: {float(self.invoice_data.get('new_reading', 0)):,.0f}
         • الكمية المقطوعة: {float(self.invoice_data.get('kilowatt_amount', 0)) + float(self.invoice_data.get('free_kilowatt', 0)):,.1f} كيلو
-        • الرصيد الجديد: {float(self.invoice_data.get('current_balance', 0)):,.0f} ل.س
+        • الرصيد الجديد: {float(self.invoice_data.get('current_balance', 0)):,.0f} كيلو
         """
         
         tk.Label(counter_frame, text=counter_info,

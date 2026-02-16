@@ -268,38 +268,121 @@ class MainWindow:
         
         # في ui/main_window.py في الدالة show_accounting_ui
     def show_accounting_ui(self):
-        """عرض واجهة المحاسبة"""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-
+        """فتح نافذة محاسبة منبثقة بملء الشاشة"""
+        # إنشاء نافذة جديدة (Toplevel)
+        accounting_window = tk.Toplevel(self.root)
+        accounting_window.title("نظام المحاسبة السريع")
+        accounting_window.state('zoomed')  # تكبير النافذة لملء الشاشة (في ويندوز)
+        # يمكن استخدام attributes('-fullscreen', True) للشاشة الكاملة الحقيقية
+        accounting_window.attributes('-fullscreen', True)
+        
+        # جعل النافذة مؤقتة (تظهر فوق الرئيسية ولا يمكن التفاعل مع الرئيسية حتى تغلق)
+        accounting_window.transient(self.root)
+        accounting_window.grab_set()
+        
         try:
             from ui.accounting_ui import AccountingUI
-            accounting_ui = AccountingUI(self.content_frame, self.user_data)
-            accounting_ui.pack(fill='both', expand=True)
-            logger.info("تم تحميل واجهة المحاسبة بنجاح")
+            # إنشاء الواجهة داخل النافذة الجديدة
+            accounting_ui = AccountingUI(accounting_window, self.user_data)
+            # لا حاجة لـ pack لأن AccountingUI يقوم بذلك داخلياً (self.pack في __init__)
+            
+            # عند إغلاق النافذة، حرر القبضة
+            accounting_window.protocol("WM_DELETE_WINDOW", lambda: self.close_accounting_window(accounting_window))
+            
+            logger.info("تم فتح نافذة المحاسبة المنبثقة بنجاح")
         except ImportError as e:
             logger.error(f"خطأ في تحميل واجهة المحاسبة: {e}")
-            self.show_simple_accounting_ui()
-        
+            messagebox.showerror("خطأ", "تعذر تحميل واجهة المحاسبة")
+            accounting_window.destroy()
+        except Exception as e:
+            logger.error(f"خطأ غير متوقع: {e}")
+            messagebox.showerror("خطأ", f"حدث خطأ: {str(e)}")
+            accounting_window.destroy()
+
+
+    def close_accounting_window(self, window):
+        """إغلاق نافذة المحاسبة وتحرير الموارد"""
+        window.grab_release()
+        window.destroy()
+
+
     def show_dashboard(self):
-        """عرض لوحة التحكم"""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-        
-        dashboard_frame = tk.Frame(self.content_frame, bg='white')
-        dashboard_frame.pack(fill='both', expand=True, padx=20, pady=20)
-        
-        title = tk.Label(dashboard_frame,
-                        text="لوحة التحكم - نظرة عامة",
-                        font=('Arial', 20, 'bold'),
-                        bg='white', fg='#2c3e50')
-        title.pack(pady=20)
-        
-        # عرض الإحصائيات
-        self.show_simple_statistics(dashboard_frame)
-        
-        # عرض ميزات قيد التطوير
-        self.show_coming_features(dashboard_frame)
+            """عرض لوحة تحكم مخصصة: سريعة، جذابة، ومركزة على المهام الأساسية"""
+            # مسح المحتوى السابق
+            for widget in self.content_frame.winfo_children():
+                widget.destroy()
+
+            # الحاوية الرئيسية (خلفية هادئة)
+            main_container = tk.Frame(self.content_frame, bg='#f0f2f5')
+            main_container.pack(fill='both', expand=True)
+
+            # إطار التمركز في وسط الشاشة
+            center_frame = tk.Frame(main_container, bg='#f0f2f5')
+            center_frame.place(relx=0.5, rely=0.4, anchor='center')
+
+            # --- قسم الترحيب ---
+            full_name = self.user_data.get('full_name', 'مستخدمنا العزيز')
+            
+            welcome_lbl = tk.Label(center_frame, text=f"أهلاً بك، {full_name} ✨", 
+                                font=('Segoe UI', 35, 'bold'), bg='#f0f2f5', fg='#1a202c')
+            welcome_lbl.pack(pady=(0, 5))
+
+            sub_text = tk.Label(center_frame, text="نظام مولدة الريان | الإدارة الذكية للطاقة", 
+                                font=('Segoe UI', 14), bg='#f0f2f5', fg='#718096')
+            sub_text.pack(pady=(0, 40))
+
+            # --- حاوية الأزرار السريعة ---
+            grid_frame = tk.Frame(center_frame, bg='#f0f2f5')
+            grid_frame.pack()
+
+            # الأزرار المحدثة حسب طلبك
+            actions = [
+                ("🧾", "فاتورة جديدة", "#3182ce", self.show_accounting_ui), # تفتح المحاسبة مباشرة
+                ("👥", "إدارة الزبائن", "#805ad5", self.show_customers_ui),
+                ("📊", "التقارير المالية", "#38a169", self.show_reports_ui),
+                ("⚡", "تحليل الهدر", "#e53e3e", self.show_waste_analysis), # بديل الإعدادات
+            ]
+
+            for i, (icon, title, color, cmd) in enumerate(actions):
+                self.create_action_card(grid_frame, icon, title, color, cmd, i)
+
+            # نص سفلي لإكمال الشكل الجمالي
+            footer_msg = tk.Label(main_container, 
+                                text="نظام الريان المتكامل - القوة والسهولة في مكان واحد", 
+                                font=('Segoe UI', 11), bg='#f0f2f5', fg='#a0aec0')
+            footer_msg.pack(side='bottom', pady=30)
+
+    def create_action_card(self, parent, icon, title, color, command, col):
+            """إنشاء بطاقة تفاعلية جذابة"""
+            # الإطار الخارجي للبطاقة
+            card = tk.Frame(parent, bg='white', padx=30, pady=30, 
+                            highlightbackground='#e2e8f0', highlightthickness=1, cursor="hand2")
+            card.grid(row=0, column=col, padx=15, pady=10)
+
+            # تأثيرات الماوس
+            def on_enter(e):
+                card.config(bg='#f8fafc', highlightbackground=color, highlightthickness=2)
+                icon_lbl.config(bg='#f8fafc')
+                title_lbl.config(bg='#f8fafc')
+
+            def on_leave(e):
+                card.config(bg='white', highlightbackground='#e2e8f0', highlightthickness=1)
+                icon_lbl.config(bg='white')
+                title_lbl.config(bg='white')
+
+            card.bind("<Enter>", on_enter)
+            card.bind("<Leave>", on_leave)
+            card.bind("<Button-1>", lambda e: command())
+
+            # الأيقونة
+            icon_lbl = tk.Label(card, text=icon, font=('Segoe UI', 45), bg='white', fg=color)
+            icon_lbl.pack()
+            icon_lbl.bind("<Button-1>", lambda e: command())
+
+            # النص
+            title_lbl = tk.Label(card, text=title, font=('Segoe UI', 13, 'bold'), bg='white', fg='#2d3748')
+            title_lbl.pack(pady=(15, 0))
+            title_lbl.bind("<Button-1>", lambda e: command())        
 
     def show_archive_ui(self):
         """عرض واجهة الأرشيف"""

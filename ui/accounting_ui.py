@@ -1,7 +1,6 @@
-"""
-ui/accounting_ui.py - واجهة محاسبة متكاملة مع النظام الجديد
-تم التحديث لدعم نظام كمية الدفع والمجاني بدلاً من القراءة الجديدة
-"""
+# ui/accounting_ui.py - واجهة محاسبة متكاملة مع النظام الجديد
+# تم التحديث لدعم نظام كمية الدفع والمجاني بدلاً من القراءة الجديدة
+# تحسين المظهر: خطوط أكبر، ألوان مريحة، تباعد أفضل
 
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
@@ -13,7 +12,7 @@ from modules.printing import FastPrinter
 logger = logging.getLogger(__name__)
 
 class AccountingUI(tk.Frame):
-    """واجهة محاسبة محسنة تعمل بالنظام الجديد (كمية الدفع + مجاني)"""
+    """واجهة محاسبة محسنة تعمل بالنظام الجديد (كمية الدفع + مجاني) بتصميم مريح"""
     
     def __init__(self, parent, user_data):
         super().__init__(parent)
@@ -46,107 +45,93 @@ class AccountingUI(tk.Frame):
             self.sectors = []
     
     def create_widgets(self):
-        """إنشاء واجهة كاملة الشاشة بالنظام الجديد"""
+        """إنشاء واجهة محاسبة بتصميم ثنائي الأعمدة محسن"""
         # إزالة أي عناصر سابقة
         for widget in self.winfo_children():
             widget.destroy()
         
-        # الإطار الرئيسي مع تمرير
-        main_frame = tk.Frame(self, bg='#f5f7fa')
+        # الإطار الرئيسي بخلفية ناعمة
+        main_frame = tk.Frame(self, bg='#e9ecef')
         main_frame.pack(fill='both', expand=True)
         
-        # شريط الأدوات العلوي
+        # شريط الأدوات العلوي (مع زر إغلاق) بتدرج لوني
         self.create_toolbar(main_frame)
         
-        # إطار المحتوى القابل للتمرير
-        canvas = tk.Canvas(main_frame, bg='#f5f7fa', highlightthickness=0)
-        canvas.pack(fill='both', expand=True, padx=20, pady=10)
-
-        scrollbar = tk.Scrollbar(main_frame, orient='vertical', command=canvas.yview)
-        scrollbar.pack(side='right', fill='y')
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        content_frame = tk.Frame(canvas, bg='#f5f7fa')
-        canvas.create_window((0, 0), window=content_frame, anchor='nw')
-
-        def on_configure(event):
-            canvas.configure(scrollregion=canvas.bbox('all'))
-
-        content_frame.bind('<Configure>', on_configure)
+        # إطار المحتوى الرئيسي مقسم إلى عمودين مع هوامش مناسبة
+        content_frame = tk.Frame(main_frame, bg='#e9ecef')
+        content_frame.pack(fill='both', expand=True, padx=20, pady=15)
         
-        # ===================== قسم البحث السريع =====================
-        search_section = tk.LabelFrame(content_frame, text="🔍 بحث سريع عن الزبائن", 
-                                      font=('Arial', 14, 'bold'),
-                                      bg='white', fg='#2c3e50',
-                                      padx=15, pady=15, relief='groove')
-        search_section.pack(fill='x', pady=(0, 10))
+        # ========== العمود الأيمن (إدخال البيانات والنتائج) ==========
+        right_column = tk.Frame(content_frame, bg='#f8f9fa', width=550, relief='ridge', bd=2)
+        right_column.pack(side='right', fill='both', expand=True, padx=(10, 0))
+        right_column.pack_propagate(False)
         
-        # صف البحث
-        search_row = tk.Frame(search_section, bg='white')
-        search_row.pack(fill='x', pady=5)
+        # ========== العمود الأيسر (بحث ومعلومات الزبون) ==========
+        left_column = tk.Frame(content_frame, bg='#f8f9fa', width=550, relief='ridge', bd=2)
+        left_column.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        left_column.pack_propagate(False)
         
-        tk.Label(search_row, text="ابحث بالاسم أو العلبة:", 
-                bg='white', font=('Arial', 12), fg='#34495e').pack(side='left', padx=5)
+        # ----- العمود الأيسر: بحث ونتائج ومعلومات الزبون -----
+        
+        # قسم البحث بتصميم محسن
+        search_frame = tk.LabelFrame(left_column, text="🔍 البحث عن زبون", 
+                                      font=('Segoe UI', 14, 'bold'),
+                                      bg='#f8f9fa', fg='#1e3c5c',
+                                      padx=15, pady=15, relief='flat')
+        search_frame.pack(fill='x', pady=(10, 15), padx=10)
+        
+        search_row = tk.Frame(search_frame, bg='#f8f9fa')
+        search_row.pack(fill='x')
         
         self.search_var = tk.StringVar()
         self.search_entry = tk.Entry(search_row, textvariable=self.search_var,
-                                    font=('Arial', 14), width=50,
-                                    bg='#ecf0f1', relief='solid')
-        self.search_entry.pack(side='left', padx=5, fill='x', expand=True)
+                                     font=('Segoe UI', 12), bg='white', fg='#2c3e50',
+                                     relief='solid', bd=1, highlightthickness=1,
+                                     highlightcolor='#3498db', highlightbackground='#ced4da')
+        self.search_entry.pack(side='left', fill='x', expand=True, padx=(0, 8), ipady=5)
         self.search_entry.bind('<KeyRelease>', self.quick_search)
         self.search_entry.focus_set()
         
-        # زر البحث
-        search_btn = tk.Button(search_row, text="بحث", 
-                              command=self.perform_search,
-                              bg='#3498db', fg='white',
-                              font=('Arial', 12, 'bold'),
-                              padx=20, pady=5)
-        search_btn.pack(side='left', padx=5)
+        search_btn = tk.Button(search_row, text="بحث", command=self.perform_search,
+                               bg='#3498db', fg='white', font=('Segoe UI', 11, 'bold'),
+                               padx=18, pady=4, bd=0, cursor='hand2', activebackground='#2980b9')
+        search_btn.pack(side='left')
         
-        # نتائج البحث في إطار مع تمرير
-        results_frame = tk.Frame(search_section, bg='white', height=200)
-        results_frame.pack(fill='both', expand=True, pady=10)
+        # نتائج البحث (قائمة) مع تحسينات
+        results_frame = tk.Frame(search_frame, bg='#f8f9fa', height=130)
+        results_frame.pack(fill='x', pady=(12, 0))
         results_frame.pack_propagate(False)
         
-        # شريط التمرير
-        scrollbar_results = tk.Scrollbar(results_frame)
+        scrollbar_results = tk.Scrollbar(results_frame, orient='vertical', bg='#b0c4de')
         scrollbar_results.pack(side='right', fill='y')
         
-        # قائمة النتائج
-        self.results_listbox = tk.Listbox(results_frame, 
-                                         font=('Arial', 12),
-                                         bg='white', fg='#2c3e50',
-                                         selectbackground='#3498db',
-                                         selectforeground='white',
-                                         yscrollcommand=scrollbar_results.set,
-                                         height=8)
+        self.results_listbox = tk.Listbox(results_frame, font=('Segoe UI', 11),
+                                           bg='white', fg='#1e3c5c',
+                                           selectbackground='#3498db',
+                                           selectforeground='white',
+                                           yscrollcommand=scrollbar_results.set,
+                                           height=5, bd=1, relief='solid',
+                                           highlightthickness=0)
         self.results_listbox.pack(side='left', fill='both', expand=True)
         scrollbar_results.config(command=self.results_listbox.yview)
         self.results_listbox.bind('<<ListboxSelect>>', self.on_search_select)
         
-        # ===================== قسم بيانات الزبون =====================
-        info_section = tk.LabelFrame(content_frame, text="📋 بيانات الزبون المحدد", 
-                                    font=('Arial', 14, 'bold'),
-                                    bg='white', fg='#2c3e50',
-                                    padx=15, pady=15, relief='groove')
-        info_section.pack(fill='x', pady=(0, 10))
+        # قسم معلومات الزبون بتصميم مريح
+        info_frame = tk.LabelFrame(left_column, text="📋 بيانات الزبون المحدد", 
+                                    font=('Segoe UI', 14, 'bold'),
+                                    bg='#f8f9fa', fg='#1e3c5c',
+                                    padx=15, pady=15, relief='flat')
+        info_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
         
-        # إطار بيانات الزبون مع تمرير
-        info_frame = tk.Frame(info_section, bg='white')
-        info_frame.pack(fill='both', expand=True)
+        # عرض المعلومات في شبكة 4x2 مع تباعد أكبر
+        info_grid = tk.Frame(info_frame, bg='#f8f9fa')
+        info_grid.pack(fill='x', pady=5)
         
-        # إنشاء شبكة لعرض البيانات
         info_labels = [
-            ("اسم الزبون:", "name"),
-            ("القطاع:", "sector"),
-            ("العلبة:", "box"),
-            ("المسلسل:", "serial"),
-            ("الرصيد الحالي:", "balance"),
-            ("آخر قراءة عداد:", "reading"),
-            ("رصيد التأشيرة:", "visa"),
-            ("سحب المشترك:", "withdrawal")
+            ("الاسم:", "name"), ("القطاع:", "sector"),
+            ("العلبة:", "box"), ("المسلسل:", "serial"),
+            ("الرصيد (ك.واط):", "balance"), ("آخر قراءة:", "reading"),
+            ("التأشيرة (ك.واط):", "visa"), ("السحب (ك.واط):", "withdrawal")
         ]
         
         self.info_vars = {}
@@ -154,214 +139,183 @@ class AccountingUI(tk.Frame):
             row = i // 2
             col = (i % 2) * 2
             
-            tk.Label(info_frame, text=label_text, 
-                    bg='white', font=('Arial', 11, 'bold'),
-                    fg='#34495e').grid(row=row, column=col, 
-                                      sticky='e', padx=5, pady=8)
+            label = tk.Label(info_grid, text=label_text, bg='#f8f9fa', font=('Segoe UI', 11),
+                             fg='#2c3e50', anchor='e')
+            label.grid(row=row, column=col, sticky='e', padx=(10,5), pady=8)
             
             var = tk.StringVar(value="---")
-            entry = tk.Entry(info_frame, textvariable=var,
-                           font=('Arial', 11), state='readonly',
-                           bg='#f8f9fa', fg='#2c3e50',
-                           relief='solid', width=25)
-            entry.grid(row=row, column=col+1, padx=5, pady=8, sticky='ew')
+            entry = tk.Entry(info_grid, textvariable=var,
+                             font=('Segoe UI', 11, 'bold'), state='readonly',
+                             bg='white', fg='#1e3c5c', readonlybackground='#ecf0f1',
+                             relief='solid', bd=1, width=18, justify='right')
+            entry.grid(row=row, column=col+1, sticky='w', padx=(0,10), pady=8)
             self.info_vars[key] = var
         
-        # جعل الأعمدة قابلة للتوسع
-        info_frame.columnconfigure(1, weight=1)
-        info_frame.columnconfigure(3, weight=1)
+        # ----- العمود الأيمن: إدخال البيانات والأزرار والنتائج -----
         
-        # ===================== قسم المحاسبة السريعة (النظام الجديد) =====================
-        acc_section = tk.LabelFrame(content_frame, text="💰 إدخال بيانات الفاتورة (النظام الجديد)", 
-                                   font=('Arial', 14, 'bold'),
-                                   bg='white', fg='#2c3e50',
-                                   padx=15, pady=15, relief='groove')
-        acc_section.pack(fill='x', pady=(0, 10))
+        # قسم إدخال بيانات الفاتورة (4 حقول) بتصميم محسن
+        input_frame = tk.LabelFrame(right_column, text="💰 إدخال بيانات الفاتورة", 
+                                      font=('Segoe UI', 14, 'bold'),
+                                      bg='#f8f9fa', fg='#1e3c5c',
+                                      padx=15, pady=15, relief='flat')
+        input_frame.pack(fill='x', pady=(10, 15), padx=10)
         
-        # شبكة لإدخال البيانات
-        acc_frame = tk.Frame(acc_section, bg='white')
-        acc_frame.pack(fill='both', expand=True)
-
-        acc_frame.columnconfigure(0, weight=0)
-        acc_frame.columnconfigure(1, weight=1)
+        # ترتيب الحقول في صفوف (كل صف حقل واحد مع أزرار التحكم لكمية الدفع)
+        fields_frame = tk.Frame(input_frame, bg='#f8f9fa')
+        fields_frame.pack(fill='x')
         
-        # حقل كمية الدفع (بدلاً من القراءة الجديدة)
-        tk.Label(acc_frame, text="كمية الدفع (كيلو):*", 
-                bg='white', font=('Arial', 12),
-                fg='#e74c3c').grid(row=0, column=0, sticky='e', padx=5, pady=12)
-        
-        kilowatt_frame = tk.Frame(acc_frame, bg='white')
-        kilowatt_frame.grid(row=0, column=1, padx=5, pady=12, sticky='ew')
-        
+        # كمية الدفع (مع أزرار) - صف 1
+        row1 = tk.Frame(fields_frame, bg='#f8f9fa')
+        row1.pack(fill='x', pady=8)
+        lbl1 = tk.Label(row1, text="كمية الدفع (كيلو):*", bg='#f8f9fa', font=('Segoe UI', 11),
+                        fg='#c0392b', width=16, anchor='w')
+        lbl1.pack(side='left')
         self.kilowatt_var = tk.StringVar()
-        self.kilowatt_entry = tk.Entry(kilowatt_frame, textvariable=self.kilowatt_var,
-                                     font=('Arial', 12), width=15,
-                                     bg='#ecf0f1', relief='solid')
-        self.kilowatt_entry.pack(side='left', padx=2)
+        self.kilowatt_entry = tk.Entry(row1, textvariable=self.kilowatt_var,
+                                        font=('Segoe UI', 11), width=12,
+                                        bg='white', fg='#2c3e50', relief='solid', bd=1,
+                                        highlightthickness=1, highlightcolor='#3498db')
+        self.kilowatt_entry.pack(side='left', padx=5, ipady=3)
         
-        # أزرار التحكم في كمية الدفع
-        tk.Button(kilowatt_frame, text="+100", 
-                 command=lambda: self.adjust_kilowatt(100),
-                 bg='#3498db', fg='white',
-                 font=('Arial', 10)).pack(side='left', padx=2)
+        btn_style = {'bg': '#3498db', 'fg': 'white', 'font': ('Segoe UI', 9, 'bold'),
+                     'width': 4, 'bd': 0, 'cursor': 'hand2', 'activebackground': '#2980b9'}
+        tk.Button(row1, text="+100", command=lambda: self.adjust_kilowatt(100), **btn_style).pack(side='left', padx=2)
+        tk.Button(row1, text="+10", command=lambda: self.adjust_kilowatt(10), **btn_style).pack(side='left', padx=2)
+        tk.Button(row1, text="-10", command=lambda: self.adjust_kilowatt(-10),
+                  bg='#e74c3c', fg='white', font=('Segoe UI', 9, 'bold'),
+                  width=4, bd=0, cursor='hand2', activebackground='#c0392b').pack(side='left', padx=2)
         
-        tk.Button(kilowatt_frame, text="+10", 
-                 command=lambda: self.adjust_kilowatt(10),
-                 bg='#3498db', fg='white',
-                 font=('Arial', 10)).pack(side='left', padx=2)
-        
-        tk.Button(kilowatt_frame, text="-10", 
-                 command=lambda: self.adjust_kilowatt(-10),
-                 bg='#e74c3c', fg='white',
-                 font=('Arial', 10)).pack(side='left', padx=2)
-        
-        # حقل المجاني
-        tk.Label(acc_frame, text="المجاني (كيلو):", 
-                bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=1, column=0, sticky='e', padx=5, pady=12)
-        
+        # المجاني
+        row2 = tk.Frame(fields_frame, bg='#f8f9fa')
+        row2.pack(fill='x', pady=8)
+        lbl2 = tk.Label(row2, text="المجاني (كيلو):", bg='#f8f9fa', font=('Segoe UI', 11),
+                        fg='#2c3e50', width=16, anchor='w')
+        lbl2.pack(side='left')
         self.free_var = tk.StringVar(value="0")
-        self.free_entry = tk.Entry(acc_frame, textvariable=self.free_var,
-                                  font=('Arial', 12), width=20,
-                                  bg='#ecf0f1', relief='solid')
-        self.free_entry.grid(row=1, column=1, padx=5, pady=12, sticky='w')
+        self.free_entry = tk.Entry(row2, textvariable=self.free_var,
+                                   font=('Segoe UI', 11), width=12,
+                                   bg='white', fg='#2c3e50', relief='solid', bd=1,
+                                   highlightthickness=1, highlightcolor='#3498db')
+        self.free_entry.pack(side='left', padx=5, ipady=3)
         
-        # حقل سعر الكيلو
-        tk.Label(acc_frame, text="سعر الكيلو (ل.س):", 
-                bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=2, column=0, sticky='e', padx=5, pady=12)
-        
+        # سعر الكيلو
+        row3 = tk.Frame(fields_frame, bg='#f8f9fa')
+        row3.pack(fill='x', pady=8)
+        lbl3 = tk.Label(row3, text="سعر الكيلو (ل.س):", bg='#f8f9fa', font=('Segoe UI', 11),
+                        fg='#2c3e50', width=16, anchor='w')
+        lbl3.pack(side='left')
         self.price_var = tk.StringVar(value="7200")
-        self.price_entry = tk.Entry(acc_frame, textvariable=self.price_var,
-                                   font=('Arial', 12), width=20,
-                                   bg='#ecf0f1', relief='solid')
-        self.price_entry.grid(row=2, column=1, padx=5, pady=12, sticky='w')
+        self.price_entry = tk.Entry(row3, textvariable=self.price_var,
+                                    font=('Segoe UI', 11), width=12,
+                                    bg='white', fg='#2c3e50', relief='solid', bd=1,
+                                    highlightthickness=1, highlightcolor='#3498db')
+        self.price_entry.pack(side='left', padx=5, ipady=3)
         
-        # حقل الحسم
-        tk.Label(acc_frame, text="الحسم (ل.س):", 
-                bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=3, column=0, sticky='e', padx=5, pady=12)
-        
+        # الحسم
+        row4 = tk.Frame(fields_frame, bg='#f8f9fa')
+        row4.pack(fill='x', pady=8)
+        lbl4 = tk.Label(row4, text="الحسم (ل.س):", bg='#f8f9fa', font=('Segoe UI', 11),
+                        fg='#2c3e50', width=16, anchor='w')
+        lbl4.pack(side='left')
         self.discount_var = tk.StringVar(value="0")
-        self.discount_entry = tk.Entry(acc_frame, textvariable=self.discount_var,
-                                      font=('Arial', 12), width=20,
-                                      bg='#ecf0f1', relief='solid')
-        self.discount_entry.grid(row=3, column=1, padx=5, pady=12, sticky='w')
+        self.discount_entry = tk.Entry(row4, textvariable=self.discount_var,
+                                       font=('Segoe UI', 11), width=12,
+                                       bg='white', fg='#2c3e50', relief='solid', bd=1,
+                                       highlightthickness=1, highlightcolor='#3498db')
+        self.discount_entry.pack(side='left', padx=5, ipady=3)
         
-        # حقل التأشيرة
-        tk.Label(acc_frame, text="تنزيل تأشيرة:", 
-                bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=4, column=0, sticky='e', padx=5, pady=12)
+        # قسم الأزرار
+        btn_frame = tk.LabelFrame(right_column, text="⚙️ الإجراءات", 
+                                    font=('Segoe UI', 14, 'bold'),
+                                    bg='#f8f9fa', fg='#1e3c5c',
+                                    padx=15, pady=15, relief='flat')
+        btn_frame.pack(fill='x', pady=(0, 15), padx=10)
         
-        self.visa_var = tk.StringVar()
-        self.visa_entry = tk.Entry(acc_frame, textvariable=self.visa_var,
-                                  font=('Arial', 12), width=20,
-                                  bg='#ecf0f1', relief='solid')
-        self.visa_entry.grid(row=4, column=1, padx=5, pady=12, sticky='w')
+        buttons_row = tk.Frame(btn_frame, bg='#f8f9fa')
+        buttons_row.pack(pady=5)
         
-        # حقل سحب المشترك
-        tk.Label(acc_frame, text="سحب المشترك:", 
-                bg='white', font=('Arial', 12),
-                fg='#34495e').grid(row=5, column=0, sticky='e', padx=5, pady=12)
+        # أزرار بحجم أكبر وألوان مريحة
+        btn_large_style = {'font': ('Segoe UI', 11, 'bold'), 'padx': 18, 'pady': 8,
+                           'bd': 0, 'cursor': 'hand2', 'relief': 'flat'}
         
-        self.withdrawal_var = tk.StringVar()
-        self.withdrawal_entry = tk.Entry(acc_frame, textvariable=self.withdrawal_var,
-                                        font=('Arial', 12), width=20,
-                                        bg='#ecf0f1', relief='solid')
-        self.withdrawal_entry.grid(row=5, column=1, padx=5, pady=12, sticky='w')
+        self.process_btn = tk.Button(buttons_row, text="⚡ معالجة سريعة", command=self.fast_process,
+                                      bg='#27ae60', fg='white', state='disabled',
+                                      **btn_large_style, activebackground='#2ecc71')
+        self.process_btn.pack(side='left', padx=6)
         
-        # جعل الأعمدة قابلة للتوسع
-        acc_frame.columnconfigure(1, weight=1)
+        self.print_btn = tk.Button(buttons_row, text="🖨️ طباعة", command=self.print_invoice,
+                                   bg='#3498db', fg='white', state='disabled',
+                                   **btn_large_style, activebackground='#5dade2')
+        self.print_btn.pack(side='left', padx=6)
         
-        # ===================== قسم أزرار التحكم =====================
-        btn_section = tk.Frame(content_frame, bg='#f5f7fa')
-        btn_section.pack(fill='x', pady=20)
+        clear_btn = tk.Button(buttons_row, text="🗑️ تصفير", command=self.clear_fields,
+                              bg='#e67e22', fg='white',
+                              **btn_large_style, activebackground='#f39c12')
+        clear_btn.pack(side='left', padx=6)
         
-        # أزرار كبيرة وواضحة
-        btn_frame = tk.Frame(btn_section, bg='#f5f7fa')
-        btn_frame.pack()
+        preview_btn = tk.Button(buttons_row, text="🧮 معاينة", command=self.calculate_preview,
+                                bg='#9b59b6', fg='white',
+                                **btn_large_style, activebackground='#af7ac5')
+        preview_btn.pack(side='left', padx=6)
         
-        # زر المعالجة السريعة
-        self.process_btn = tk.Button(btn_frame, text="⚡ معالجة سريعة", 
-                                   command=self.fast_process,
-                                   bg='#27ae60', fg='white',
-                                   font=('Arial', 14, 'bold'),
-                                   padx=40, pady=15,
-                                   state='disabled', cursor='hand2')
-        self.process_btn.pack(side='left', padx=10)
+        # قسم تفاصيل المعالجة
+        result_frame = tk.LabelFrame(right_column, text="📊 تفاصيل المعالجة", 
+                                       font=('Segoe UI', 14, 'bold'),
+                                       bg='#f8f9fa', fg='#1e3c5c',
+                                       padx=15, pady=15, relief='flat')
+        result_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
         
-        # زر الطباعة
-        self.print_btn = tk.Button(btn_frame, text="🖨️ طباعة الفاتورة", 
-                                 command=self.print_invoice,
-                                 bg='#3498db', fg='white',
-                                 font=('Arial', 14),
-                                 padx=40, pady=15,
-                                 state='disabled', cursor='hand2')
-        self.print_btn.pack(side='left', padx=10)
-        
-        # زر التصفير
-        clear_btn = tk.Button(btn_frame, text="🗑️ تصفير الحقول", 
-                            command=self.clear_fields,
-                            bg='#e74c3c', fg='white',
-                            font=('Arial', 14),
-                            padx=40, pady=15, cursor='hand2')
-        clear_btn.pack(side='left', padx=10)
-        
-        # زر حساب المعاينة
-        preview_btn = tk.Button(btn_frame, text="🧮 حساب المعاينة", 
-                              command=self.calculate_preview,
-                              bg='#9b59b6', fg='white',
-                              font=('Arial', 14),
-                              padx=40, pady=15, cursor='hand2')
-        preview_btn.pack(side='left', padx=10)
-        
-        # ===================== قسم النتائج =====================
-        result_section = tk.LabelFrame(content_frame, text="📊 تفاصيل المعالجة", 
-                                      font=('Arial', 14, 'bold'),
-                                      bg='white', fg='#2c3e50',
-                                      padx=15, pady=15, relief='groove')
-        result_section.pack(fill='both', expand=True, pady=(0, 10))
-        
-        # منطقة النص للنتائج
-        self.result_text = scrolledtext.ScrolledText(result_section,
-                                                    height=10,
-                                                    font=('Arial', 11),
-                                                    bg='#f8f9fa',
-                                                    fg='#2c3e50',
-                                                    wrap='word')
+        self.result_text = scrolledtext.ScrolledText(result_frame,
+                                                      height=10,
+                                                      font=('Segoe UI', 11),
+                                                      bg='white',
+                                                      fg='#2c3e50',
+                                                      wrap='word',
+                                                      bd=1,
+                                                      relief='solid')
         self.result_text.pack(fill='both', expand=True)
         self.result_text.config(state='disabled')
         
-        # عرض رسالة ترحيبية
-        self.show_result_message("🔍 ابدأ بالبحث عن زبون باستخدام حقل البحث أعلاه...")
+        self.show_result_message("🔍 ابدأ بالبحث عن زبون...")
     
     def create_toolbar(self, parent):
-        """إنشاء شريط الأدوات العلوي"""
-        toolbar = tk.Frame(parent, bg='#2c3e50', height=60)
+        """إنشاء شريط الأدوات العلوي بتصميم جذاب"""
+        toolbar = tk.Frame(parent, bg='#1e3c5c', height=60)
         toolbar.pack(fill='x', side='top')
         toolbar.pack_propagate(False)
         
+        # زر إغلاق (×) بشكل دائري تقريباً
+        close_btn = tk.Button(toolbar, text="✕", command=self.close_window,
+                              bg='#c0392b', fg='white', font=('Segoe UI', 14, 'bold'),
+                              bd=0, padx=18, pady=6, cursor='hand2',
+                              activebackground='#e74c3c', relief='flat')
+        close_btn.pack(side='left', padx=15)
+        
         # العنوان
         title_label = tk.Label(toolbar, 
-                              text="مولدة الريان - نظام المحاسبة السريعة (النظام الجديد)",
-                              font=('Arial', 18, 'bold'),
-                              bg='#2c3e50', fg='white')
-        title_label.pack(side='left', padx=20)
+                              text="مولدة الريان - نظام المحاسبة السريعة",
+                              font=('Segoe UI', 18, 'bold'),
+                              bg='#1e3c5c', fg='#ecf0f1')
+        title_label.pack(side='left', padx=25)
         
         # معلومات المستخدم
         user_info = tk.Label(toolbar,
                             text=f"المستخدم: {self.user_data.get('full_name', '')} | الدور: {self.user_data.get('role', '')}",
-                            font=('Arial', 12),
-                            bg='#2c3e50', fg='#ecf0f1')
+                            font=('Segoe UI', 11),
+                            bg='#1e3c5c', fg='#bdc3c7')
         user_info.pack(side='right', padx=20)
+    
+    def close_window(self):
+        """إغلاق النافذة المنبثقة"""
+        self.parent.destroy()
     
     def center_window(self):
         """توسيط النافذة على الشاشة"""
         root = self.parent.winfo_toplevel()
         root.update_idletasks()
 
-        width = 1200
-        height = 700
+        width = 1300
+        height = 750
 
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
@@ -370,7 +324,7 @@ class AccountingUI(tk.Frame):
         y = (screen_height // 2) - (height // 2)
 
         root.geometry(f'{width}x{height}+{x}+{y}')
-        root.minsize(1000, 600)
+        root.minsize(1100, 650)
     
     def quick_search(self, event=None):
         """بحث فوري أثناء الكتابة"""
@@ -379,11 +333,9 @@ class AccountingUI(tk.Frame):
             self.results_listbox.delete(0, tk.END)
             return
         
-        # إلغاء البحث السابق إذا كان هناك واحد
         if hasattr(self, '_search_job'):
             self.after_cancel(self._search_job)
         
-        # جدولة بحث جديد بعد تأخير 300 مللي ثانية
         self._search_job = self.after(300, self._perform_search, search_term)
     
     def _perform_search(self, search_term):
@@ -394,7 +346,6 @@ class AccountingUI(tk.Frame):
         results = self.fast_ops.fast_search_customers(search_term, limit=30)
         self.results_listbox.delete(0, tk.END)
         
-        # حفظ بيانات العملاء للوصول السريع
         self.search_results_data = results
         
         for customer in results:
@@ -443,20 +394,16 @@ class AccountingUI(tk.Frame):
             self.free_var.set("0")
             self.price_var.set("7200")
             self.discount_var.set("0")
-            self.visa_var.set("")
-            self.withdrawal_var.set("")
             
             # تفعيل الأزرار
             self.process_btn.config(state='normal', bg='#27ae60')
             self.print_btn.config(state='normal', bg='#3498db')
             
-            # إظهار رسالة في منطقة النتائج
             self.show_result_message(f"✅ تم تحديد الزبون: {customer_data.get('name', '')}\n"
-                                   f"الرصيد الحالي: {customer_data.get('current_balance', 0):,.0f} كيلو واط\n"
-                                   f"آخر قراءة عداد: {customer_data.get('last_counter_reading', 0):,.0f}\n\n"
-                                   f"⚠️ أدخل كمية الدفع والمجاني ثم اضغط على 'معالجة سريعة'")
+                                f"الرصيد الحالي: {customer_data.get('current_balance', 0):,.0f} كيلو واط\n"
+                                f"آخر قراءة عداد: {customer_data.get('last_counter_reading', 0):,.0f}\n\n"
+                                f"⚠️ أدخل كمية الدفع والمجاني ثم اضغط على 'معالجة سريعة'")
             
-            # وضع التركيز على حقل كمية الدفع
             self.kilowatt_entry.focus_set()
             
         except Exception as e:
@@ -480,7 +427,6 @@ class AccountingUI(tk.Frame):
             return
         
         try:
-            # التحقق من المدخلات
             if not self.kilowatt_var.get().strip():
                 messagebox.showerror("خطأ", "يرجى إدخال كمية الدفع")
                 return
@@ -490,20 +436,13 @@ class AccountingUI(tk.Frame):
             price_per_kilo = float(self.price_var.get() or 7200)
             discount = float(self.discount_var.get() or 0)
             
-            # الحسابات
             last_reading = float(self.selected_customer.get('last_counter_reading', 0))
             current_balance = float(self.selected_customer.get('current_balance', 0))
             
-            # القراءة الجديدة = القراءة السابقة + كمية الدفع + المجاني
             new_reading = last_reading + kilowatt_amount + free_kilowatt
-            
-            # الرصيد الجديد = الرصيد الحالي + كمية الدفع + المجاني
             new_balance = current_balance + kilowatt_amount + free_kilowatt
-            
-            # المبلغ الكلي = (كمية الدفع * سعر الكيلو) - الحسم
             total_amount = (kilowatt_amount * price_per_kilo) - discount
             
-            # عرض المعاينة
             preview_text = f"""
             📊 معاينة الحساب (غير محفوظة):
             
@@ -540,29 +479,22 @@ class AccountingUI(tk.Frame):
             return
         
         try:
-            # التحقق من المدخلات
             if not self.kilowatt_var.get().strip():
                 messagebox.showerror("خطأ", "يرجى إدخال كمية الدفع")
                 return
             
-            # جمع البيانات
             kilowatt_amount = float(self.kilowatt_var.get())
             free_kilowatt = float(self.free_var.get() or 0)
             price_per_kilo = float(self.price_var.get() or 7200)
             discount = float(self.discount_var.get() or 0)
-            visa_application = self.visa_var.get()
-            customer_withdrawal = self.withdrawal_var.get()
             
-            # التحقق من صحة البيانات
             if kilowatt_amount < 0 or free_kilowatt < 0:
                 messagebox.showerror("خطأ", "كمية الدفع والمجاني يجب أن تكون أرقاماً موجبة")
                 return
             
-            # الحسابات للمعاينة
             last_reading = float(self.selected_customer.get('last_counter_reading', 0))
             total_kilowatt = kilowatt_amount + free_kilowatt
             
-            # إظهار تأكيد
             confirm_msg = f"""
             هل أنت متأكد من معالجة الفاتورة؟
             
@@ -581,20 +513,16 @@ class AccountingUI(tk.Frame):
             if not messagebox.askyesno("تأكيد المعالجة", confirm_msg):
                 return
             
-            # معالجة الفاتورة باستخدام التابع المعدل
             result = self.fast_ops.fast_process_invoice(
                 customer_id=self.selected_customer['id'],
                 kilowatt_amount=kilowatt_amount,
                 free_kilowatt=free_kilowatt,
                 price_per_kilo=price_per_kilo,
                 discount=discount,
-                visa_application=visa_application,
-                customer_withdrawal=customer_withdrawal,
                 user_id=self.user_data.get('id', 1)
             )
             
             if result.get('success'):
-                # عرض النتيجة
                 result_text = f"""
                 ✅ تمت المعالجة بنجاح!
                 
@@ -614,8 +542,6 @@ class AccountingUI(tk.Frame):
                 """
                 
                 self.show_result_message(result_text)
-                
-                # حفظ نتيجة المعالجة للطباعة
                 self.last_invoice_result = result
                 
                 # تحديث بيانات الزبون المعروضة
@@ -624,11 +550,9 @@ class AccountingUI(tk.Frame):
                 self.info_vars['balance'].set(f"{result['new_balance']:,.0f}")
                 self.info_vars['reading'].set(f"{result['new_reading']:,.0f}")
                 
-                # سؤال عن الطباعة
                 if messagebox.askyesno("طباعة", "هل تريد طباعة الفاتورة الآن؟"):
                     self.print_invoice()
                 
-                # تصفير حقول الإدخال
                 self.clear_input_fields()
                 
             else:
@@ -649,7 +573,6 @@ class AccountingUI(tk.Frame):
             return
         
         try:
-            # تحضير بيانات الطباعة
             invoice_data = {
                 'customer_name': self.selected_customer.get('name', ''),
                 'sector_name': self.selected_customer.get('sector_name', ''),
@@ -691,11 +614,8 @@ class AccountingUI(tk.Frame):
         self.free_var.set("0")
         self.price_var.set("7200")
         self.discount_var.set("0")
-        self.visa_var.set("")
-        self.withdrawal_var.set("")
         
         if self.selected_customer:
-            last_reading = self.selected_customer.get('last_counter_reading', 0)
             self.kilowatt_entry.focus_set()
     
     def clear_fields(self):
@@ -705,26 +625,17 @@ class AccountingUI(tk.Frame):
         self.free_var.set("0")
         self.price_var.set("7200")
         self.discount_var.set("0")
-        self.visa_var.set("")
-        self.withdrawal_var.set("")
         
-        # تصفير حقول المعلومات
-        for var in self.info_vars.values():
-            var.set("---")
+        for key in self.info_vars:
+            self.info_vars[key].set("---")
         
-        # تصفير قائمة النتائج
         self.results_listbox.delete(0, tk.END)
-        
-        # تصفير منطقة النتائج
         self.show_result_message("🔍 ابدأ بالبحث عن زبون باستخدام حقل البحث أعلاه...")
         
-        # إلغاء تحديد الزبون
         self.selected_customer = None
         self.last_invoice_result = None
         
-        # تعطيل الأزرار
         self.process_btn.config(state='disabled', bg='#95a5a6')
         self.print_btn.config(state='disabled', bg='#95a5a6')
         
-        # وضع التركيز على حقل البحث
         self.search_entry.focus_set()

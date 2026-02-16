@@ -1,9 +1,0 @@
-{
-  "backup_label": "full_backup_20260215_121023",
-  "timestamp": "20260215_121023",
-  "type": "full_dump",
-  "database_size": 10499775,
-  "checksum": "0f406f270c982a779bde9e7dfaca78684b9b4c60882dd18c03b8748a4a6f62b8",
-  "encrypted": false,
-  "pg_version": "psql (PostgreSQL) 18.1"
-}
