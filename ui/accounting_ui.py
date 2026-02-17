@@ -499,7 +499,8 @@ class AccountingUI(tk.Frame):
                 free_kilowatt=free_kilowatt,
                 price_per_kilo=price_per_kilo,
                 discount=discount,
-                user_id=self.user_data.get('id', 1)
+                user_id=self.user_data.get('id', 1),
+                customer_withdrawal=self.selected_customer.get('withdrawal_amount', 0),   
             )
             if result.get('success'):
                 result_text = f"""
@@ -558,7 +559,9 @@ class AccountingUI(tk.Frame):
                 'total_amount': self.last_invoice_result.get('total_amount', 0),
                 'new_balance': self.last_invoice_result.get('new_balance', 0),
                 'invoice_number': self.last_invoice_result.get('invoice_number', ''),
-                'discount': self.last_invoice_result.get('discount', 0)
+                'discount': self.last_invoice_result.get('discount', 0),
+                'withdrawal_amount': self.selected_customer.get('withdrawal_amount', 0),
+                'visa_application': self.selected_customer.get('visa_balance', 0)   # <-- إضافة هذا السطر
             }
             if self.printer.print_fast_invoice(invoice_data):
                 self.show_result_message("🖨️ تمت الطباعة بنجاح!")

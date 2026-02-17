@@ -336,7 +336,7 @@ class InvoicePrinter:
             from escpos.printer import Network
             
             # اتصال بالطابعة
-            printer_ip = "10.10.0.5"  # عنوان IP الطابعة
+            printer_ip = "10.10.0.4"  # عنوان IP الطابعة
             printer_port = 9100
             
             p = Network(printer_ip, printer_port, timeout=10)

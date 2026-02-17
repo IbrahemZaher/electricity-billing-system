@@ -43,7 +43,7 @@ VERSION = '3.0.0'
 
 # إعدادات الطباعة
 PRINTER_CONFIG = {
-    'ip': '10.10.0.5',
+    'ip': '10.10.0.4',
     'port': 9100,
     'timeout': 10,
     'paper_width': 570

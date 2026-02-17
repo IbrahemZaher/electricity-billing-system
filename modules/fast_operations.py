@@ -206,6 +206,7 @@ class FastOperations:
                     "free_kilowatt": free_kilowatt,
                     "total_amount": total_amount,
                     "new_balance": new_balance,
+                    "withdrawal_amount": kwargs.get('customer_withdrawal', 0),   # <-- إضافة هذا السطر
                     "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
 
