@@ -247,22 +247,98 @@ class InvoicePreview:
                              font=('Arial', 12),
                              padx=30, pady=10, cursor='hand2')
         close_btn.pack(side='left', padx=10)
-    
+        
     def print_invoice(self):
         """طباعة الفاتورة"""
         try:
-            from utils.printer import InvoicePrinter
-            printer = InvoicePrinter()
+            from modules.printing import FastPrinter
+            printer = FastPrinter()
             
-            if printer.print_invoice(self.invoice_data):
-                messagebox.showinfo("نجاح", "تم إرسال الفاتورة للطابعة بنجاح")
+            # دالة لتحويل أي قيمة إلى float بشكل آمن
+            def to_float(value, default=0.0):
+                if value is None:
+                    return default
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    # محاولة تحويل النص إلى رقم بعد تنظيفه
+                    try:
+                        # إزالة الفواصل والمسافات
+                        cleaned = str(value).replace(',', '').replace(' ', '').strip()
+                        return float(cleaned)
+                    except:
+                        return default
+
+            # دالة لاستخراج القيمة الرقمية من أي حقل في البيانات
+            def extract_numeric_value(possible_keys):
+                for key in possible_keys:
+                    if key in self.invoice_data:
+                        val = self.invoice_data[key]
+                        if val:
+                            # محاولة تحويل النص إلى رقم (حتى لو كان يحتوي على أرقام عربية)
+                            try:
+                                # تحويل الأرقام العربية (مثل ٩٠٥) إلى أرقام غربية
+                                arabic_digits = str(val).translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+                                # إزالة أي فواصل
+                                cleaned = arabic_digits.replace(',', '').strip()
+                                if cleaned:
+                                    return float(cleaned)
+                            except:
+                                pass
+                return 0.0
+
+            # البحث عن قيمة التأشيرة في جميع الأسماء المحتملة (عربية وإنجليزية)
+            visa_value = extract_numeric_value([
+                'visa_application', 'visa_balance', 'visa_amount', 'visa',
+                'تنزيل تأشيرة', 'التأشيرة', 'تأشيرة', 'رصيد التأشيرة', 'الرصيد التأشيري'
+            ])
+
+            # البحث عن قيمة السحب
+            withdrawal_value = extract_numeric_value([
+                'withdrawal_amount', 'customer_withdrawal', 'سحب المشترك', 'السحب', 'withdrawal'
+            ])
+
+            # البحث عن قيمة الحسم (إذا لم تكن موجودة في self.invoice_data.get('discount'))
+            discount_value = to_float(self.invoice_data.get('discount', 0))
+            if discount_value == 0:
+                discount_value = extract_numeric_value(['الحسم', 'discount_amount'])
+
+            # تجهيز البيانات مع التحويل الرقمي الإجباري
+            invoice_data_for_printer = {
+                'customer_name': str(self.invoice_data.get('customer_name', self.invoice_data.get('name', ''))),
+                'sector_name': str(self.invoice_data.get('sector_name', self.invoice_data.get('sector', ''))),
+                'box_number': str(self.invoice_data.get('box_number', '')),
+                'serial_number': str(self.invoice_data.get('serial_number', '')),
+                'previous_reading': to_float(self.invoice_data.get('previous_reading')),
+                'new_reading': to_float(self.invoice_data.get('new_reading')),
+                'kilowatt_amount': to_float(self.invoice_data.get('kilowatt_amount')),
+                'free_kilowatt': to_float(self.invoice_data.get('free_kilowatt')),
+                'consumption': to_float(self.invoice_data.get('kilowatt_amount')) + to_float(self.invoice_data.get('free_kilowatt')),
+                'price_per_kilo': to_float(self.invoice_data.get('price_per_kilo'), 7200.0),
+                'discount': discount_value,
+                'total_amount': to_float(self.invoice_data.get('total_amount')),
+                'new_balance': to_float(self.invoice_data.get('current_balance', self.invoice_data.get('new_balance', 0))),
+                'invoice_number': str(self.invoice_data.get('invoice_number', '')),
+                'visa_application': visa_value,
+                'withdrawal_amount': withdrawal_value,
+                'accountant_name': str(self.invoice_data.get('accountant_name', self.invoice_data.get('user_name', 'محاسب')))
+            }
+
+            # طباعة معلومات التشخيص لمعرفة القيم المستخرجة
+            print("\n=== بيانات الفاتورة المرسلة للطباعة ===")
+            for k, v in invoice_data_for_printer.items():
+                print(f"  {k}: {v} (type: {type(v)})")
+            print("========================================\n")
+
+            if printer.print_fast_invoice(invoice_data_for_printer):
+                messagebox.showinfo("نجاح", "تمت طباعة الفاتورة بنجاح")
             else:
-                messagebox.showerror("خطأ", "فشل إرسال الفاتورة للطابعة")
-                
+                messagebox.showerror("خطأ", "فشلت الطباعة - قد تكون الطابعة غير متصلة")
         except Exception as e:
-            logger.error(f"خطأ في الطباعة: {e}")
-            messagebox.showerror("خطأ", f"فشل الطباعة: {str(e)}")
-    
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("خطأ في الطباعة", f"الاستثناء: {str(e)}")
+            
     def print_without_balance(self):
         """طباعة الفاتورة بدون عرض الرصيد"""
         try:
