@@ -1205,7 +1205,7 @@ class ReportManager:
         report_data: Dict[str, Any],
         filename: str = None
     ) -> Tuple[bool, str]:
-        """تصدير تقرير قوائم القطع إلى Excel - بدون عمود الرصيد الجديد"""
+        """تصدير تقرير قوائم القطع إلى Excel - كل قطاع في ورقة منفصلة"""
         try:
             if not filename:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1216,99 +1216,141 @@ class ReportManager:
             filepath = os.path.join(export_dir, filename)
             
             with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                # ورقة الإجماليات
-                summary_data = []
-                summary_data.append(['تقرير قوائم القطع', report_data.get('report_title', '')])
-                summary_data.append(['تاريخ الإنشاء', report_data.get('generated_at', '')])
-                summary_data.append([''])
-                summary_data.append(['الإجماليات:'])
+                # ========== ورقة معلومات التقرير ==========
+                info_data = []
+                info_data.append(['تقرير قوائم القطع', report_data.get('report_title', '')])
+                info_data.append(['تاريخ الإنشاء', report_data.get('generated_at', '')])
+                info_data.append([''])
+                info_data.append(['الإجماليات:'])
                 
                 grand_total = report_data.get('grand_total', {})
-                summary_data.append(['عدد العلب', f"{grand_total.get('total_boxes', 0):,}"])
-                summary_data.append(['عدد الزبائن', f"{grand_total.get('total_customers', 0):,}"])
-                summary_data.append(['إجمالي الرصيد', f"{grand_total.get('total_balance', 0):,.0f}"])
-                summary_data.append(['إجمالي السحب', f"{grand_total.get('total_withdrawal', 0):,.0f}"])
-                summary_data.append(['إجمالي التأشيرة', f"{grand_total.get('total_visa', 0):,.0f}"])
-                # ❌ تم حذف صف الرصيد الجديد
-                summary_data.append([''])
+                info_data.append(['عدد العلب', f"{grand_total.get('total_boxes', 0):,}"])
+                info_data.append(['عدد الزبائن', f"{grand_total.get('total_customers', 0):,}"])
+                info_data.append(['إجمالي الرصيد', f"{grand_total.get('total_balance', 0):,.0f}"])
+                info_data.append(['إجمالي السحب', f"{grand_total.get('total_withdrawal', 0):,.0f}"])
+                info_data.append(['إجمالي التأشيرة', f"{grand_total.get('total_visa', 0):,.0f}"])
+                info_data.append([''])
                 
                 filters = report_data.get('filters', {})
-                summary_data.append(['الفلاتر المطبقة:'])
-                summary_data.append(['الحد الأدنى للرصيد', filters.get('min_balance', -1000)])
-                summary_data.append(['الحد الأقصى للرصيد', filters.get('max_balance', 0)])
-                summary_data.append(['استبعاد المجانيين', 'نعم' if filters.get('exclude_free') else 'لا'])
-                summary_data.append(['استبعاد VIP', 'نعم' if filters.get('exclude_vip') else 'لا'])
-                summary_data.append(['نوع العداد', filters.get('only_meter_type', 'زبون')])
+                info_data.append(['الفلاتر المطبقة:'])
+                info_data.append(['الحد الأدنى للرصيد', filters.get('min_balance', -1000)])
+                info_data.append(['الحد الأقصى للرصيد', filters.get('max_balance', 0)])
+                info_data.append(['استبعاد المجانيين', 'نعم' if filters.get('exclude_free') else 'لا'])
+                info_data.append(['استبعاد VIP', 'نعم' if filters.get('exclude_vip') else 'لا'])
+                info_data.append(['نوع العداد', filters.get('only_meter_type', 'زبون')])
                 
-                df_summary = pd.DataFrame(summary_data)
-                df_summary.to_excel(writer, sheet_name='ملخص', index=False, header=False)
+                df_info = pd.DataFrame(info_data)
+                df_info.to_excel(writer, sheet_name='معلومات', index=False, header=False)
                 
-                # ورقة لكل علبة
+                # ========== تجميع البيانات حسب القطاع ==========
+                sectors_dict = {}  # sector_name -> list of customers with box info
                 for box_data in report_data.get('boxes', []):
-                    box_name = box_data['box_name']
-                    customers = box_data.get('customers', [])
-                    if customers:
-                        data_list = []
-                        for customer in customers:
-                            data_list.append([
-                                customer['name'],
-                                customer['box_number'],
-                                customer['serial_number'],
-                                customer['current_balance'],
-                                customer['withdrawal_amount'],
-                                customer['visa_balance'],
-                                # ❌ تم حذف calculated_new_balance
-                                customer['financial_category'],
-                                customer['meter_type'],
-                                customer['phone_number']
-                            ])
-                        
-                        columns = [
-                            'اسم الزبون', 'رقم العلبة', 'رقم المسلسل',
-                            'الرصيد الحالي', 'مبلغ السحب', 'رصيد التأشيرة',
-                            # ❌ تم حذف 'الرصيد الجديد'
-                            'التصنيف المالي', 'نوع العداد',
-                            'رقم الهاتف'
-                        ]
-                        
-                        df_box = pd.DataFrame(data_list, columns=columns)
-                        
-                        total_row = pd.DataFrame([[
-                            f"إجمالي {box_name}",
-                            f"{box_data['filtered_customer_count']} زبون",
-                            '',
-                            box_data['box_total_balance'],
-                            box_data['box_total_withdrawal'],
-                            box_data['box_total_visa'],
-                            # ❌ تم حذف box_calculated_balance
-                            '',
-                            '',
-                            ''
-                        ]], columns=columns)
-                        
-                        df_box = pd.concat([df_box, total_row], ignore_index=True)
-                        
-                        info_rows = [
-                            ['معلومات العلبة:'],
-                            ['اسم العلبة', box_data['box_name']],
-                            ['رقم العلبة', box_data['box_number']],
-                            ['نوع العلبة', box_data['box_type']],
-                            ['القطاع', box_data['sector_name']],
-                            ['عدد الزبائن الكلي', box_data['total_customers_count']],
-                            ['عدد الزبائن برصيد سالب', box_data['negative_customers_count']],
-                            ['عدد الزبائن بعد الفلترة', box_data['filtered_customer_count']],
-                            [''],
-                            ['تفاصيل الزبائن:']
-                        ]
-                        
-                        df_info = pd.DataFrame(info_rows)
-                        sheet_name = f"{box_name}_{box_data['box_number']}"[:31]
-                        df_info.to_excel(writer, sheet_name=sheet_name, 
-                                    index=False, header=False, startrow=0)
-                        df_box.to_excel(writer, sheet_name=sheet_name, 
-                                    index=False, startrow=len(info_rows))
+                    sector_name = box_data.get('sector_name', 'بدون قطاع')
+                    if sector_name not in sectors_dict:
+                        sectors_dict[sector_name] = []
+                    
+                    box_info = {
+                        'box_name': box_data['box_name'],
+                        'box_number': box_data['box_number'],
+                        'box_type': box_data['box_type'],
+                        'sector_name': sector_name
+                    }
+                    
+                    for customer in box_data.get('customers', []):
+                        customer_row = {
+                            **box_info,
+                            'customer_name': customer['name'],
+                            'customer_box_number': customer['box_number'],
+                            'serial_number': customer['serial_number'],
+                            'current_balance': customer['current_balance'],
+                            'withdrawal_amount': customer['withdrawal_amount'],
+                            'visa_balance': customer['visa_balance'],
+                            'financial_category': customer['financial_category'],
+                            'meter_type': customer['meter_type'],
+                            'phone_number': customer['phone_number']
+                        }
+                        sectors_dict[sector_name].append(customer_row)
                 
-                # تنسيق الأعمدة
+                # ========== ورقة ملخص القطاعات ==========
+                sectors_summary = []
+                for sector_name, customers in sectors_dict.items():
+                    if customers:
+                        total_balance = sum(c['current_balance'] for c in customers)
+                        total_withdrawal = sum(c['withdrawal_amount'] for c in customers)
+                        total_visa = sum(c['visa_balance'] for c in customers)
+                        sectors_summary.append([
+                            sector_name,
+                            len(customers),
+                            total_balance,
+                            total_withdrawal,
+                            total_visa
+                        ])
+                
+                if sectors_summary:
+                    df_sectors_summary = pd.DataFrame(sectors_summary, columns=[
+                        'القطاع', 'عدد الزبائن', 'إجمالي الرصيد', 'إجمالي السحب', 'إجمالي التأشيرة'
+                    ])
+                    df_sectors_summary.to_excel(writer, sheet_name='ملخص القطاعات', index=False)
+                
+                # ========== ورقة لكل قطاع ==========
+                for sector_name, customers in sectors_dict.items():
+                    if not customers:
+                        continue
+                    
+                    # تجهيز البيانات
+                    data_list = []
+                    for cust in customers:
+                        data_list.append([
+                            cust['box_name'],
+                            cust['box_number'],
+                            cust['box_type'],
+                            cust['customer_name'],
+                            cust['customer_box_number'],
+                            cust['serial_number'],
+                            cust['current_balance'],
+                            cust['withdrawal_amount'],
+                            cust['visa_balance'],
+                            cust['financial_category'],
+                            cust['meter_type'],
+                            cust['phone_number']
+                        ])
+                    
+                    columns = [
+                        'اسم العلبة', 'رقم العلبة', 'نوع العلبة',
+                        'اسم الزبون', 'رقم علبة الزبون', 'رقم المسلسل',
+                        'الرصيد الحالي', 'مبلغ السحب', 'رصيد التأشيرة',
+                        'التصنيف المالي', 'نوع العداد', 'رقم الهاتف'
+                    ]
+                    
+                    df_sector = pd.DataFrame(data_list, columns=columns)
+                    
+                    # إضافة صف إجمالي
+                    total_balance = sum(c['current_balance'] for c in customers)
+                    total_withdrawal = sum(c['withdrawal_amount'] for c in customers)
+                    total_visa = sum(c['visa_balance'] for c in customers)
+                    
+                    total_row = pd.DataFrame([[
+                        f"إجمالي {sector_name}",
+                        f"{len(customers)} زبون",
+                        '',
+                        '',
+                        '',
+                        '',
+                        total_balance,
+                        total_withdrawal,
+                        total_visa,
+                        '',
+                        '',
+                        ''
+                    ]], columns=columns)
+                    
+                    df_sector = pd.concat([df_sector, total_row], ignore_index=True)
+                    
+                    # اسم الورقة (مختصر إذا كان طويلاً)
+                    sheet_name = sector_name[:31]
+                    df_sector.to_excel(writer, sheet_name=sheet_name, index=False)
+                
+                # تنسيق الأعمدة لجميع الأوراق
                 for sheet_name in writer.sheets:
                     worksheet = writer.sheets[sheet_name]
                     for column in worksheet.columns:

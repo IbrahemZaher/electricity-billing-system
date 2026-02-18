@@ -135,15 +135,55 @@ class ReportUI(tk.Frame):
         # قسم رئيسي
         main_frame = tk.Frame(self)
         main_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        # قسم اختيار التقارير (يسار)
+                
+        # left_frame بعرض ثابت وتمرير بالماوس (بدون شريط مرئي) - نسخة محسنة مع ربط الأحداث بجميع العناصر
         left_frame = tk.LabelFrame(main_frame, text="أنواع التقارير", 
-                                  font=('Arial', 12, 'bold'),
-                                  padx=10, pady=10)
+                                font=('Arial', 12, 'bold'),
+                                padx=10, pady=10)
         left_frame.pack(side='left', fill='y', padx=(0, 10))
-        
-        # إنشاء قائمة التقارير
+        left_frame.config(width=200, height=500)   # عدل الأرقام حسب رغبتك
+        left_frame.pack_propagate(False)
+
+        # إنشاء Canvas للتمرير بدون شريط
+        canvas = tk.Canvas(left_frame, highlightthickness=0, bg='#f0f0f0')
+        canvas.pack(side='left', fill='both', expand=True)
+
+        scrollable_frame = tk.Frame(canvas)
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        # نافذة داخل canvas بعرض أقل قليلاً من الإطار (180 بكسل مثلاً)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw', width=180)
+
+        # دالة موحدة للتمرير بالماوس (تعمل على ويندوز ولينكس)
+        def _on_mousewheel(event):
+            # Windows: event.delta
+            if event.delta:
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            # Linux: event.num
+            elif event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+            return "break"  # منع انتشار الحدث
+
+        # ربط الأحداث بالـ Canvas نفسه
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+        canvas.bind("<Button-4>", _on_mousewheel)   # Linux
+        canvas.bind("<Button-5>", _on_mousewheel)   # Linux
+
+        # ربط الأحداث بالإطار القابل للتمرير (ليغطي المساحات الفارغة)
+        scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
+        scrollable_frame.bind("<Button-4>", _on_mousewheel)
+        scrollable_frame.bind("<Button-5>", _on_mousewheel)
+
+        canvas.focus_set()
+
+        # قائمة الأزرار (جبايات المحاسب أولاً)
         reports = [
+            ("💰 جبايات المحاسب", self.show_accountant_collections_report),
             ("📉 قوائم الكسر (قديم)", self.show_negative_balance_old),
             ("📉 قوائم الكسر (متقدم)", self.show_negative_balance_advanced),
             ("✂️ قوائم القطع (قديم)", self.show_cut_lists_old),
@@ -153,14 +193,18 @@ class ReportUI(tk.Frame):
             ("📊 إحصائيات عامة", self.show_dashboard_statistics),
             ("💰 تقرير المبيعات", self.show_sales_report),
             ("🧾 تقرير الفواتير", self.show_invoice_report),
-            ("🖨️ أوراق التأشيرات", self.show_visa_report),   # إضافة الزر الجديد
-                        ("💰 جبايات المحاسب", self.show_accountant_collections_report),   # إضافة الزر الجديد
+            ("🖨️ أوراق التأشيرات", self.show_visa_report),
         ]
-        
+
         for report_name, command in reports:
-            btn = self.create_styled_button(left_frame, report_name, command, color_type='normal')
-            btn.config(anchor='w', justify='left')  # للحفاظ على المحاذاة لليسار
-            btn.pack(fill='x', pady=2)        
+            btn = self.create_styled_button(scrollable_frame, report_name, command, color_type='normal')
+            btn.config(anchor='w', justify='left')
+            # ربط أحداث التمرير بالزر نفسه
+            btn.bind("<MouseWheel>", _on_mousewheel)
+            btn.bind("<Button-4>", _on_mousewheel)
+            btn.bind("<Button-5>", _on_mousewheel)
+            btn.pack(fill='x', pady=2)            
+                        
         # قسم عرض التقرير (يمين)
         right_frame = tk.Frame(main_frame)
         right_frame.pack(side='right', fill='both', expand=True)

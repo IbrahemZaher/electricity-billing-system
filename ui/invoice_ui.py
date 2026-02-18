@@ -30,78 +30,84 @@ class InvoiceUI(tk.Frame):
         
         self.create_widgets()
         self.load_invoices()
-        #self.load_customers_for_filter()
         self.load_sectors_for_filter()
     
     def create_widgets(self):
-        """إنشاء عناصر الواجهة"""
-        # الجزء العلوي: أدوات البحث والتصفية
+        """إنشاء عناصر الواجهة باستخدام grid لتخطيط ثابت"""
+        # تكوين أوزان الصفوف والأعمدة
+        self.grid_rowconfigure(1, weight=1)  # الصف الخاص بالجدول يتمدد عمودياً
+        self.grid_columnconfigure(0, weight=1)  # العمود الخاص بالجدول يتمدد أفقياً
+        self.grid_columnconfigure(1, weight=0)  # عمود التفاصيل ثابت العرض
+
+        # شريط البحث (row=0, عمود مزدوج)
         self.create_search_toolbar()
-        
-        # الجزء الأوسط: جدول الفواتير
+        self.search_toolbar.grid(row=0, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
+
+        # الجدول (row=1, column=0)
         self.create_invoice_table()
-        
-        # الجزء السفلي: التحكم بالصفحات
-        self.create_pagination()
-        
-        # الجزء الجانبي: تفاصيل الفاتورة
+        self.table_frame.grid(row=1, column=0, sticky='nsew', padx=(5, 0), pady=5)
+
+        # لوحة التفاصيل (row=1, column=1) - لا تُظهر في البداية
         self.create_detail_panel()
-        
-        # شريط الأدوات السفلي
+        # لا نضعها في grid الآن، ستظهر عند الحاجة
+
+        # شريط الصفحات (row=2, عمود مزدوج)
+        self.create_pagination()
+        self.pagination_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
+
+        # شريط الأدوات السفلي (row=3, عمود مزدوج) - مع تخزين المرجع
         self.create_bottom_toolbar()
-        
+        self.bottom_toolbar.grid(row=3, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
+
     def create_search_toolbar(self):
         """إنشاء شريط أدوات البحث"""
-        toolbar = tk.Frame(self, bg='#f8f9fa', padx=10, pady=10)
-        toolbar.pack(fill='x')
+        self.search_toolbar = tk.Frame(self, bg='#f8f9fa', padx=10, pady=10)
 
         # البحث بالتاريخ
-        tk.Label(toolbar, text="من تاريخ:", bg='#f8f9fa').pack(side='left')
-        self.start_date_entry = tk.Entry(toolbar, width=12)
+        tk.Label(self.search_toolbar, text="من تاريخ:", bg='#f8f9fa').pack(side='left')
+        self.start_date_entry = tk.Entry(self.search_toolbar, width=12)
         self.start_date_entry.insert(0, (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"))
         self.start_date_entry.pack(side='left', padx=5)
 
-        tk.Label(toolbar, text="إلى تاريخ:", bg='#f8f9fa').pack(side='left')
-        self.end_date_entry = tk.Entry(toolbar, width=12)
+        tk.Label(self.search_toolbar, text="إلى تاريخ:", bg='#f8f9fa').pack(side='left')
+        self.end_date_entry = tk.Entry(self.search_toolbar, width=12)
         self.end_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
         self.end_date_entry.pack(side='left', padx=5)
 
-        # البحث باسم الزبون (جديد)
-        tk.Label(toolbar, text="اسم الزبون:", bg='#f8f9fa').pack(side='left')
-        self.customer_name_entry = tk.Entry(toolbar, width=20)
+        # البحث باسم الزبون
+        tk.Label(self.search_toolbar, text="اسم الزبون:", bg='#f8f9fa').pack(side='left')
+        self.customer_name_entry = tk.Entry(self.search_toolbar, width=20)
         self.customer_name_entry.pack(side='left', padx=5)
-        # يمكن تفعيل البحث الفوري عند الكتابة (اختياري)
         self.customer_name_entry.bind('<KeyRelease>', lambda e: self.apply_filters())
 
-        # البحث بالقطاع (يبقى كما هو)
-        tk.Label(toolbar, text="القطاع:", bg='#f8f9fa').pack(side='left')
-        self.sector_combo = ttk.Combobox(toolbar, width=15, state='readonly')
+        # البحث بالقطاع
+        tk.Label(self.search_toolbar, text="القطاع:", bg='#f8f9fa').pack(side='left')
+        self.sector_combo = ttk.Combobox(self.search_toolbar, width=15, state='readonly')
         self.sector_combo.pack(side='left', padx=5)
 
         # زر البحث
-        search_btn = tk.Button(toolbar, text="بحث", command=self.apply_filters,
+        search_btn = tk.Button(self.search_toolbar, text="بحث", command=self.apply_filters,
                             bg='#3498db', fg='white')
         search_btn.pack(side='left', padx=10)
 
         # زر إعادة التعيين
-        reset_btn = tk.Button(toolbar, text="إعادة تعيين", command=self.reset_filters,
+        reset_btn = tk.Button(self.search_toolbar, text="إعادة تعيين", command=self.reset_filters,
                             bg='#95a5a6', fg='white')
         reset_btn.pack(side='left')
-    
+
     def create_invoice_table(self):
         """إنشاء جدول الفواتير"""
-        table_frame = tk.Frame(self)
-        table_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        self.table_frame = tk.Frame(self)
         
         # شريط التمرير
-        scrollbar = ttk.Scrollbar(table_frame)
+        scrollbar = ttk.Scrollbar(self.table_frame)
         scrollbar.pack(side='right', fill='y')
         
         # تعريف الأعمدة
         columns = ('id', 'invoice_number', 'date', 'customer', 'sector', 
                   'amount', 'status', 'accountant')
         
-        self.tree = ttk.Treeview(table_frame, columns=columns, 
+        self.tree = ttk.Treeview(self.table_frame, columns=columns, 
                                 yscrollcommand=scrollbar.set,
                                 selectmode='browse', height=20)
         
@@ -132,13 +138,12 @@ class InvoiceUI(tk.Frame):
         
         # ربط حدث التحديد
         self.tree.bind('<<TreeviewSelect>>', self.on_invoice_select)
-    
+
     def create_pagination(self):
         """إنشاء عناصر التحكم بالصفحات"""
-        pagination_frame = tk.Frame(self, bg='#ecf0f1', pady=10)
-        pagination_frame.pack(fill='x')
+        self.pagination_frame = tk.Frame(self, bg='#ecf0f1', pady=10)
         
-        self.page_label = tk.Label(pagination_frame, 
+        self.page_label = tk.Label(self.pagination_frame, 
                                   text="الصفحة 1 من 1", 
                                   bg='#ecf0f1')
         self.page_label.pack(side='left', padx=10)
@@ -151,56 +156,40 @@ class InvoiceUI(tk.Frame):
         ]
         
         for text, command in nav_buttons:
-            btn = tk.Button(pagination_frame, text=text, command=command,
+            btn = tk.Button(self.pagination_frame, text=text, command=command,
                           bg='#7f8c8d', fg='white', font=('Arial', 9))
             btn.pack(side='left', padx=2)
-    
+
     def create_detail_panel(self):
         """إنشاء لوحة تفاصيل الفاتورة"""
         self.detail_frame = tk.Frame(self, width=350, bg='white',
                                     relief='sunken', borderwidth=2)
         self.detail_frame.pack_propagate(False)
-        
+
     def create_bottom_toolbar(self):
-        """إنشاء شريط الأدوات السفلي"""
-        toolbar = tk.Frame(self, bg='#2c3e50', pady=8)
-        toolbar.pack(fill='x', side='bottom')
+        """إنشاء شريط الأدوات السفلي مع التأكد من عدم التكرار"""
+        # إذا كان موجوداً مسبقاً، نتخلص منه (للحالات النادرة التي تستدعي الدالة مرتين)
+        if hasattr(self, 'bottom_toolbar') and self.bottom_toolbar:
+            self.bottom_toolbar.destroy()
+        
+        self.bottom_toolbar = tk.Frame(self, bg='#2c3e50', pady=8)
 
         actions = [
             ("➕ فاتورة جديدة", self.create_new_invoice, '#27ae60'),
             ("✏️ تعديل الفاتورة", self.edit_invoice, '#3498db'),
-            ("❌ إلغاء الفاتورة", self.cancel_invoice, '#e67e22'),   # جديد
+            ("❌ إلغاء الفاتورة", self.cancel_invoice, '#e67e22'),
             ("🗑️ حذف الفاتورة", self.delete_invoice, '#e74c3c'),
-            ("👁️ عرض الفاتورة", self.view_selected_invoice, '#9b59b6'),      # جديد
+            ("👁️ عرض الفاتورة", self.view_selected_invoice, '#9b59b6'),
             ("🖨️ طباعة الفاتورة", self.print_invoice, '#9b59b6'),
             ("📊 ملخص اليوم", self.show_daily_summary, '#f39c12'),
             ("📈 تقرير الفواتير", self.generate_report, '#16a085')
         ]
 
         for text, command, color in actions:
-            btn = tk.Button(toolbar, text=text, command=command,
+            btn = tk.Button(self.bottom_toolbar, text=text, command=command,
                             bg=color, fg='white', font=('Arial', 10))
             btn.pack(side='left', padx=5)
-            
 
-    def load_customers_for_filter(self):
-        """تحميل قائمة الزبائن للفلترة"""
-        try:
-            customers = self.customer_manager.search_customers()
-            customer_list = ["الكل"]
-            self.customer_filter_dict = {"الكل": None}
-            
-            for customer in customers:
-                display_name = f"{customer['name']} - {customer.get('box_number', '')}"
-                customer_list.append(display_name)
-                self.customer_filter_dict[display_name] = customer['id']
-            
-            self.customer_combo['values'] = customer_list
-            self.customer_combo.current(0)
-            
-        except Exception as e:
-            logger.error(f"خطأ في تحميل الزبائن للفلترة: {e}")
-    
     def load_sectors_for_filter(self):
         """تحميل القطاعات للفلترة"""
         try:
@@ -220,7 +209,7 @@ class InvoiceUI(tk.Frame):
                 
         except Exception as e:
             logger.error(f"خطأ في تحميل القطاعات للفلترة: {e}")
-    
+
     def load_invoices(self):
         """تحميل الفواتير للعرض"""
         try:
@@ -252,10 +241,6 @@ class InvoiceUI(tk.Frame):
                                        invoice.get('accountant_name', '')),
                                tags=(invoice['status'],))
             
-            # تحديث تسمية الصفحة
-            # (لاحظ: نحن بحاجة إلى معرفة العدد الإجمالي، لكن search_invoices لا ترجعها حالياً)
-            # سنضيف منطقاً للحصول على العدد الإجمالي في الخطوة القادمة
-            
             # تلوين الصفوف حسب الحالة
             self.tree.tag_configure('active', background='#e8f5e9')
             self.tree.tag_configure('cancelled', background='#ffebee')
@@ -263,7 +248,7 @@ class InvoiceUI(tk.Frame):
         except Exception as e:
             logger.error(f"خطأ في تحميل الفواتير: {e}")
             messagebox.showerror("خطأ", f"فشل تحميل الفواتير: {str(e)}")
-        
+
     def apply_filters(self):
         """تطبيق الفلاتر"""
         self.search_filters = {}
@@ -278,7 +263,7 @@ class InvoiceUI(tk.Frame):
         if end_date:
             self.search_filters['end_date'] = end_date
 
-        # اسم الزبون (جديد)
+        # اسم الزبون
         customer_name = self.customer_name_entry.get().strip()
         if customer_name:
             self.search_filters['customer_name'] = customer_name
@@ -293,7 +278,7 @@ class InvoiceUI(tk.Frame):
         # إعادة تحميل الفواتير
         self.current_page = 1
         self.load_invoices()
-        
+
     def reset_filters(self):
         """إعادة تعيين الفلاتر"""
         self.start_date_entry.delete(0, 'end')
@@ -302,14 +287,13 @@ class InvoiceUI(tk.Frame):
         self.end_date_entry.delete(0, 'end')
         self.end_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
 
-        self.customer_name_entry.delete(0, 'end')   # تعديل هنا
+        self.customer_name_entry.delete(0, 'end')
 
         self.sector_combo.current(0)
 
         self.search_filters = {}
         self.current_page = 1
         self.load_invoices()
-        
 
     def on_invoice_select(self, event):
         """عند اختيار فاتورة من القائمة"""
@@ -322,7 +306,7 @@ class InvoiceUI(tk.Frame):
         
         # تحميل تفاصيل الفاتورة
         self.show_invoice_details(invoice_id)
-    
+
     def show_invoice_details(self, invoice_id):
         """عرض تفاصيل الفاتورة"""
         try:
@@ -330,13 +314,14 @@ class InvoiceUI(tk.Frame):
             for widget in self.detail_frame.winfo_children():
                 widget.destroy()
             
-            # إظهار اللوحة
-            self.detail_frame.pack(side='right', fill='y', padx=(0, 10), pady=10)
-            
             # جلب بيانات الفاتورة
             invoice = self.invoice_manager.get_invoice(invoice_id)
             if not invoice:
                 return
+            
+            # إظهار اللوحة إذا كانت مخفية
+            if not self.detail_frame.winfo_ismapped():
+                self.detail_frame.grid(row=1, column=1, sticky='ns', padx=(0, 5), pady=5)
             
             # إنشاء محتوى اللوحة
             title = tk.Label(self.detail_frame, text="تفاصيل الفاتورة",
@@ -417,11 +402,11 @@ class InvoiceUI(tk.Frame):
                 
         except Exception as e:
             logger.error(f"خطأ في عرض تفاصيل الفاتورة: {e}")
-    
+
     def create_new_invoice(self):
         """إنشاء فاتورة جديدة"""
         try:
-            require_permission('invoices.create')  # غير هذا السطر
+            require_permission('invoices.create')
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
@@ -432,11 +417,11 @@ class InvoiceUI(tk.Frame):
         if dialog.result:
             self.load_invoices()
             messagebox.showinfo("نجاح", "تم إنشاء الفاتورة بنجاح")
-    
+
     def edit_invoice(self, invoice_id=None):
         """تعديل فاتورة موجودة"""
         try:
-            require_permission('invoices.edit')  # غير هذا السطر
+            require_permission('invoices.edit')
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
@@ -455,11 +440,11 @@ class InvoiceUI(tk.Frame):
         if dialog.result:
             self.load_invoices()
             messagebox.showinfo("نجاح", "تم تعديل الفاتورة بنجاح")
-        
+
     def delete_invoice(self):
         """حذف فاتورة من الواجهة"""
         try:
-            require_permission('invoices.edit')  # يمكن استخدام صلاحية أعلى إن وجدت
+            require_permission('invoices.edit')
         except PermissionError as e:
             messagebox.showerror("صلاحيات", str(e))
             return
@@ -481,14 +466,14 @@ class InvoiceUI(tk.Frame):
             result = self.invoice_manager.delete_invoice(invoice_id, user_id=user_id)
             if result['success']:
                 self.load_invoices()
-                self.detail_frame.pack_forget()
+                # إخفاء لوحة التفاصيل
+                self.detail_frame.grid_remove()
                 messagebox.showinfo("نجاح", result['message'])
             else:
                 messagebox.showerror("خطأ", result['error'])
         except Exception as e:
             logger.error(f"خطأ في حذف الفاتورة: {e}")
             messagebox.showerror("خطأ", f"فشل حذف الفاتورة: {str(e)}")
-            
 
     def print_invoice(self, invoice_id=None):
         """طباعة الفاتورة على الرول بنفس طريقة المعاينة"""
@@ -498,7 +483,6 @@ class InvoiceUI(tk.Frame):
             messagebox.showerror("صلاحيات", str(e))
             return
 
-        # تحديد رقم الفاتورة إذا لم يُمرر
         if not invoice_id:
             selection = self.tree.selection()
             if not selection:
@@ -508,13 +492,11 @@ class InvoiceUI(tk.Frame):
             invoice_id = item['values'][0]
 
         try:
-            # جلب بيانات الفاتورة كاملة
             invoice = self.invoice_manager.get_invoice(invoice_id)
             if not invoice:
                 messagebox.showerror("خطأ", "الفاتورة غير موجودة")
                 return
 
-            # دالة مساعدة لتحويل القيم إلى float بأمان
             def to_float(value, default=0.0):
                 if value is None:
                     return default
@@ -522,20 +504,17 @@ class InvoiceUI(tk.Frame):
                     return float(value)
                 except (ValueError, TypeError):
                     try:
-                        # محاولة تنظيف النص من الفواصل والمسافات
                         cleaned = str(value).replace(',', '').replace(' ', '').strip()
                         return float(cleaned)
                     except:
                         return default
 
-            # دالة لاستخراج قيمة رقمية من عدة أسماء حقول محتملة
             def extract_numeric_value(possible_keys):
                 for key in possible_keys:
                     if key in invoice:
                         val = invoice[key]
                         if val:
                             try:
-                                # تحويل الأرقام العربية إن وجدت
                                 arabic_digits = str(val).translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
                                 cleaned = arabic_digits.replace(',', '').strip()
                                 if cleaned:
@@ -544,7 +523,6 @@ class InvoiceUI(tk.Frame):
                                 pass
                 return 0.0
 
-            # استخراج القيم الخاصة (تأشيرة، سحب، خصم)
             visa_value = extract_numeric_value([
                 'visa_application', 'visa_balance', 'visa_amount', 'visa',
                 'تنزيل تأشيرة', 'التأشيرة', 'تأشيرة', 'الرصيد التأشيري'
@@ -558,7 +536,6 @@ class InvoiceUI(tk.Frame):
             if discount_value == 0:
                 discount_value = extract_numeric_value(['الحسم', 'discount_amount'])
 
-            # تجهيز بيانات الفاتورة للطابعة
             invoice_data_for_printer = {
                 'customer_name': str(invoice.get('customer_name', invoice.get('name', ''))),
                 'sector_name': str(invoice.get('sector_name', invoice.get('sector', ''))),
@@ -579,13 +556,6 @@ class InvoiceUI(tk.Frame):
                 'accountant_name': str(invoice.get('accountant_name', self.user_data.get('name', 'محاسب')))
             }
 
-            # طباعة معلومات للتشخيص (يمكن إزالتها لاحقاً)
-            print("\n=== بيانات الفاتورة المرسلة للطباعة ===")
-            for k, v in invoice_data_for_printer.items():
-                print(f"  {k}: {v} (type: {type(v)})")
-            print("========================================\n")
-
-            # إنشاء كائن الطابعة والطباعة
             printer = FastPrinter()
             if printer.print_fast_invoice(invoice_data_for_printer):
                 messagebox.showinfo("نجاح", "تمت طباعة الفاتورة بنجاح")
@@ -595,8 +565,8 @@ class InvoiceUI(tk.Frame):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            messagebox.showerror("خطأ في الطباعة", f"الاستثناء: {str(e)}") 
-                   
+            messagebox.showerror("خطأ في الطباعة", f"الاستثناء: {str(e)}")
+
     def cancel_invoice(self, invoice_id=None):
         """إلغاء الفاتورة من الواجهة"""
         try:
@@ -627,7 +597,7 @@ class InvoiceUI(tk.Frame):
                 messagebox.showerror("خطأ", result['error'])
         except Exception as e:
             logger.error(f"خطأ في إلغاء الفاتورة: {e}")
-            messagebox.showerror("خطأ", f"فشل إلغاء الفاتورة: {str(e)}")            
+            messagebox.showerror("خطأ", f"فشل إلغاء الفاتورة: {str(e)}")
 
     def show_daily_summary(self):
         """عرض ملخص المبيعات اليومية"""
@@ -650,28 +620,26 @@ class InvoiceUI(tk.Frame):
         except Exception as e:
             logger.error(f"خطأ في عرض الملخص اليومي: {e}")
             messagebox.showerror("خطأ", "فشل تحميل الملخص اليومي")
-    
+
     def generate_report(self):
         """توليد تقرير عن الفواتير"""
         messagebox.showinfo("تقرير الفواتير", "سيتم توليد تقرير الفواتير")
         # سيتم ربط هذا بوحدة التقارير لاحقاً
-    
+
     # دوال التحكم بالصفحات
     def first_page(self):
         self.current_page = 1
         self.load_invoices()
-    
+
     def prev_page(self):
         if self.current_page > 1:
             self.current_page -= 1
             self.load_invoices()
-    
+
     def next_page(self):
-        # هنا نحتاج إلى معرفة العدد الإجمالي للصفحات
-        # سنقوم بتعديل load_invoices لتعيد العدد الإجمالي
         self.current_page += 1
         self.load_invoices()
-    
+
     def last_page(self):
         # هنا نحتاج إلى معرفة العدد الإجمالي للصفحات
         self.current_page = 10  # قيمة افتراضية
@@ -687,19 +655,16 @@ class InvoiceUI(tk.Frame):
         item = self.tree.item(selection[0])
         invoice_id = item['values'][0]
 
-        # جلب بيانات الفاتورة
         invoice = self.invoice_manager.get_invoice(invoice_id)
         if not invoice:
             messagebox.showerror("خطأ", "الفاتورة غير موجودة")
             return
 
-        # فتح نافذة المعاينة (تأكد من استيراد InvoicePreview)
         try:
             from ui.invoice_preview import InvoicePreview
             InvoicePreview(self, invoice, self.user_data)
         except ImportError:
-            messagebox.showerror("خطأ", "وحدة المعاينة غير متوفرة")            
-
+            messagebox.showerror("خطأ", "وحدة المعاينة غير متوفرة")
 
 
 class CreateInvoiceDialog(tk.Toplevel):
@@ -798,7 +763,6 @@ class CreateInvoiceDialog(tk.Toplevel):
         invoice_frame = tk.LabelFrame(parent, text="معلومات الفاتورة", padx=10, pady=10, bg='#f5f7fa')
         invoice_frame.pack(fill='both', expand=True, pady=5, padx=10)
 
-        # تكوين الحقول (كما كانت سابقاً)
         fields_config = [
             ("تاريخ الدفع:", "payment_date", "entry"),
             ("وقت الدفع:", "payment_time", "entry"),
@@ -809,7 +773,7 @@ class CreateInvoiceDialog(tk.Toplevel):
             ("سعر الكيلو:", "price_per_kilo", "entry"),
             ("الخصم:", "discount", "entry"),
             ("المبلغ الإجمالي:", "total_amount", "entry"),
-            ("الرصيد الحالي:", "current_balance", "entry"),   # ← هذا السطر الجديد
+            ("الرصيد الحالي:", "current_balance", "entry"),
             ("تنزيل تأشيرة:", "visa_application", "entry"),
             ("سحب المشترك:", "customer_withdrawal", "entry"),
             ("رقم الدفتر:", "book_number", "entry"),
@@ -837,8 +801,6 @@ class CreateInvoiceDialog(tk.Toplevel):
         self.fields['payment_time'].insert(0, datetime.now().strftime("%H:%M"))
         self.fields['price_per_kilo'].insert(0, "7200")
     
-    # باقي الدوال (load_customers, load_sectors, on_customer_select, save, cancel) كما هي دون تغيير
-    # ...    
     def load_customers(self):
         """تحميل قائمة الزبائن"""
         try:
@@ -926,7 +888,7 @@ class CreateInvoiceDialog(tk.Toplevel):
                 # تحويل القيم الرقمية
                 if field_name in ['previous_reading', 'new_reading', 'kilowatt_amount',
                                 'free_kilowatt', 'price_per_kilo', 'discount', 'total_amount',
-                                'current_balance']:  # أضفنا current_balance للحقول الرقمية
+                                'current_balance']:
                     try:
                         value = float(value) if value else 0.0
                     except ValueError:
@@ -956,10 +918,8 @@ class CreateInvoiceDialog(tk.Toplevel):
             
             # تحديد الرصيد الحالي: إما من الإدخال اليدوي أو محسوب
             if 'current_balance' in invoice_data and invoice_data['current_balance']:
-                # استخدم القيمة المدخلة يدوياً (مع التأكد من أنها رقمية)
                 final_balance = float(invoice_data['current_balance'])
             else:
-                # احسبها من رصيد الزبون + مبلغ الفاتورة
                 customer_balance = customer.get('current_balance', 0)
                 invoice_amount = invoice_data.get('total_amount', 0)
                 final_balance = customer_balance + invoice_amount
@@ -1029,9 +989,6 @@ class EditInvoiceDialog(CreateInvoiceDialog):
             logger.error(f"خطأ في تحميل بيانات الفاتورة: {e}")
             messagebox.showerror("خطأ", "فشل تحميل بيانات الفاتورة")
 
-
-
-    
     def save(self):
         """حفظ التعديلات"""
         try:
@@ -1067,7 +1024,7 @@ class EditInvoiceDialog(CreateInvoiceDialog):
             
             if result['success']:
                 self.result = True
-                self.destroy()
+                self.destroy()   
             else:
                 messagebox.showerror("خطأ", result['error'])
                 

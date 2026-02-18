@@ -58,34 +58,24 @@ class CustomerUI(tk.Frame):
         self.create_statusbar()
 
     def create_toolbar(self):
-        """شريط أدوات علوي بجميع الأزرار مع شريط تمرير أفقي موثوق"""
-        toolbar = tk.Frame(self, bg='#1a252f', height=100)
+        """شريط أدوات علوي بصفين من الأزرار متساوية الحجم والتباعد"""
+        toolbar = tk.Frame(self, bg='#1a252f', height=140)
         toolbar.pack(fill='x', padx=0, pady=0)
         toolbar.pack_propagate(False)
 
+        # عنوان الشريط (يُبقي على اليمين)
         title_label = tk.Label(toolbar,
-                               text="📋 إدارة حسابات الزبائن",
-                               font=('Arial', 18, 'bold'),
-                               bg='#1a252f', fg='#ecf0f1')
-        title_label.pack(side='right', padx=25, pady=30)
+                            text="📋 إدارة حسابات الزبائن",
+                            font=('Arial', 18, 'bold'),
+                            bg='#1a252f', fg='#ecf0f1')
+        title_label.pack(side='right', padx=25, pady=(15, 5))
 
-        # إطار الأزرار القابل للتمرير
-        toolbar_container = tk.Frame(toolbar, bg='#1a252f')
-        toolbar_container.pack(side='left', fill='both', expand=True, padx=10)
+        # حاوية الأزرار (تملأ المساحة المتبقية)
+        buttons_container = tk.Frame(toolbar, bg='#1a252f')
+        buttons_container.pack(side='left', fill='both', expand=True, padx=10, pady=(5, 10))
 
-        # إنشاء Canvas مع شريط تمرير أفقي
-        canvas = tk.Canvas(toolbar_container, bg='#1a252f', highlightthickness=0, height=90)
-        scrollbar = ttk.Scrollbar(toolbar_container, orient='horizontal', command=canvas.xview)
-        canvas.configure(xscrollcommand=scrollbar.set)
-        canvas.pack(side='top', fill='both', expand=True, pady=5)
-        scrollbar.pack(side='bottom', fill='x')
-
-        # إطار داخلي للأزرار
-        buttons_frame = tk.Frame(canvas, bg='#1a252f')
-        canvas_window = canvas.create_window((0, 0), window=buttons_frame, anchor='nw')
-
-        # قائمة الأزرار مع الصلاحيات (جميع الأزرار من الكود الأصلي)
-        buttons = [
+        # قائمة الأزرار بنفس ترتيبك الأصلي
+        all_buttons = [
             ("➕ إضافة", self.add_customer, "#27ae60", 'customers.add'),
             ("✏️ تعديل", self.edit_customer, "#3498db", 'customers.edit'),
             ("🗑️ حذف", self.delete_customer, "#e74c3c", 'customers.delete'),
@@ -100,34 +90,46 @@ class CustomerUI(tk.Frame):
             ("📊 لنا/علينا", self.show_balance_stats, "#34495e", 'customers.view')
         ]
 
-        for text, command, color, permission in buttons:
-            if has_permission(permission):
-                btn = tk.Button(buttons_frame, text=text, command=command,
-                                bg=color, fg='white',
-                                font=('Arial', 11, 'bold'),
-                                padx=15, pady=8, cursor='hand2',
-                                relief='flat', activebackground='#ecf0f1')
-                btn.pack(side='left', padx=5)
-            else:
-                btn = tk.Button(buttons_frame, text=text,
-                                state='disabled',
-                                bg='#95a5a6', fg='white',
-                                font=('Arial', 11, 'bold'),
-                                padx=15, pady=8)
-                btn.pack(side='left', padx=5)
+        # تقسيم الأزرار إلى صفين
+        row1_buttons = all_buttons[:6]
+        row2_buttons = all_buttons[6:]
 
-        # تحديث منطقة التمرير بعد إضافة الأزرار
-        def update_scrollregion(event=None):
-            canvas.update_idletasks()
-            canvas.configure(scrollregion=canvas.bbox("all"))
-            canvas.itemconfig(canvas_window, width=canvas.winfo_width())
+        # عرض ثابت لجميع الأزرار (يمكنك تعديل الرقم حسب رغبتك)
+        BTN_WIDTH = 14  # بوحدة عدد الأحرف
 
-        buttons_frame.bind("<Configure>", update_scrollregion)
-        canvas.bind("<Configure>", update_scrollregion)
+        def create_row(parent, buttons):
+            """إنشاء صف من الأزرار متساوية العرض والتباعد"""
+            row_frame = tk.Frame(parent, bg='#1a252f')
+            row_frame.pack(fill='x', pady=5)
 
-        # تأخير بسيط لضمان التحديث بعد اكتمال التخطيط
-        self.after(100, update_scrollregion)
+            # استخدام grid لجعل الأعمدة متساوية العرض
+            for col, (text, command, color, permission) in enumerate(buttons):
+                # جعل جميع الأعمدة تأخذ وزناً متساوياً
+                row_frame.columnconfigure(col, weight=1, uniform='btn_group')
 
+                if has_permission(permission):
+                    btn = tk.Button(row_frame, text=text, command=command,
+                                    bg=color, fg='white',
+                                    font=('Arial', 11, 'bold'),
+                                    width=BTN_WIDTH,
+                                    cursor='hand2',
+                                    relief='flat', activebackground='#ecf0f1')
+                else:
+                    btn = tk.Button(row_frame, text=text,
+                                    state='disabled',
+                                    bg='#95a5a6', fg='white',
+                                    font=('Arial', 11, 'bold'),
+                                    width=BTN_WIDTH,
+                                    relief='flat')
+
+                # وضع الزر في العمود مع توسيط أفقي وتباعد بسيط
+                btn.grid(row=0, column=col, padx=4, pady=2, sticky='ew')
+
+        # إنشاء الصفين
+        create_row(buttons_container, row1_buttons)
+        create_row(buttons_container, row2_buttons)
+        
+                
     def create_search_bar(self):
         """شريط البحث والتصفية (محسّن)"""
         search_frame = tk.Frame(self, bg='#f8f9fa', pady=15, padx=15, relief='flat')

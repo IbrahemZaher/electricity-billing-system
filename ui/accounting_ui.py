@@ -363,6 +363,7 @@ class AccountingUI(tk.Frame):
             if not customer_data:
                 messagebox.showwarning("تحذير", "لم يتم العثور على بيانات الزبون")
                 return
+            self.last_invoice_result = None   # فاتورة سابقة لم تعد صالحة لهذا الزبون    
             self.selected_customer = customer_data
             self.info_vars['name'].set(customer_data.get('name', '---'))
             self.info_vars['sector'].set(customer_data.get('sector_name', '---'))
@@ -552,6 +553,7 @@ class AccountingUI(tk.Frame):
             
             result = self.fast_ops.fast_process_invoice(
                 customer_id=self.selected_customer['id'],
+                
                 kilowatt_amount=kilowatt_amount,
                 free_kilowatt=free_kilowatt,
                 price_per_kilo=price_per_kilo,
@@ -559,7 +561,10 @@ class AccountingUI(tk.Frame):
                 user_id=self.user_data.get('id', 1),
                 customer_withdrawal=self.selected_customer.get('withdrawal_amount', 0),   
             )
-            
+            # ✅ تأكد من وجود customer_id في النتيجة (أضف هذا السطر)
+            if 'customer_id' not in result:
+                result['customer_id'] = self.selected_customer['id']            
+            self.last_invoice_result = result
             if result.get('success'):
                 result_text = f"""
 ✅ تمت المعالجة بنجاح!
@@ -602,11 +607,16 @@ class AccountingUI(tk.Frame):
         """الواجهة الجديدة للمعالجة: تعرض نافذة التأكيد بدلاً من messagebox"""
         self.show_custom_confirm_dialog()
     
-    # ----- بقية الدوال كما هي (print_invoice, show_result_message, clear_input_fields, clear_fields) -----
+        # ----- بقية الدوال كما هي (print_invoice, show_result_message, clear_input_fields, clear_fields) -----
     def print_invoice(self):
         if not hasattr(self, 'last_invoice_result') or not self.last_invoice_result:
             messagebox.showwarning("تحذير", "لا توجد فاتورة حديثة للطباعة")
             return
+        
+        if self.last_invoice_result.get('customer_id') != self.selected_customer.get('id'):
+            messagebox.showwarning("تحذير", "الفاتورة السابقة لا تخص هذا الزبون، قم بمعالجة فاتورة جديدة أولاً")
+            return
+        
         try:
             invoice_data = {
                 'customer_name': self.selected_customer.get('name', ''),
@@ -626,15 +636,24 @@ class AccountingUI(tk.Frame):
                 'withdrawal_amount': self.selected_customer.get('withdrawal_amount', 0),
                 'visa_application': self.selected_customer.get('visa_balance', 0)
             }
+            
             if self.printer.print_fast_invoice(invoice_data):
                 self.show_result_message("🖨️ تمت الطباعة بنجاح!")
                 messagebox.showinfo("نجاح", "تمت طباعة الفاتورة بنجاح")
             else:
                 self.show_result_message("❌ فشل الطباعة. تحقق من اتصال الطابعة.")
                 messagebox.showerror("خطأ", "فشل الطباعة. تحقق من اتصال الطابعة.")
+        except SystemExit:
+            # منع إنهاء البرنامج إذا حاولت مكتبة الطباعة استدعاء exit()
+            logger.error("محاولة إنهاء البرنامج أثناء الطباعة - تم منعها")
+            messagebox.showerror("خطأ", "حدثت محاولة إنهاء البرنامج بسبب مشكلة في الطابعة. تم منع الإنهاء.")
+            self.show_result_message("❌ فشل الطباعة (محاولة إنهاء البرنامج)")
         except Exception as e:
-            logger.error(f"خطأ في الطباعة: {e}")
+            logger.error(f"خطأ في الطباعة: {e}", exc_info=True)
             messagebox.showerror("خطأ", f"فشل الطباعة: {str(e)}")
+            self.show_result_message(f"❌ خطأ في الطباعة: {str(e)}")
+
+
     
     def show_result_message(self, message):
         self.result_text.config(state='normal')
@@ -667,3 +686,4 @@ class AccountingUI(tk.Frame):
         self.process_btn.config(state='disabled', bg='#D4A5A5')
         self.print_btn.config(state='disabled', bg='#D4A5A5')
         self.search_entry.focus_set()
+        self.last_invoice_result = None
