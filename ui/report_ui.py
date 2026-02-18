@@ -29,6 +29,15 @@ class ReportUI(tk.Frame):
             self.report_manager = None
             self.report_loaded = False
             return
+
+        self.btn_colors = {
+            'generate': '#27ae60',  # أخضر للتوليد
+            'export': '#2980b9',    # أزرق للتصدير
+            'print': '#8e44ad',     # بنفسجي للطباعة
+            'filter': '#f39c12',    # برتقالي للفلترة
+            'normal': '#3498db',    # أزرق فاتح للأزرار العادية
+            'bg_light': '#f8f9fa'
+        }
         
         self.current_report = None
         self.current_report_type = None
@@ -70,6 +79,37 @@ class ReportUI(tk.Frame):
                     'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
         return DummyReportManager()
+
+
+    def create_styled_button(self, parent, text, command, color_type='normal', width=None):
+        """إنشاء زر بحجم كبير وألوان جذابة"""
+        color = self.btn_colors.get(color_type, '#7f8c8d')
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=color,
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            padx=15,
+            pady=8,
+            cursor='hand2',
+            relief='flat',
+            activebackground='#34495e',
+            activeforeground='white',
+            width=width
+        )
+        # تأثير hover
+        def on_enter(e): btn.config(bg=self.lighten_color(color))
+        def on_leave(e): btn.config(bg=color)
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
+
+    def lighten_color(self, hex_color):
+        """تفتيح طفيف للون (يمكنك تطويرها لاحقاً)"""
+        # للتبسيط، نعيد نفس اللون أو نغير إلى لون أغمق قليلاً
+        return '#34495e'  # لون داكن ثابت                
     
     def create_widgets(self):
         if not self.report_loaded:
@@ -118,12 +158,9 @@ class ReportUI(tk.Frame):
         ]
         
         for report_name, command in reports:
-            btn = tk.Button(left_frame, text=report_name, command=command,
-                          width=25, anchor='w', justify='left',
-                          bg='#ecf0f1', fg='#2c3e50',
-                          font=('Arial', 10))
-            btn.pack(fill='x', pady=2)
-        
+            btn = self.create_styled_button(left_frame, report_name, command, color_type='normal')
+            btn.config(anchor='w', justify='left')  # للحفاظ على المحاذاة لليسار
+            btn.pack(fill='x', pady=2)        
         # قسم عرض التقرير (يمين)
         right_frame = tk.Frame(main_frame)
         right_frame.pack(side='right', fill='both', expand=True)
@@ -131,20 +168,14 @@ class ReportUI(tk.Frame):
         # إضافة أزرار التحكم
         control_frame = tk.Frame(right_frame)
         control_frame.pack(fill='x', pady=(0, 10))
-        
-        self.export_excel_btn = tk.Button(control_frame, text="📥 تصدير Excel", 
-                                         command=self.export_current_to_excel,
-                                         bg='#f39c12', fg='white',
-                                         font=('Arial', 10),
-                                         state='disabled')
+                
+        self.export_excel_btn = self.create_styled_button(control_frame, "📥 تصدير Excel", 
+                                                        self.export_current_to_excel, 'export')
         self.export_excel_btn.pack(side='left', padx=5)
-        
-        self.filter_btn = tk.Button(control_frame, text="🔍 فلترة متقدمة", 
-                                   command=self.show_advanced_filter,
-                                   bg='#3498db', fg='white',
-                                   font=('Arial', 10))
-        self.filter_btn.pack(side='left', padx=5)
-        
+
+        self.filter_btn = self.create_styled_button(control_frame, "🔍 فلترة متقدمة", 
+                                                    self.show_advanced_filter, 'filter')
+        self.filter_btn.pack(side='left', padx=5)        
         # إنشاء Notebook (تبويبات)
         self.notebook = ttk.Notebook(right_frame)
         self.notebook.pack(fill='both', expand=True)

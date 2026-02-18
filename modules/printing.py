@@ -112,6 +112,7 @@ class FastPrinter:
                 'visa_application': invoice_data.get('visa_application', ''),
                 'withdrawal_amount': invoice_data.get('withdrawal_amount', 0),  # القيمة المضافة (السحب)
                 'accountant_name': invoice_data.get('accountant_name', 'محاسب'),
+                'landline': invoice_data.get('landline', '5310344'),
             }
             
             now = datetime.now()
@@ -344,8 +345,17 @@ class FastPrinter:
             w_phone = draw.textlength(phone_txt, font=font_small)
             draw.text(((PAPER_WIDTH - w_phone) / 2, y), phone_txt,
                     font=font_small, fill="black")
-            y += 40
+            y += 30  # نزود مسافة بسيطة بعد رقم الهاتف
 
+            # إضافة الرقم الأرضي (بدون أي إضافات نصية زائدة)
+            landline = data.get('landline', '5310344')
+            landline_txt = ar(f"[أرضي: {landline}]")
+            w_landline = draw.textlength(landline_txt, font=font_small)
+            draw.text(((PAPER_WIDTH - w_landline) / 2, y), landline_txt,
+                    font=font_small, fill="black")
+
+            y += 40  # زيادة المسافة بعد الرقم الأرضي لاستيعاب السطرين (يمكن تعديلها)            
+            
             # قص الصورة وإرسالها
             final_img = img.crop((0, 0, PAPER_WIDTH, y))
             self.printer.image(final_img.convert("1"))

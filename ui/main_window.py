@@ -664,22 +664,42 @@ class MainWindow:
         back_btn.pack(pady=20)
     
     def show_customers_ui(self):
-        """عرض واجهة الزبائن"""
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-    
+        """فتح نافذة الزبائن المنبثقة بملء الشاشة"""
+        if not has_permission('customers.view'):
+            messagebox.showerror("صلاحيات", "ليس لديك صلاحية عرض الزبائن")
+            return
+
+        customers_window = tk.Toplevel(self.root)
+        customers_window.title("إدارة الزبائن - النظام الهرمي")
+        customers_window.state('zoomed')
+        # customers_window.attributes('-fullscreen', True)  # اختياري
+
+        customers_window.transient(self.root)
+        customers_window.grab_set()
+
         try:
             from ui.customer_ui import CustomerUI
-            customer_ui = CustomerUI(self.content_frame, self.user_data)
+            customer_ui = CustomerUI(customers_window, self.user_data)
+            # ❗ يجب إضافة السطر التالي لعرض الإطار داخل النافذة
             customer_ui.pack(fill='both', expand=True)
-        
-            logger.info("تم تحميل واجهة الزبائن بنجاح")
-        
+
+            customers_window.protocol("WM_DELETE_WINDOW", lambda: self.close_customers_window(customers_window))
+            logger.info("تم فتح نافذة الزبائن المنبثقة بنجاح")
         except ImportError as e:
             logger.error(f"خطأ في تحميل واجهة الزبائن: {e}")
-            # عرض واجهة بديلة
-            self.show_simple_customers_ui()
-    
+            messagebox.showerror("خطأ", "تعذر تحميل واجهة الزبائن")
+            customers_window.destroy()
+        except Exception as e:
+            logger.error(f"خطأ غير متوقع: {e}")
+            messagebox.showerror("خطأ", f"حدث خطأ: {str(e)}")
+            customers_window.destroy()
+
+            
+    def close_customers_window(self, window):
+        """إغلاق نافذة الزبائن وتحرير الموارد"""
+        window.grab_release()
+        window.destroy()          
+
     def show_invoices_ui(self):
         """عرض واجهة الفواتير"""
         for widget in self.content_frame.winfo_children():

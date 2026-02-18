@@ -31,36 +31,78 @@ class FinancialCategoryUI:
             messagebox.showerror("خطأ", "لا يمكن تحميل وحدة الزبائن")
     
     def create_dialog(self):
-        """إنشاء النافذة المنبثقة"""
+        """إنشاء النافذة المنبثقة مع شريط تمرير عام"""
         self.dialog = tk.Toplevel(self.parent)
         self.dialog.title(f"التصنيف المالي - {self.customer_data['name']}")
-        self.dialog.geometry("600x750")
-        self.dialog.resizable(False, False)
+        self.dialog.geometry("700x800")  # حجم أولي مناسب
+        self.dialog.resizable(True, True)  # السماح بتغيير الحجم
         self.dialog.configure(bg='#f5f7fa')
         
-        # مركزية النافذة
+        # إنشاء Canvas رئيسي مع شريط تمرير عمودي
+        self.main_canvas = tk.Canvas(self.dialog, bg='#f5f7fa', highlightthickness=0)
+        self.main_scrollbar = ttk.Scrollbar(self.dialog, orient='vertical', command=self.main_canvas.yview)
+        self.main_canvas.configure(yscrollcommand=self.main_scrollbar.set)
+        
+        # إطار داخلي يحتوي على كل المحتوى
+        self.main_frame = tk.Frame(self.main_canvas, bg='#f5f7fa')
+        self.main_canvas.create_window((0, 0), window=self.main_frame, anchor='nw', width=self.main_canvas.winfo_width())
+        
+        # ترتيب Canvas و Scrollbar
+        self.main_canvas.pack(side='left', fill='both', expand=True)
+        self.main_scrollbar.pack(side='right', fill='y')
+        
+        # تحديث منطقة التمرير عند تغيير حجم الإطار الداخلي
+        self.main_frame.bind('<Configure>', self._on_frame_configure)
+        self.main_canvas.bind('<Configure>', self._on_canvas_configure)
+        
+        # ربط عجلة الفأرة بالتمرير
+        self._bind_mousewheel()
+        
+        # مركزية النافذة بعد إنشائها
         self.dialog.update_idletasks()
         width = self.dialog.winfo_width()
         height = self.dialog.winfo_height()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'600x750+{x}+{y}')
-    
+        self.dialog.geometry(f'+{x}+{y}')
+
+    def _on_frame_configure(self, event):
+        """تحديث منطقة التمرير عند تغيير حجم الإطار الداخلي"""
+        self.main_canvas.configure(scrollregion=self.main_canvas.bbox('all'))
+
+    def _on_canvas_configure(self, event):
+        """ضبط عرض الإطار الداخلي ليتناسب مع عرض Canvas"""
+        self.main_canvas.itemconfig(1, width=event.width)  # 1 هو معرف النافذة الداخلية
+
+    def _bind_mousewheel(self):
+        """ربط عجلة الفأرة بالتمرير"""
+        def _on_mousewheel(event):
+            self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        self.dialog.bind_all("<MouseWheel>", _on_mousewheel)
+        # إلغاء الربط عند إغلاق النافذة لتجنب التأثير على النوافذ الأخرى
+        self.dialog.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        """معالج إغلاق النافذة - إلغاء ربط عجلة الفأرة"""
+        self.dialog.unbind_all("<MouseWheel>")
+        self.dialog.destroy()
+
     def create_widgets(self):
-        """إنشاء عناصر الواجهة"""
+        """إنشاء عناصر الواجهة داخل main_frame"""
         # إطار العنوان
-        title_frame = tk.Frame(self.dialog, bg='#9b59b6', height=70)
+        title_frame = tk.Frame(self.main_frame, bg='#9b59b6', height=70)
         title_frame.pack(fill='x')
         title_frame.pack_propagate(False)
         
         title_label = tk.Label(title_frame, 
-                              text=f"📊 التصنيف المالي - {self.customer_data['name']}",
-                              font=('Arial', 16, 'bold'),
-                              bg='#9b59b6', fg='white')
+                            text=f"📊 التصنيف المالي - {self.customer_data['name']}",
+                            font=('Arial', 16, 'bold'),
+                            bg='#9b59b6', fg='white')
         title_label.pack(expand=True)
         
         # إطار المعلومات الأساسية
-        info_frame = tk.Frame(self.dialog, bg='#e8f4fc', relief='ridge', borderwidth=1)
+        info_frame = tk.Frame(self.main_frame, bg='#e8f4fc', relief='ridge', borderwidth=1)
         info_frame.pack(fill='x', padx=20, pady=10)
         
         info_text = f"""
@@ -69,13 +111,13 @@ class FinancialCategoryUI:
         """
         
         info_label = tk.Label(info_frame, text=info_text,
-                             font=('Arial', 11),
-                             bg='#e8f4fc', fg='#2c3e50',
-                             justify='left')
+                            font=('Arial', 11),
+                            bg='#e8f4fc', fg='#2c3e50',
+                            justify='left')
         info_label.pack(padx=10, pady=10)
         
         # إنشاء دفتر التبويبات
-        notebook = ttk.Notebook(self.dialog)
+        notebook = ttk.Notebook(self.main_frame)
         notebook.pack(fill='both', expand=True, padx=10, pady=10)
         
         # تبويب التصنيف الحالي
@@ -93,9 +135,10 @@ class FinancialCategoryUI:
         self.create_history_tab(history_tab)
         notebook.add(history_tab, text='سجل التغييرات')
         
-        # أزرار التحكم
+        # أزرار التحكم (الآن داخل main_frame)
         self.create_buttons()
-    
+        
+            
     def create_current_category_tab(self, parent):
         """إنشاء تبويب التصنيف الحالي"""
         canvas = tk.Canvas(parent, bg='white', highlightthickness=0)
