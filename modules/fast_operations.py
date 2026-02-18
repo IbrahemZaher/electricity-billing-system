@@ -195,6 +195,7 @@ class FastOperations:
                     VALUES (%s, 'fast_invoice', %s)
                 """, (user_id, f"فاتورة سريعة #{invoice_number} للزبون {customer['name']}"))
 
+                # في نهاية الدالة fast_process_invoice
                 return {
                     "success": True,
                     "invoice_id": invoice_id,
@@ -206,10 +207,11 @@ class FastOperations:
                     "free_kilowatt": free_kilowatt,
                     "total_amount": total_amount,
                     "new_balance": new_balance,
-                    "withdrawal_amount": kwargs.get('customer_withdrawal', 0),   # <-- إضافة هذا السطر
+                    "withdrawal_amount": kwargs.get('customer_withdrawal', 0),
+                    "price_per_kilo": price_per_kilo,          # <-- إضافة
+                    "discount": discount,                      # <-- إضافة
                     "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
-
         except Exception as e:
             logger.error(f"خطأ في المعالجة السريعة: {e}")
             return {"success": False, "error": str(e)}

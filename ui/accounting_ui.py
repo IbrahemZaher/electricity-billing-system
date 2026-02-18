@@ -555,7 +555,7 @@ class AccountingUI(tk.Frame):
                 'kilowatt_amount': self.last_invoice_result.get('kilowatt_amount', 0),
                 'free_kilowatt': self.last_invoice_result.get('free_kilowatt', 0),
                 'consumption': self.last_invoice_result.get('kilowatt_amount', 0) + self.last_invoice_result.get('free_kilowatt', 0),
-                'price_per_kilo': 7200,
+                'price_per_kilo': self.last_invoice_result.get('price_per_kilo', 7200),   # من النتيجة
                 'total_amount': self.last_invoice_result.get('total_amount', 0),
                 'new_balance': self.last_invoice_result.get('new_balance', 0),
                 'invoice_number': self.last_invoice_result.get('invoice_number', ''),
