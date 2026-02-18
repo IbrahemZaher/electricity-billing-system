@@ -350,6 +350,7 @@ class FastPrinter:
             final_img = img.crop((0, 0, PAPER_WIDTH, y))
             self.printer.image(final_img.convert("1"))
             self.printer.cut()
+            self.printer.close()          # <-- إغلاق الاتصال
             return True
 
         except Exception as e:

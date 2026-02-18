@@ -108,6 +108,7 @@ class FastOperations:
                         c.current_balance,
                         c.last_counter_reading,
                         c.sector_id,
+                        c.visa_balance,          
                         c.name,
                         s.name as sector_name
                     FROM customers c
@@ -161,7 +162,7 @@ class FastOperations:
                     float(kilowatt_amount), float(free_kilowatt), float(price_per_kilo),
                     float(discount), float(total_amount),
                     float(previous_reading), float(new_reading),
-                    kwargs.get('visa_application', ''),
+                    customer['visa_balance'],            # <-- القيمة من الزبون
                     kwargs.get('customer_withdrawal', ''),
                     float(new_balance)
                 ))
@@ -210,6 +211,7 @@ class FastOperations:
                     "withdrawal_amount": kwargs.get('customer_withdrawal', 0),
                     "price_per_kilo": price_per_kilo,          # <-- إضافة
                     "discount": discount,                      # <-- إضافة
+                    "visa_application": customer['visa_balance'],   # <-- إضافة
                     "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
         except Exception as e:
