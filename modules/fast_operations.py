@@ -61,21 +61,24 @@ class FastOperations:
         except Exception as e:
             logger.error(f"خطأ في البحث السريع: {e}")
             return []
-    
+        
     @staticmethod
     def fast_get_customer_details(customer_id: int) -> Dict:
-        """جلب بيانات زبون سريعاً"""
+        """جلب بيانات زبون سريعاً مع التصنيف المالي"""
         try:
             with db.get_cursor() as cursor:
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         c.*, s.name as sector_name,
                         s.code as sector_code,
+                        c.financial_category,
+                        c.free_reason, c.free_amount, c.free_remaining, c.free_expiry_date,
+                        c.vip_reason, c.vip_no_cut_days, c.vip_expiry_date, c.vip_grace_period,
                         (
-                            SELECT invoice_number 
-                            FROM invoices 
-                            WHERE customer_id = c.id 
-                            ORDER BY payment_date DESC, payment_time DESC 
+                            SELECT invoice_number
+                            FROM invoices
+                            WHERE customer_id = c.id
+                            ORDER BY payment_date DESC, payment_time DESC
                             LIMIT 1
                         ) as last_invoice
                     FROM customers c
@@ -89,7 +92,8 @@ class FastOperations:
         except Exception as e:
             logger.error(f"خطأ في جلب بيانات الزبون: {e}")
             return {}
-                
+            
+                            
     @staticmethod
     def fast_process_invoice(customer_id: int, **kwargs):
         """معالجة فاتورة سريعة مع تسجيل في customer_history"""

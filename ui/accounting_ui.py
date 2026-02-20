@@ -1,5 +1,7 @@
 # ui/accounting_ui.py - واجهة محاسبة متكاملة بتصميم ناعم وواضح جداً (تحديث الوضوح)
 # تم التحديث: تحسين التباين، تكبير الخطوط، إضافة نافذة تأكيد مخصصة، مع الحفاظ على جميع الوظائف.
+# إضافة التصنيف المالي (عادي، مجاني، VIP، مجاني+VIP) مع أيقونة ملونة و tooltip.
+# التعديلات التشخيصية: إضافة نقاط تتبع (print) وتعديلات في التنسيق للتأكد من ظهور التصنيف المالي.
 
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
@@ -57,9 +59,9 @@ class AccountingUI(tk.Frame):
         except Exception as e:
             logger.error(f"خطأ في تحميل القطاعات: {e}")
             self.sectors = []
-    
+                
     def create_widgets(self):
-        """إنشاء واجهة محاسبة واضحة جداً مع الاحتفاظ بجميع العناصر"""
+        """إنشاء واجهة محاسبة واضحة جداً مع الاحتفاظ بجميع العناصر (نسخة معدلة)"""
         # إزالة أي عناصر سابقة
         for widget in self.winfo_children():
             widget.destroy()
@@ -85,9 +87,9 @@ class AccountingUI(tk.Frame):
         title_frame.pack(side='left', padx=10)
         
         tk.Label(title_frame, text="مولدة الريان الذكية", font=('Segoe UI', 24, 'bold'),
-                 bg=self.colors['primary'], fg='white').pack(anchor='w')
+                bg=self.colors['primary'], fg='white').pack(anchor='w')
         tk.Label(title_frame, text="نظام الإدارة المالية المتكامل", font=('Segoe UI', 11),
-                 bg=self.colors['primary'], fg='#F0F0F0').pack(anchor='w')
+                bg=self.colors['primary'], fg='#F0F0F0').pack(anchor='w')
         
         # معلومات المستخدم
         user_frame = tk.Frame(self.header, bg=self.colors['primary'])
@@ -95,9 +97,9 @@ class AccountingUI(tk.Frame):
         user_role = self.user_data.get('role', '')
         user_name = self.user_data.get('full_name', '')
         tk.Label(user_frame, text=f"👤 {user_name}", 
-                 font=('Segoe UI', 12, 'bold'), bg=self.colors['primary'], fg='white').pack(anchor='e')
+                font=('Segoe UI', 12, 'bold'), bg=self.colors['primary'], fg='white').pack(anchor='e')
         tk.Label(user_frame, text=f"الدور: {user_role}", 
-                 font=('Segoe UI', 10), bg=self.colors['primary'], fg='#F0F0F0').pack(anchor='e')
+                font=('Segoe UI', 10), bg=self.colors['primary'], fg='#F0F0F0').pack(anchor='e')
         
         # ========== منطقة العمل الرئيسية ==========
         self.work_area = tk.Frame(self.main_container, bg=self.colors['bg_main'])
@@ -109,45 +111,96 @@ class AccountingUI(tk.Frame):
         
         # 1. بطاقة البحث (بارزة جداً)
         search_card = tk.Frame(left_column, bg=self.colors['card_bg'], 
-                               highlightbackground=self.colors['border_strong'], 
-                               highlightthickness=2)
+                            highlightbackground=self.colors['border_strong'], 
+                            highlightthickness=2)
         search_card.pack(fill='x', pady=(0, 20))
         
         tk.Label(search_card, text="🔍 ابحث عن المشترك (الاسم أو رقم العلبة):", 
-                 font=('Segoe UI', 15, 'bold'),
-                 bg=self.colors['card_bg'], fg=self.colors['text_dark']).pack(anchor='e', padx=15, pady=(10, 5))
+                font=('Segoe UI', 15, 'bold'),
+                bg=self.colors['card_bg'], fg=self.colors['text_dark']).pack(anchor='e', padx=15, pady=(10, 5))
         
         self.search_var = tk.StringVar()
         self.search_entry = tk.Entry(search_card, textvariable=self.search_var,
-                                     font=('Segoe UI', 18), bg='#FFFFFF', fg='#000000',
-                                     relief='flat', insertbackground=self.colors['primary'])
+                                    font=('Segoe UI', 18), bg='#FFFFFF', fg='#000000',
+                                    relief='flat', insertbackground=self.colors['primary'])
         self.search_entry.pack(fill='x', padx=15, pady=(0, 15), ipady=8)
         self.search_entry.bind('<KeyRelease>', self.quick_search)
         self.search_entry.focus_set()
         
         # قائمة النتائج (بحجم خط أكبر)
         self.results_listbox = tk.Listbox(left_column, font=('Segoe UI', 14),
-                                           bg='white', fg=self.colors['text_dark'],
-                                           selectbackground=self.colors['secondary'],
-                                           selectforeground='white', height=5)
+                                        bg='white', fg=self.colors['text_dark'],
+                                        selectbackground=self.colors['secondary'],
+                                        selectforeground='white', height=5)
         self.results_listbox.pack(fill='x', pady=(0, 20))
         self.results_listbox.bind('<<ListboxSelect>>', self.on_search_select)
         
-        # 2. بطاقة معلومات المشترك (تصميم جديد واضح بجميع الحقول)
+        # 2. بطاقة معلومات المشترك
         self.info_card = tk.Frame(left_column, bg=self.colors['card_bg'], 
-                                   highlightbackground='#E0E0E0', highlightthickness=1)
+                                highlightbackground='#E0E0E0', highlightthickness=1)
         self.info_card.pack(fill='both', expand=True)
-        
+
         # عنوان البطاقة
         tk.Label(self.info_card, text="📋 ملف المشترك المختار", 
-                 font=('Segoe UI', 15, 'bold'),
-                 bg=self.colors['primary'], fg='white').pack(fill='x', ipady=5)
-        
-        # إطار داخلي للمعلومات (خلفية بيضاء)
-        info_inner = tk.Frame(self.info_card, bg='white', padx=20, pady=15)
-        info_inner.pack(fill='both', expand=True)
-        
-        # تقسيم الحقول إلى عمودين (كما في الأصل، 8 حقول)
+                font=('Segoe UI', 15, 'bold'),
+                bg=self.colors['primary'], fg='white').pack(fill='x', ipady=5)
+
+        # ---------- شريط التصنيف المالي (سيتم حزمه لاحقاً عند الحاجة) ----------
+        self.category_frame = tk.Frame(self.info_card, bg=self.colors['card_bg'], height=34)
+        # لا نقوم بحزمه هنا - سيتم حزمه في toggle_category_and_scroll
+
+        self.category_icon = tk.Label(self.category_frame, text="", font=('Segoe UI', 14),
+                                    bg=self.colors['card_bg'])
+        self.category_icon.pack(side='left', padx=5)
+
+        self.category_label = tk.Label(self.category_frame, text="", font=('Segoe UI', 11, 'bold'),
+                                        bg=self.colors['card_bg'])
+        self.category_label.pack(side='left', padx=(5,0))
+
+        self.category_progress = None  # سيتم إنشاؤه لاحقاً عند الحاجة
+
+        self.category_details_label = tk.Label(self.info_card, text="", font=('Segoe UI', 9),
+                                                bg=self.colors['card_bg'], fg=self.colors['text_dark'],
+                                                anchor='w', padx=15)
+        # لا نقوم بحزم category_details_label هنا أيضاً - سيتم حزمه مع category_frame
+        # ---------------------------------------------------------------
+
+        # إطار داخلي للمعلومات مع إضافة سكرول عمودي
+        canvas_container = tk.Frame(self.info_card, bg='white')
+        canvas_container.pack(fill='both', expand=True, padx=0, pady=0)
+
+        # إنشاء Canvas
+        self.info_canvas = tk.Canvas(canvas_container, bg='white', highlightthickness=0)
+        self.info_scrollbar = tk.Scrollbar(canvas_container, orient='vertical', command=self.info_canvas.yview)
+        self.info_canvas.configure(yscrollcommand=self.info_scrollbar.set)
+
+        # لا نقوم بحزم scrollbar هنا (سيتم حزمه فقط عند الحاجة)
+        self.info_canvas.pack(side='right', fill='both', expand=True)
+
+        # إطار داخلي سيحتوي على محتويات info_inner السابقة
+        self.info_inner = tk.Frame(self.info_canvas, bg='white', padx=20, pady=15)
+        self.info_inner_window = self.info_canvas.create_window((0, 0), window=self.info_inner, anchor='nw')
+
+        # تحديث منطقة التمرير عندما يتغير حجم الإطار الداخلي
+        def configure_inner(event):
+            self.info_canvas.configure(scrollregion=self.info_canvas.bbox('all'))
+            # بعد تغيير الحجم، نتحقق من الحاجة لشريط التمرير
+            self.check_scroll_needed()
+        self.info_inner.bind('<Configure>', configure_inner)
+
+        # تحديث عرض الإطار الداخلي عندما يتغير حجم الـ Canvas
+        def configure_canvas(event):
+            canvas_width = event.width
+            self.info_canvas.itemconfig(self.info_inner_window, width=canvas_width)
+            self.check_scroll_needed()
+        self.info_canvas.bind('<Configure>', configure_canvas)
+
+        # ربط عجلة الفأرة للتمرير داخل الـ Canvas
+        def on_mousewheel(event):
+            self.info_canvas.yview_scroll(int(-1*(event.delta/120)), 'units')
+        self.info_canvas.bind_all('<MouseWheel>', on_mousewheel)
+
+        # الآن ننقل الحقول إلى self.info_inner
         self.info_vars = {}
         
         # قائمة الحقول بالترتيب: (التسمية, المفتاح)
@@ -165,31 +218,31 @@ class AccountingUI(tk.Frame):
         ]
         
         # العمود الأيمن
-        right_frame = tk.Frame(info_inner, bg='white')
+        right_frame = tk.Frame(self.info_inner, bg='white')
         right_frame.pack(side='right', fill='both', expand=True, padx=(10, 0))
         
         for label, key in right_fields:
             row = tk.Frame(right_frame, bg='white', pady=5)
             row.pack(fill='x')
             tk.Label(row, text=label, font=('Segoe UI', 12), bg='white', 
-                     fg='#7F8C8D', anchor='e').pack(fill='x')
+                    fg='#7F8C8D', anchor='e').pack(fill='x')
             var = tk.StringVar(value="---")
             tk.Label(row, textvariable=var, font=('Segoe UI', 14, 'bold'), 
-                     bg='white', fg=self.colors['text_dark'], anchor='e').pack(fill='x')
+                    bg='white', fg=self.colors['text_dark'], anchor='e').pack(fill='x')
             self.info_vars[key] = var
         
         # العمود الأيسر
-        left_frame = tk.Frame(info_inner, bg='white')
+        left_frame = tk.Frame(self.info_inner, bg='white')
         left_frame.pack(side='left', fill='both', expand=True, padx=(0, 10))
         
         for label, key in left_fields:
             row = tk.Frame(left_frame, bg='white', pady=5)
             row.pack(fill='x')
             tk.Label(row, text=label, font=('Segoe UI', 12), bg='white', 
-                     fg='#7F8C8D', anchor='e').pack(fill='x')
+                    fg='#7F8C8D', anchor='e').pack(fill='x')
             var = tk.StringVar(value="---")
             tk.Label(row, textvariable=var, font=('Segoe UI', 14, 'bold'), 
-                     bg='white', fg=self.colors['text_dark'], anchor='e').pack(fill='x')
+                    bg='white', fg=self.colors['text_dark'], anchor='e').pack(fill='x')
             self.info_vars[key] = var
         
         # ---- العمود الأيمن (الإدخال والمعالجة) ----
@@ -198,24 +251,24 @@ class AccountingUI(tk.Frame):
         
         # 3. بطاقة الإدخال المالي (تصميم جديد واضح)
         input_card = tk.Frame(right_column, bg=self.colors['card_bg'],
-                              highlightbackground='#E0E0E0', highlightthickness=1)
+                            highlightbackground='#E0E0E0', highlightthickness=1)
         input_card.pack(fill='x', pady=(0, 15))
         
         tk.Label(input_card, text="💰 إدخال دفعة جديدة", 
-                 font=('Segoe UI', 16, 'bold'),
-                 bg=self.colors['secondary'], fg='white').pack(fill='x', ipady=5)
+                font=('Segoe UI', 16, 'bold'),
+                bg=self.colors['secondary'], fg='white').pack(fill='x', ipady=5)
         
         entry_form = tk.Frame(input_card, bg='white', padx=20, pady=15)
         entry_form.pack(fill='x')
         
         # كمية الدفع (حقل ضخم)
         tk.Label(entry_form, text="كمية الدفع (ك.واط):", font=('Segoe UI', 14), 
-                 bg='white', fg=self.colors['secondary']).grid(row=0, column=2, sticky='e', pady=5)
+                bg='white', fg=self.colors['secondary']).grid(row=0, column=2, sticky='e', pady=5)
         self.kilowatt_var = tk.StringVar()
         self.kilowatt_entry = tk.Entry(entry_form, textvariable=self.kilowatt_var, 
-                                       font=('Segoe UI', 30, 'bold'), 
-                                       width=8, bg='#F1F8E9', relief='flat', justify='center',
-                                       highlightthickness=1, highlightcolor=self.colors['secondary'])
+                                    font=('Segoe UI', 30, 'bold'), 
+                                    width=8, bg='#F1F8E9', relief='flat', justify='center',
+                                    highlightthickness=1, highlightcolor=self.colors['secondary'])
         self.kilowatt_entry.grid(row=0, column=1, padx=10)
         
         # أزرار التعديل السريع (بجانب الحقل)
@@ -228,24 +281,24 @@ class AccountingUI(tk.Frame):
         # باقي الحقول (بخطوط واضحة)
         # المجاني
         tk.Label(entry_form, text="المجاني (ك.واط):", font=('Segoe UI', 12), 
-                 bg='white', fg=self.colors['text_dark']).grid(row=1, column=2, sticky='e', pady=10)
+                bg='white', fg=self.colors['text_dark']).grid(row=1, column=2, sticky='e', pady=10)
         self.free_var = tk.StringVar(value="0")
         tk.Entry(entry_form, textvariable=self.free_var, font=('Segoe UI', 14), 
-                 bg='#F8F9FA', relief='flat', width=15, justify='center').grid(row=1, column=1, pady=10)
+                bg='#F8F9FA', relief='flat', width=15, justify='center').grid(row=1, column=1, pady=10)
         
         # سعر الكيلو
         tk.Label(entry_form, text="سعر الكيلو (ل.س):", font=('Segoe UI', 12), 
-                 bg='white', fg=self.colors['text_dark']).grid(row=2, column=2, sticky='e', pady=10)
+                bg='white', fg=self.colors['text_dark']).grid(row=2, column=2, sticky='e', pady=10)
         self.price_var = tk.StringVar(value="7200")
         tk.Entry(entry_form, textvariable=self.price_var, font=('Segoe UI', 14), 
-                 bg='#F8F9FA', relief='flat', width=15, justify='center').grid(row=2, column=1, pady=10)
+                bg='#F8F9FA', relief='flat', width=15, justify='center').grid(row=2, column=1, pady=10)
         
         # الحسم
         tk.Label(entry_form, text="الحسم (ل.س):", font=('Segoe UI', 12), 
-                 bg='white', fg=self.colors['text_dark']).grid(row=3, column=2, sticky='e', pady=10)
+                bg='white', fg=self.colors['text_dark']).grid(row=3, column=2, sticky='e', pady=10)
         self.discount_var = tk.StringVar(value="0")
         tk.Entry(entry_form, textvariable=self.discount_var, font=('Segoe UI', 14), 
-                 bg='#F8F9FA', relief='flat', width=15, justify='center').grid(row=3, column=1, pady=10)
+                bg='#F8F9FA', relief='flat', width=15, justify='center').grid(row=3, column=1, pady=10)
         
         # 4. أزرار الإجراءات (كبيرة وواضحة)
         action_frame = tk.Frame(right_column, bg=self.colors['bg_main'])
@@ -276,19 +329,94 @@ class AccountingUI(tk.Frame):
         
         # 5. منطقة النتائج (بطريقة Dark Mode)
         result_card = tk.Frame(right_column, bg=self.colors['terminal_bg'],
-                               highlightbackground=self.colors['border_strong'], 
-                               highlightthickness=1)
+                            highlightbackground=self.colors['border_strong'], 
+                            highlightthickness=1)
         result_card.pack(fill='both', expand=True, pady=10)
         
         self.result_text = scrolledtext.ScrolledText(result_card, font=('Consolas', 13), 
-                                                      bg=self.colors['terminal_bg'], 
-                                                      fg=self.colors['terminal_fg'], 
-                                                      bd=0, padx=10, pady=10,
-                                                      insertbackground=self.colors['primary'])
+                                                    bg=self.colors['terminal_bg'], 
+                                                    fg=self.colors['terminal_fg'], 
+                                                    bd=0, padx=10, pady=10,
+                                                    insertbackground=self.colors['primary'])
         self.result_text.pack(fill='both', expand=True)
         self.result_text.config(state='disabled')
         
         self.show_result_message("🔍 جهاز الاستقبال جاهز... بانتظار اختيار زبون")
+        
+        # بعد إنشاء كل العناصر، نضمن إخفاء category_frame في البداية
+        self.toggle_category_and_scroll(False)
+        
+        # ربط حدث تغيير حجم النافذة لفحص الحاجة للتمرير
+        self.parent.bind('<Configure>', lambda e: self.check_scroll_needed())
+
+
+
+    def check_scroll_needed(self):
+        """فحص ما إذا كان المحتوى يحتاج إلى شريط تمرير عمودي، وإظهار/إخفاء scrollbar وفقاً لذلك"""
+        # التأكد من أن canvas والمحتوى قد تم رسمهما
+        self.info_canvas.update_idletasks()
+        content_height = self.info_inner.winfo_reqheight()
+        canvas_height = self.info_canvas.winfo_height()
+        
+        # نعتبر أن هناك حاجة للتمرير إذا كان المحتوى أكبر من مساحة العرض بفارق أكثر من 5 بكسل
+        # لتجنب الظهور بسبب فروق بسيطة في الحساب
+        if content_height > canvas_height + 5:
+            # نحتاج إلى شريط تمرير
+            if not self.info_scrollbar.winfo_ismapped():
+                self.info_scrollbar.pack(side='left', fill='y')
+        else:
+            # لا حاجة لشريط التمرير
+            if self.info_scrollbar.winfo_ismapped():
+                self.info_scrollbar.pack_forget()
+        
+        # تحديث منطقة التمرير
+        self.info_canvas.configure(scrollregion=self.info_canvas.bbox('all'))
+
+    def bind_tooltip(self, widget, text):
+        """ربط tooltip يظهر أسفل العنصر، وإذا لم تكن مساحة كافية يظهر فوقه"""
+        def enter(event):
+            # حساب موقع التلميح
+            x = widget.winfo_rootx() + 10
+            y_below = widget.winfo_rooty() + widget.winfo_height() + 5
+            y_above = widget.winfo_rooty() - 5  # سنضبط الارتفاع لاحقاً
+            
+            # إنشاء نافذة التلميح مؤقتاً لقياس ارتفاعها
+            temp_tip = tk.Toplevel(widget)
+            temp_tip.wm_overrideredirect(True)
+            temp_tip.wm_geometry("+0+0")
+            label = tk.Label(temp_tip, text=text, justify='right',
+                            background="#ffffe0", relief='solid', borderwidth=1,
+                            font=("Arial", 10))
+            label.pack()
+            temp_tip.update_idletasks()
+            tip_height = temp_tip.winfo_reqheight()
+            temp_tip.destroy()
+            
+            # التحقق من المساحة المتاحة أسفل
+            screen_height = widget.winfo_screenheight()
+            if y_below + tip_height < screen_height:
+                y = y_below
+            else:
+                y = y_above - tip_height
+            
+            self.tooltip = tk.Toplevel(widget)
+            self.tooltip.wm_overrideredirect(True)
+            self.tooltip.wm_geometry(f"+{x}+{y}")
+            label = tk.Label(self.tooltip, text=text, justify='right',
+                            background="#ffffe0", relief='solid', borderwidth=1,
+                            font=("Arial", 10))
+            label.pack()
+        
+        def leave(event):
+            if hasattr(self, 'tooltip'):
+                try:
+                    self.tooltip.destroy()
+                    del self.tooltip
+                except:
+                    pass
+        widget.bind('<Enter>', enter)
+        widget.bind('<Leave>', leave)
+
     
     # ----- دوال مساعدة للتصميم (بدون تغيير) -----
     def create_flat_btn(self, parent, text, command, color):
@@ -357,9 +485,12 @@ class AccountingUI(tk.Frame):
             self.select_customer(customer['id'])
     
     def select_customer(self, customer_id):
-        """تحديد زبون وعرض بياناته (بدون تغيير في المنطق)"""
+        """تحديد زبون وعرض بياناته (بدون تغيير في المنطق) + تحديث التصنيف"""
         try:
             customer_data = self.fast_ops.fast_get_customer_details(customer_id)
+            # [تشخيص] طباعة البيانات القادمة من الدالة
+            #print("بيانات الزبون:", customer_data)
+            
             if not customer_data:
                 messagebox.showwarning("تحذير", "لم يتم العثور على بيانات الزبون")
                 return
@@ -379,14 +510,166 @@ class AccountingUI(tk.Frame):
             self.discount_var.set("0")
             self.process_btn.config(state='normal', bg=self.colors['secondary'])
             self.print_btn.config(state='normal', bg=self.colors['primary'])
+            
+            # تحديث عرض التصنيف المالي
+            self.update_financial_category_display(customer_data)
+            
             self.show_result_message(f"✅ تم تحديد الزبون: {customer_data.get('name', '')}\n"
-                                     f"الرصيد الحالي: {customer_data.get('current_balance', 0):,.0f} ك.واط\n"
-                                     f"آخر قراءة عداد: {customer_data.get('last_counter_reading', 0):,.0f}\n\n"
-                                     f"⚠️ أدخل كمية الدفع والمجاني ثم اضغط على 'معالجة سريعة'")
+                                    f"الرصيد الحالي: {customer_data.get('current_balance', 0):,.0f} ك.واط\n"
+                                    f"آخر قراءة عداد: {customer_data.get('last_counter_reading', 0):,.0f}\n\n"
+                                    f"⚠️ أدخل كمية الدفع والمجاني ثم اضغط على 'معالجة سريعة'")
             self.kilowatt_entry.focus_set()
+            
+            # تحديث شريط التمرير بعد تحميل البيانات
+            self.check_scroll_needed()
+            
         except Exception as e:
             logger.error(f"خطأ في تحديد الزبون: {e}")
             messagebox.showerror("خطأ", f"فشل تحميل بيانات الزبون: {str(e)}")
+    
+    # ----- دوال التصنيف المالي (جديدة) -----
+    def update_financial_category_display(self, customer_data):
+        """تحديث عرض التصنيف المالي مع إخفاء الشريط والسكرول للزبون العادي"""
+        #print("✅ update_financial_category_display تم استدعاؤها")
+        #print("البيانات المستقبلة:", customer_data.keys())
+        
+        category = customer_data.get('financial_category')
+        if not category:
+            category = 'normal'
+            #print("تم تعيين تصنيف افتراضي: normal")
+        
+        # إعدادات الأيقونة واللون
+        icons = {
+            'normal': '👤',
+            'free': '🎁',
+            'vip': '⭐',
+            'free_vip': '🌟'
+        }
+        colors = {
+            'normal': '#3498db',      # أزرق
+            'free': '#2ecc71',        # أخضر
+            'vip': '#e67e22',         # برتقالي
+            'free_vip': '#9b59b6'     # بنفسجي
+        }
+        names = {
+            'normal': 'عادي',
+            'free': 'مجاني',
+            'vip': 'VIP',
+            'free_vip': 'مجاني + VIP'
+        }
+        bg_colors = {
+            'normal': '#EAF3FF',      # أزرق فاتح جداً
+            'free': '#E9F7EF',        # أخضر فاتح جداً
+            'vip': '#FFF7EA',          # برتقالي فاتح جداً
+            'free_vip': '#F4EAF7'      # بنفسجي فاتح جداً
+        }
+        
+        icon = icons.get(category, '👤')
+        color = colors.get(category, '#7f8c8d')
+        name = names.get(category, 'غير معروف')
+        bg = bg_colors.get(category, self.colors['card_bg'])
+        
+        # تحديث الشريط بالكامل
+        self.category_frame.config(bg=bg)
+        self.category_icon.config(text=icon, fg=color, bg=bg)
+        self.category_label.config(text=name, fg=color, bg=bg)
+        self.category_details_label.config(bg=bg, fg=self.colors['text_dark'])
+        
+        # بناء نص التفاصيل للـ tooltip والملخص
+        tooltip_text = self.build_category_tooltip(customer_data)
+        details_summary = self.build_category_summary(customer_data)
+        
+        # تحديث سطر الملخص
+        self.category_details_label.config(text=details_summary)
+        
+        # ربط tooltip لجميع عناصر الشريط
+        self.bind_tooltip(self.category_icon, tooltip_text)
+        self.bind_tooltip(self.category_label, tooltip_text)
+        self.bind_tooltip(self.category_details_label, tooltip_text)
+        
+        # إدارة شريط تقدم المجاني (category_progress)
+        if self.category_progress:
+            self.category_progress.destroy()
+            self.category_progress = None
+        
+        # إضافة شريط تقدم المجاني إذا كان التصنيف يحتوي على مجاني
+        if category in ('free', 'free_vip'):
+            total = float(customer_data.get('free_amount', 0))
+            remaining = float(customer_data.get('free_remaining', 0))
+            if total > 0:
+                percent = (remaining / total) * 100
+                progress_text = f" {remaining:,.0f}/{total:,.0f} ك.و"
+                self.category_progress = tk.Label(self.category_frame, text=progress_text,
+                                                font=('Segoe UI', 9), fg='#2ecc71', bg=bg)
+                self.category_progress.pack(side='left', padx=5)
+                self.bind_tooltip(self.category_progress, tooltip_text)
+        
+        # إظهار أو إخفاء شريط التصنيف بناءً على التصنيف
+        self.toggle_category_and_scroll(category != 'normal')
+
+            
+    def toggle_category_and_scroll(self, show):
+        """
+        إظهار أو إخفاء شريط التصنيف (category_frame) وشريط التمرير بناءً على show.
+        """
+        if show:
+            # إظهار شريط التصنيف إذا كان مخفياً
+            if not self.category_frame.winfo_ismapped():
+                self.category_frame.pack(fill='x', padx=10, pady=(10, 0))
+                # حزم category_details_label أيضاً لأنه جزء من التصنيف
+                self.category_details_label.pack(fill='x', pady=(4, 10))
+        else:
+            # إخفاء شريط التصنيف إذا كان ظاهراً
+            if self.category_frame.winfo_ismapped():
+                self.category_frame.pack_forget()
+                self.category_details_label.pack_forget()
+        
+        # بعد تغيير ظهور category_frame، نتحقق من الحاجة لشريط التمرير
+        self.check_scroll_needed()   
+
+
+    def build_category_summary(self, customer_data):
+        """بناء ملخص مختصر للتصنيف المالي (سطر واحد)"""
+        category = customer_data.get('financial_category', 'normal')
+        parts = []
+        
+        if category in ('free', 'free_vip'):
+            remaining = float(customer_data.get('free_remaining', 0))
+            total = float(customer_data.get('free_amount', 0))
+            if total > 0:
+                parts.append(f"مجاني متبقي: {remaining:,.0f} ك.و")
+        
+        if category in ('vip', 'free_vip'):
+            days = customer_data.get('vip_no_cut_days', 0)
+            expiry = customer_data.get('vip_expiry_date')
+            if expiry:
+                parts.append(f"VIP حتى {expiry}")
+            elif days:
+                parts.append(f"VIP {days} يوم")
+        
+        return " | ".join(parts) if parts else ""
+    
+    def build_category_tooltip(self, customer_data):
+        """بناء نص التفاصيل للتصنيف المالي"""
+        category = customer_data.get('financial_category', 'normal')
+        lines = []
+        
+        if category in ('free', 'free_vip'):
+            lines.append(f"سبب المجانية: {customer_data.get('free_reason', 'غير محدد')}")
+            lines.append(f"المبلغ المجاني: {float(customer_data.get('free_amount', 0)):,.0f} ك.و")
+            lines.append(f"المتبقي: {float(customer_data.get('free_remaining', 0)):,.0f} ك.و")
+            if expiry := customer_data.get('free_expiry_date'):
+                lines.append(f"تاريخ الانتهاء: {expiry}")
+        
+        if category in ('vip', 'free_vip'):
+            lines.append(f"سبب VIP: {customer_data.get('vip_reason', 'غير محدد')}")
+            lines.append(f"أيام عدم القطع: {customer_data.get('vip_no_cut_days', 0)} يوم")
+            if expiry := customer_data.get('vip_expiry_date'):
+                lines.append(f"تاريخ انتهاء VIP: {expiry}")
+            lines.append(f"فترة السماح: {customer_data.get('vip_grace_period', 0)} يوم")
+        
+        return "\n".join(lines) if lines else "لا توجد تفاصيل إضافية"
+    
     
     # ----- دوال الإدخال والتعديل (كما كانت) -----
     def adjust_kilowatt(self, amount):
@@ -443,7 +726,7 @@ class AccountingUI(tk.Frame):
             logger.error(f"خطأ في حساب المعاينة: {e}")
             messagebox.showerror("خطأ", f"فشل حساب المعاينة: {str(e)}")
     
-        # ----- نافذة التأكيد المخصصة الجديدة (واضحة وكبيرة) -----
+    # ----- نافذة التأكيد المخصصة الجديدة (واضحة وكبيرة) -----
     def show_custom_confirm_dialog(self):
         """نافذة تأكيد مخصصة قبل المعالجة الفعلية - بحجم تلقائي مناسب للمحتوى"""
         if not self.selected_customer:
@@ -607,7 +890,7 @@ class AccountingUI(tk.Frame):
         """الواجهة الجديدة للمعالجة: تعرض نافذة التأكيد بدلاً من messagebox"""
         self.show_custom_confirm_dialog()
     
-        # ----- بقية الدوال كما هي (print_invoice, show_result_message, clear_input_fields, clear_fields) -----
+    # ----- بقية الدوال كما هي (print_invoice, show_result_message, clear_input_fields, clear_fields) -----
     def print_invoice(self):
         if not hasattr(self, 'last_invoice_result') or not self.last_invoice_result:
             messagebox.showwarning("تحذير", "لا توجد فاتورة حديثة للطباعة")
@@ -652,8 +935,6 @@ class AccountingUI(tk.Frame):
             logger.error(f"خطأ في الطباعة: {e}", exc_info=True)
             messagebox.showerror("خطأ", f"فشل الطباعة: {str(e)}")
             self.show_result_message(f"❌ خطأ في الطباعة: {str(e)}")
-
-
     
     def show_result_message(self, message):
         self.result_text.config(state='normal')
@@ -670,8 +951,9 @@ class AccountingUI(tk.Frame):
         self.discount_var.set("0")
         if self.selected_customer:
             self.kilowatt_entry.focus_set()
-    
+            
     def clear_fields(self):
+        """مسح جميع الحقول وإعادة تعيين الواجهة"""
         self.search_var.set("")
         self.kilowatt_var.set("")
         self.free_var.set("0")
@@ -686,4 +968,13 @@ class AccountingUI(tk.Frame):
         self.process_btn.config(state='disabled', bg='#D4A5A5')
         self.print_btn.config(state='disabled', bg='#D4A5A5')
         self.search_entry.focus_set()
-        self.last_invoice_result = None
+        
+        # إخفاء شريط التصنيف وشريط التمرير
+        self.toggle_category_and_scroll(False)
+        # إعادة تعيين نصوص التصنيف
+        self.category_icon.config(text="", fg='black')
+        self.category_label.config(text="", fg='black')
+        self.category_details_label.config(text="")
+        if self.category_progress:
+            self.category_progress.destroy()
+            self.category_progress = None
