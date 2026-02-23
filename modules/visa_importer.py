@@ -5,8 +5,7 @@ import logging
 from typing import Dict, List, Optional, Tuple, Any
 from database.connection import db
 import re
-from datetime import datetime
-
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +16,9 @@ class ExcelLikeTable(tk.Frame):
         super().__init__(parent)
         self.columns = columns
         self.data = data
+        self.data = data          # البيانات المعروضة حالياً
+        self.all_data = data.copy()  # نسخة احتياطية من جميع البيانات
+
         self.original_data = data.copy()
         self.cells = {}  # لحفظ مراجع الصفوف
         self.entry = None  # حقل التعديل العائم
@@ -71,53 +73,83 @@ class ExcelLikeTable(tk.Frame):
         self.tree.tag_configure('search_result', background='#fff9c4')
         self.tree.tag_configure('modified', background='#ffeaa7')
         self.tree.tag_configure('separator', background='#e0e0e0')
+        self.tree.tag_configure('recently_modified', background='#b3e5fc')   # <-- أضف هذا
+        self.tree.tag_configure('test', background='red')
         self.apply_row_colors()
         
         # التركيز على الجدول
         self.tree.focus_set()
-    
+        
     def populate_data(self):
-        """ملء الجدول بالبيانات مع الحفاظ على الترتيب الوارد"""
-        # مسح البيانات السابقة
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
-        # إضافة البيانات الجديدة مع حفظ المراجع
+
         self.cells = {}
         item_id_counter = 0
-        
-        # نعرض البيانات بنفس الترتيب الذي جاءت به (مفترض أنه هرمي)
+        now = datetime.now()  # استخدم التوقيت المحلي
+        twenty_four_hours_ago = now - timedelta(hours=24)
+
         for idx, row in enumerate(self.data):
             values = [row.get(col, '') for col in self.columns]
             item_id = self.tree.insert('', tk.END, values=values, tags=(f'row_{item_id_counter}',))
+
+            # الحصول على updated_at من الصف مباشرة
+            updated_at = row.get('updated_at')
+            if updated_at and isinstance(updated_at, str):
+                try:
+                    updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                except:
+                    updated_at = None
+
+            is_recent = False
+            if updated_at and isinstance(updated_at, datetime):
+                if updated_at > twenty_four_hours_ago:
+                    is_recent = True
+
+            # طباعة للتصحيح (يمكن إزالتها لاحقاً)
+            print(f"الصف {idx}: updated_at = {updated_at}, is_recent = {is_recent}")
+
             self.cells[item_id] = {
                 'row_data': row,
                 'original_row': row.copy(),
                 'data_index': idx,
                 'box': row.get('علبة', ''),
-                'serial': row.get('مسلسل', '')
+                'serial': row.get('مسلسل', ''),
+                'updated_at': updated_at,
+                'is_recent': is_recent,
+                'is_modified': False
             }
             item_id_counter += 1
+
+        self.apply_row_colors()
             
 
     def apply_row_colors(self):
-        """تلوين الصفوف بالتناوب البسيط"""
         for idx, item in enumerate(self.tree.get_children()):
             if 'separator' in self.tree.item(item, 'tags'):
                 continue
             current_tags = list(self.tree.item(item, 'tags'))
-            for tag in ['evenbox', 'oddbox', 'selected', 'search_result', 'modified']:
+            # إزالة جميع التاجات التي نريد إعادة تعيينها
+            for tag in ['evenbox', 'oddbox', 'search_result', 'modified', 'recently_modified']:
                 if tag in current_tags:
                     current_tags.remove(tag)
-            # تلوين زوجي/فردي
-            if idx % 2 == 0:
-                current_tags.append('evenbox')
+
+            # تحديد حالة الصف
+            is_recent = item in self.cells and self.cells[item].get('is_recent', False)
+            is_modified = item in self.cells and self.cells[item].get('is_modified', False)
+
+            # إضافة التاجات حسب الأولوية: recently_modified > modified > تناوب عادي
+            if is_recent:
+                current_tags.append('recently_modified')
+            elif is_modified:
+                current_tags.append('modified')
             else:
-                current_tags.append('oddbox')
-            # إضافة modified إذا كان الصف معدلاً
-            if item in self.cells:
-                # ... نفس الكود القديم ...
-                pass
+                # تلوين متناوب عادي
+                if idx % 2 == 0:
+                    current_tags.append('evenbox')
+                else:
+                    current_tags.append('oddbox')
+
             self.tree.item(item, tags=tuple(current_tags))
             
                 
@@ -293,6 +325,7 @@ class ExcelLikeTable(tk.Frame):
         
         # تلوين الصف المعدل
         self.mark_row_as_modified(item)
+        self.apply_row_colors()
         
         # إخفاء حقل التعديل
         self.hide_entry()
@@ -302,14 +335,20 @@ class ExcelLikeTable(tk.Frame):
         self.tree.selection_set(item)
         
         return 'break'
-    
+        
     def mark_row_as_modified(self, item):
-        """تحديد الصف كمعدل"""
+        """تحديد الصف كمعدل وتحديث is_recent إذا لزم الأمر"""
         if item in self.cells:
             current_tags = list(self.tree.item(item, 'tags'))
             if 'modified' not in current_tags:
                 current_tags.append('modified')
                 self.tree.item(item, tags=tuple(current_tags))
+            
+            # تحديث is_modified في الخلايا
+            self.cells[item]['is_modified'] = True
+            # تحديث is_recent (أي تعديل جديد يعتبر حديثاً)
+            self.cells[item]['is_recent'] = True
+            self.cells[item]['updated_at'] = datetime.now()   # نضع الوقت الحالي افتراضياً
     
     def save_edit_and_move_down(self, item, column):
         """حفظ التعديل والانتقال للأسفل"""
@@ -557,60 +596,65 @@ class ExcelLikeTable(tk.Frame):
                         self.current_cell = (prev, f'#{len(self.columns)}')
         
         return 'break'
-    
+        
     def search_in_table(self, search_text: str, search_column: str = "الكل"):
-        """بحث في الجدول مع تلوين النتائج"""
-        # إعادة تعيين تلوين البحث السابق
-        for item in self.tree.get_children():
+        """بحث في الجدول مع إخفاء الصفوف غير المطابقة"""
+        # إعادة تعيين تلوين البحث السابق (ولكننا الآن نخفي الصفوف)
+        # نعيد إظهار جميع الصفوف أولاً إذا كان هناك بحث سابق
+        all_items = self.tree.get_children()
+        for item in all_items:
             if 'separator' in self.tree.item(item, 'tags'):
                 continue
-                
-            current_tags = list(self.tree.item(item, 'tags'))
-            if 'search_result' in current_tags:
-                current_tags.remove('search_result')
-            self.tree.item(item, tags=tuple(current_tags))
+            # إذا كان العنصر مخفياً (detached) نعيده
+            # لكن tree.get_children لا تعيد العناصر المخفية. لذا نحتاج لتتبع المخفيين.
+            # بدلاً من ذلك، سنقوم بإعادة بناء الجدول عند البحث الفارغ.
+            pass
         
+        # لتسهيل الأمر، سنقوم بتخزين قائمة بجميع العناصر (حتى المخفية) في self.all_items
+        # ولكن ليس لدينا. لذا سنستخدم طريقة detach وإعادة الإظهار عبر populate_data.
+            
+    
         if not search_text:
-            self.apply_row_colors()
+            # إعادة عرض جميع البيانات
+            self.data = self.all_data.copy()
+            self.populate_data()
             return []
         
         search_text = search_text.lower()
-        results = []
+        filtered_data = []
         
-        for item in self.tree.get_children():
-            # تخطي الفواصل
-            if 'separator' in self.tree.item(item, 'tags'):
-                continue
-            
-            values = self.tree.item(item, 'values')
-            
-            if not values or all(str(v).strip() == '' for v in values):
-                continue
-            
+        for row in self.all_data:
             found = False
-            
             if search_column == "الكل":
-                # البحث في كل الأعمدة
-                for idx, value in enumerate(values):
-                    if search_text in str(value).lower():
+                for col in self.columns:
+                    if search_text in str(row.get(col, '')).lower():
                         found = True
                         break
             else:
-                # البحث في عمود محدد
                 if search_column in self.columns:
-                    idx = self.columns.index(search_column)
-                    if search_text in str(values[idx]).lower():
+                    if search_text in str(row.get(search_column, '')).lower():
                         found = True
             
             if found:
-                results.append(item)
-                # تلوين الصف الذي يحتوي على نتيجة البحث
-                current_tags = list(self.tree.item(item, 'tags'))
-                if 'search_result' not in current_tags:
-                    current_tags.append('search_result')
-                    self.tree.item(item, tags=tuple(current_tags))
+                filtered_data.append(row)
         
-        # إعادة تطبيق الألوان
+        # عرض البيانات المفلترة
+        self.data = filtered_data
+        self.populate_data()
+        
+        # تحديث التلوين للنتائج (اختياري، لأن populate_data يعيد التلوين)
+        # يمكن إضافة تاغ search_result للصفوف في populate_data إذا أردنا تلوينها.
+        
+        return filtered_data
+        
+        # تلوين النتائج (الصفوف التي لا تزال ظاهرة)
+        for item in results:
+            current_tags = list(self.tree.item(item, 'tags'))
+            if 'search_result' not in current_tags:
+                current_tags.append('search_result')
+                self.tree.item(item, tags=tuple(current_tags))
+        
+        # إعادة تطبيق الألوان على الصفوف الظاهرة
         self.apply_row_colors()
         
         # إذا كانت هناك نتائج، التمرير للنتيجة الأولى
@@ -672,691 +716,7 @@ class ExcelLikeTable(tk.Frame):
         
         return all_data
 
-class VisaEditor:
-    """محرر التأشيرات داخل البرنامج مع تحسينات كبيرة"""
-    
-    def __init__(self, parent, user_id: int):
-        self.parent = parent
-        self.user_id = user_id
-        self.sector_id = None
-        self.sector_name = None
-        self.customers_data = []
-        self.original_customers_data = []  # نسخة احتياطية للبحث
-        
-        self.setup_ui()
-        self.load_sectors()
-    
-    def setup_ui(self):
-        """إعداد الواجهة الرئيسية مع تحسينات"""
-        self.window = tk.Toplevel(self.parent)
-        self.window.title("محرر التأشيرات - التعديل المباشر")
-        self.window.geometry("1400x800")
-        
-        # إطار التحكم العلوي
-        control_frame = ttk.Frame(self.window)
-        control_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        # اختيار القطاع
-        ttk.Label(control_frame, text="اختر القطاع:").pack(side=tk.LEFT, padx=5)
-        
-        self.sector_var = tk.StringVar()
-        self.sector_combo = ttk.Combobox(control_frame, textvariable=self.sector_var, 
-                                         width=30, state='readonly')
-        self.sector_combo.pack(side=tk.LEFT, padx=5)
-        self.sector_combo.bind('<<ComboboxSelected>>', self.on_sector_selected)
-        
-        # زر تحميل البيانات
-        ttk.Button(control_frame, text="🔍 تحميل الزبائن", 
-                  command=self.load_customers).pack(side=tk.LEFT, padx=10)
-        
-        # معلومات القطاع
-        self.info_label = ttk.Label(control_frame, text="", font=('Arial', 10, 'bold'))
-        self.info_label.pack(side=tk.LEFT, padx=20)
-        
-        # إطار البحث
-        search_frame = ttk.LabelFrame(control_frame, text="بحث متقدم", padding=5)
-        search_frame.pack(side=tk.LEFT, padx=20)
-        
-        # اختيار حقل البحث
-        ttk.Label(search_frame, text="بحث في:").pack(side=tk.LEFT, padx=5)
-        
-        self.search_column_var = tk.StringVar(value="الكل")
-        self.search_column_combo = ttk.Combobox(
-            search_frame, 
-            textvariable=self.search_column_var,
-            width=15,
-            state='readonly'
-        )
-        self.search_column_combo['values'] = ["الكل", "علبة", "مسلسل", "اسم الزبون", "التأشيرة الحالية", "التأشيرة الجديدة"]
-        self.search_column_combo.pack(side=tk.LEFT, padx=5)
-        
-        # حقل البحث
-        self.search_var = tk.StringVar()
-        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=25)
-        self.search_entry.pack(side=tk.LEFT, padx=5)
-        self.search_entry.bind('<KeyRelease>', self.on_search)
-        
-        # زر مسح البحث
-        ttk.Button(search_frame, text="🗑️ مسح", 
-                  command=self.clear_search, width=8).pack(side=tk.LEFT, padx=5)
-        
-        # زر بحث سريع في التأشيرات
-        ttk.Button(search_frame, text="🔎 بحث تأشيرة", 
-                  command=self.quick_search_visa, width=12).pack(side=tk.LEFT, padx=5)
-        
-        # زر التالي في البحث
-        ttk.Button(search_frame, text="▶️ التالي", 
-                  command=self.find_next, width=8).pack(side=tk.LEFT, padx=5)
-        
-        # إطار الجدول الرئيسي
-        main_frame = ttk.Frame(self.window)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # ملصق حالة الجدول
-        self.status_label = ttk.Label(main_frame, text="قم بتحميل القطاع أولاً", 
-                                     font=('Arial', 11, 'italic'))
-        self.status_label.pack(pady=10)
-        
-        # مكان الجدول
-        self.table_container = ttk.Frame(main_frame)
-        self.table_container.pack(fill=tk.BOTH, expand=True)
-        
-        # إطار الإحصاءات
-        self.stats_frame = ttk.Frame(main_frame)
-        self.stats_frame.pack(fill=tk.X, pady=5)
-        
-        self.stats_label = ttk.Label(self.stats_frame, text="", font=('Arial', 10))
-        self.stats_label.pack()
-        
-        # إطار الأزرار السفلي
-        button_frame = ttk.Frame(self.window)
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        # زر حفظ التعديلات
-        self.save_btn = ttk.Button(button_frame, text="💾 حفظ التعديلات", 
-                                  command=self.save_changes, state='disabled',
-                                  style='Save.TButton')
-        self.save_btn.pack(side=tk.RIGHT, padx=5)
-        
-        # زر استعادة القيم الأصلية
-        ttk.Button(button_frame, text="↻ استعادة الأصلية", 
-                  command=self.reset_changes).pack(side=tk.RIGHT, padx=5)
-        
-        # زر تصدير إلى Excel
-        ttk.Button(button_frame, text="📄 تصدير إلى Excel", 
-                  command=self.export_to_excel).pack(side=tk.LEFT, padx=5)
-        
-        # زر البحث عن تأشيرة محددة
-        ttk.Button(button_frame, text="🔍 بحث رقمي", 
-                  command=self.search_numeric).pack(side=tk.LEFT, padx=5)
-        
-        # زر إغلاق
-        ttk.Button(button_frame, text="✕ إغلاق", 
-                  command=self.window.destroy).pack(side=tk.LEFT, padx=5)
-        
-        # ربط الاختصارات
-        self.window.bind('<Control-s>', lambda e: self.save_changes())
-        self.window.bind('<Control-S>', lambda e: self.save_changes())
-        self.window.bind('<Control-r>', lambda e: self.reset_changes())
-        self.window.bind('<Control-f>', lambda e: self.search_entry.focus())
-        self.window.bind('<F3>', lambda e: self.find_next())
-        self.window.bind('<Escape>', lambda e: self.window.destroy())
-        
-        # إنشاء أسلوب خاص لزر الحفظ
-        style = ttk.Style()
-        style.configure('Save.TButton', font=('Arial', 10, 'bold'), foreground='white', background='#4CAF50')
-        
-        # مركز النافذة
-        self.center_window()
-    
-    def center_window(self):
-        """توسيط النافذة على الشاشة"""
-        self.window.update_idletasks()
-        width = self.window.winfo_width()
-        height = self.window.winfo_height()
-        x = (self.window.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.window.winfo_screenheight() // 2) - (height // 2)
-        self.window.geometry(f'{width}x{height}+{x}+{y}')
-    
-    def load_sectors(self):
-        """تحميل قائمة القطاعات"""
-        try:
-            with db.get_cursor() as cursor:
-                cursor.execute("""
-                    SELECT id, name, code 
-                    FROM sectors 
-                    WHERE is_active = TRUE 
-                    ORDER BY name
-                """)
-                sectors = cursor.fetchall()
-                
-                sector_names = []
-                self.sectors_map = {}
-                
-                for sector in sectors:
-                    display_name = f"{sector['name']} ({sector['code'] or 'بدون رمز'})"
-                    sector_names.append(display_name)
-                    self.sectors_map[display_name] = {
-                        'id': sector['id'],
-                        'name': sector['name'],
-                        'code': sector['code']
-                    }
-                
-                self.sector_combo['values'] = sector_names
-                
-                if sector_names:
-                    self.sector_combo.current(0)
-                    self.on_sector_selected()
-                
-        except Exception as e:
-            logger.error(f"خطأ في تحميل القطاعات: {e}")
-            messagebox.showerror("خطأ", f"فشل تحميل القطاعات: {e}")
-    
-    def on_sector_selected(self, event=None):
-        """عند اختيار قطاع"""
-        selected = self.sector_var.get()
-        if selected in self.sectors_map:
-            sector_info = self.sectors_map[selected]
-            self.sector_id = sector_info['id']
-            self.sector_name = sector_info['name']
-            self.info_label.config(text=f"القطاع: {self.sector_name} (كود: {sector_info['code'] or 'بدون'})")
-    
-    def on_search(self, event=None):
-        """عند البحث في الجدول"""
-        if hasattr(self, 'table'):
-            search_text = self.search_var.get()
-            search_column = self.search_column_var.get()
-            
-            results = self.table.search_in_table(search_text, search_column)
-            
-            if search_text:
-                self.status_label.config(
-                    text=f"تم العثور على {len(results)} نتيجة للبحث عن: '{search_text}'"
-                )
-            else:
-                if hasattr(self, 'table'):
-                    all_data = self.table.get_all_data()
-                    self.status_label.config(text=f"تم تحميل {len(all_data)} زبون")
-    
-    def clear_search(self):
-        """مسح البحث"""
-        self.search_var.set('')
-        self.on_search()
-    
-    def quick_search_visa(self):
-        """بحث سريع في التأشيرات"""
-        visa_value = simpledialog.askstring("بحث تأشيرة", "أدخل قيمة التأشيرة للبحث:")
-        if visa_value:
-            self.search_var.set(visa_value)
-            self.search_column_var.set("التأشيرة الجديدة")
-            self.on_search()
-    
-    def search_numeric(self):
-        """بحث رقمي متقدم"""
-        search_window = tk.Toplevel(self.window)
-        search_window.title("بحث رقمي متقدم")
-        search_window.geometry("400x300")
-        search_window.transient(self.window)
-        search_window.grab_set()
-        
-        ttk.Label(search_window, text="بحث رقمي متقدم", 
-                 font=('Arial', 12, 'bold')).pack(pady=10)
-        
-        # حقل البحث
-        frame = ttk.Frame(search_window)
-        frame.pack(pady=10, padx=20, fill=tk.X)
-        
-        ttk.Label(frame, text="ابحث عن:").pack(side=tk.LEFT)
-        search_entry = ttk.Entry(frame, width=20)
-        search_entry.pack(side=tk.LEFT, padx=10)
-        search_entry.focus()
-        
-        # خيارات البحث
-        options_frame = ttk.LabelFrame(search_window, text="خيارات البحث", padding=10)
-        options_frame.pack(pady=10, padx=20, fill=tk.X)
-        
-        search_type = tk.StringVar(value="exact")
-        
-        ttk.Radiobutton(options_frame, text="مطابقة تامة", 
-                       variable=search_type, value="exact").pack(anchor=tk.W)
-        ttk.Radiobutton(options_frame, text="يحتوي على", 
-                       variable=search_type, value="contains").pack(anchor=tk.W)
-        ttk.Radiobutton(options_frame, text="أكبر من", 
-                       variable=search_type, value="greater").pack(anchor=tk.W)
-        ttk.Radiobutton(options_frame, text="أصغر من", 
-                       variable=search_type, value="smaller").pack(anchor=tk.W)
-        
-        def perform_search():
-            """تنفيذ البحث"""
-            value = search_entry.get()
-            search_type_val = search_type.get()
-            
-            if not value:
-                return
-            
-            # تطبيق البحث
-            if hasattr(self, 'table'):
-                # البحث في البيانات
-                items = self.table.tree.get_children()
-                results = []
-                
-                for item in items:
-                    if 'separator' in self.table.tree.item(item, 'tags'):
-                        continue
-                    
-                    values = self.table.tree.item(item, 'values')
-                    if not values:
-                        continue
-                    
-                    match = False
-                    
-                    # البحث في كل الأعمدة
-                    for idx, cell_value in enumerate(values):
-                        cell_str = str(cell_value).replace(',', '')
-                        
-                        if search_type_val == "exact":
-                            match = cell_str == value
-                        elif search_type_val == "contains":
-                            match = value in cell_str
-                        elif search_type_val == "greater":
-                            try:
-                                if cell_str.replace('.', '').isdigit():
-                                    match = float(cell_str) > float(value)
-                            except:
-                                pass
-                        elif search_type_val == "smaller":
-                            try:
-                                if cell_str.replace('.', '').isdigit():
-                                    match = float(cell_str) < float(value)
-                            except:
-                                pass
-                        
-                        if match:
-                            results.append(item)
-                            break
-                
-                # تلوين النتائج
-                if results:
-                    for item in results:
-                        current_tags = list(self.table.tree.item(item, 'tags'))
-                        if 'search_result' not in current_tags:
-                            current_tags.append('search_result')
-                            self.table.tree.item(item, tags=tuple(current_tags))
-                    
-                    # التمرير للنتيجة الأولى
-                    self.table.tree.see(results[0])
-                    self.table.tree.selection_set(results[0])
-                    self.table.update_selection(results[0])
-                    
-                    messagebox.showinfo("نتيجة البحث", 
-                                      f"تم العثور على {len(results)} نتيجة")
-                else:
-                    messagebox.showinfo("نتيجة البحث", "لم يتم العثور على نتائج")
-            
-            search_window.destroy()
-        
-        # أزرار
-        btn_frame = ttk.Frame(search_window)
-        btn_frame.pack(pady=20)
-        
-        ttk.Button(btn_frame, text="بحث", command=perform_search).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="إلغاء", 
-                  command=search_window.destroy).pack(side=tk.LEFT, padx=5)
-    
-    def find_next(self):
-        """البحث عن التالي"""
-        if hasattr(self, 'table') and self.search_var.get():
-            items = self.table.tree.get_children()
-            # تصفية العناصر الفارغة والفاصلة
-            valid_items = []
-            for item in items:
-                if 'separator' in self.table.tree.item(item, 'tags'):
-                    continue
-                values = self.table.tree.item(item, 'values')
-                if values and any(str(v).strip() != '' for v in values):
-                    valid_items.append(item)
-            
-            if not valid_items:
-                return
-            
-            selected = self.table.tree.selection()
-            
-            if selected and selected[0] in valid_items:
-                current_idx = valid_items.index(selected[0])
-                next_idx = (current_idx + 1) % len(valid_items)
-            else:
-                next_idx = 0
-            
-            # البحث عن المطابقة التالية
-            search_text = self.search_var.get().lower()
-            search_column = self.search_column_var.get()
-            
-            for i in range(len(valid_items)):
-                idx = (next_idx + i) % len(valid_items)
-                item = valid_items[idx]
-                values = self.table.tree.item(item, 'values')
-                
-                found = False
-                if search_column == "الكل":
-                    for value in values:
-                        if search_text in str(value).lower():
-                            found = True
-                            break
-                else:
-                    if search_column in self.table.columns:
-                        col_idx = self.table.columns.index(search_column)
-                        if search_text in str(values[col_idx]).lower():
-                            found = True
-                
-                if found:
-                    self.table.tree.see(item)
-                    self.table.tree.selection_set(item)
-                    self.table.update_selection(item)
-                    break
-                
-    def load_customers(self):
-        """تحميل جميع عدادات القطاع المحدد بالترتيب الهرمي (جميع الأنواع)"""
-        if not self.sector_id:
-            messagebox.showwarning("تحذير", "الرجاء اختيار قطاع أولاً")
-            return
 
-        # تحديث حالة الزر أثناء التحميل
-        self.save_btn.config(state='disabled', text="⏳ جاري التحميل...", bg='#FF9800')
-        self.save_bottom_btn.config(state='disabled', text="⏳ جاري التحميل...", bg='#FF9800')
-        self.save_status_label.config(text="⏳ جاري تحميل البيانات...", foreground='blue')
-        self.window.update()
-
-        try:
-            from modules.customers import CustomerManager
-            cm = CustomerManager()
-            # جلب جميع العقد بالترتيب الهرمي (جميع الأنواع)
-            all_nodes = cm.get_customer_hierarchy(sector_id=self.sector_id)
-
-            # ترتيب العقد حسب path_names (نفس الترتيب العميق أولاً)
-            all_nodes.sort(key=lambda x: x['path_names'])
-
-            # تحويل إلى صيغة العرض
-            display_data = []
-            self.original_customers_data = []
-            for node in all_nodes:
-                # بيانات العرض
-                row_display = {
-                    'id': node['id'],
-                    'علبة': node.get('box_number', ''),
-                    'مسلسل': node.get('serial_number', ''),
-                    'اسم الزبون': node['name'],
-                    'نوع العداد': node.get('meter_type', ''),  # عمود جديد
-                    'القطاع': node.get('sector_name', ''),
-                    'التأشيرة الحالية': node.get('visa_balance', 0),
-                    'التأشيرة الجديدة': node.get('visa_balance', 0),
-                    'الرصيد الحالي': node.get('current_balance', 0),
-                    'السحب الحالي': node.get('withdrawal_amount', 0),
-                }
-                display_data.append(row_display)
-
-                # البيانات الأصلية للحفظ
-                original_row = {
-                    'id': node['id'],
-                    'علبة': node.get('box_number', ''),
-                    'مسلسل': node.get('serial_number', ''),
-                    'اسم الزبون': node['name'],
-                    'القطاع': node.get('sector_name', ''),
-                    'التأشيرة الحالية': float(node.get('visa_balance', 0)),
-                    'التأشيرة الجديدة': float(node.get('visa_balance', 0)),
-                    'الرصيد الحالي': float(node.get('current_balance', 0)),
-                    'السحب الحالي': float(node.get('withdrawal_amount', 0)),
-                }
-                self.original_customers_data.append(original_row)
-
-            # حساب الإحصاءات
-            total_visa = sum(float(c['التأشيرة الحالية']) for c in self.original_customers_data)
-            total_balance = sum(float(c['الرصيد الحالي']) for c in self.original_customers_data)
-
-            # عرض البيانات في الجدول مع إضافة عمود نوع العداد
-            visible_columns = ["علبة", "مسلسل", "اسم الزبون", "نوع العداد", "القطاع", "التأشيرة الحالية", "التأشيرة الجديدة"]
-            self.display_customers(display_data, visible_columns)
-
-            # تحديث الإحصاءات
-            self.stats_label.config(
-                text=f"عدد العدادات: {len(all_nodes)} | إجمالي التأشيرات: {total_visa:,.0f} | إجمالي الأرصدة: {total_balance:,.0f}"
-            )
-
-            logger.info(f"تم تحميل {len(all_nodes)} عداد للقطاع {self.sector_name}")
-
-        except Exception as e:
-            logger.error(f"خطأ في تحميل العدادات: {e}")
-            messagebox.showerror("خطأ", f"فشل تحميل البيانات: {e}")
-        finally:
-            self.save_btn.config(text="💾 حفظ التعديلات (Ctrl+S)")
-            self.save_bottom_btn.config(text="💾 حفظ التعديلات")
-            self.update_save_button_status()
-
-
-    def display_customers(self, data: List[Dict], visible_columns: List[str] = None):
-        """عرض الزبائن في الجدول"""
-        # تنظيف الحاوية السابقة
-        for widget in self.table_container.winfo_children():
-            widget.destroy()
-        
-        if not data:
-            self.status_label.config(text="لا يوجد زبائن في هذا القطاع")
-            self.save_status_label.config(text="❌ لا توجد بيانات", foreground='red')
-            self.update_save_button_status()
-            return
-        
-        # تحديث ملصق الحالة
-        self.status_label.config(text=f"تم تحميل {len(data)} عداد - يمكنك التعديل الآن")
-        
-        # تحديد الأعمدة المرئية
-        if visible_columns is None:
-            visible_columns = ["علبة", "مسلسل", "اسم الزبون", "القطاع", 
-                            "التأشيرة الحالية", "التأشيرة الجديدة"]
-        
-        # إنشاء الجدول المحسن
-        self.table = ExcelLikeTable(self.table_container, visible_columns, data)
-        self.table.pack(fill=tk.BOTH, expand=True)
-        
-        # تحديث قائمة البحث
-        if hasattr(self, 'search_column_combo'):
-            self.search_column_combo['values'] = ["الكل"] + visible_columns
-        
-        # تحديث حالة الزر
-        self.save_status_label.config(text="✅ البيانات جاهزة للتعديل", foreground='green')
-        
-            
-    def save_changes(self):
-        """حفظ التعديلات في قاعدة البيانات"""
-        if not hasattr(self, 'table'):
-            messagebox.showinfo("لا توجد بيانات", "لا توجد بيانات للحفظ")
-            return
-        
-        # الحصول على البيانات المعدلة فقط
-        modified_data = self.table.get_modified_data()
-        
-        if not modified_data:
-            messagebox.showinfo("لا توجد تغييرات", "لم تقم بأي تعديلات")
-            return
-        
-        # طلب تأكيد
-        if not messagebox.askyesno("تأكيد الحفظ", 
-                                  f"تم العثور على {len(modified_data)} تعديلات. هل تريد المتابعة؟"):
-            return
-        
-        try:
-            total_updated = 0
-            failed_updates = []
-            
-            with db.get_cursor() as cursor:
-                for modified_row in modified_data:
-                    try:
-                        customer_id = modified_row['id']
-                        
-                        if not customer_id:
-                            failed_updates.append(f"الزبون {modified_row.get('علبة')}/{modified_row.get('مسلسل')}: لا يوجد معرف")
-                            continue
-                        
-                        # الحصول على القيم الأصلية والجديدة
-                        old_visa = float(modified_row['التأشيرة_الحالية_أصلية'])
-                        new_visa_str = str(modified_row['التأشيرة_الجديدة']).replace(',', '')
-                        
-                        try:
-                            new_visa = float(new_visa_str) if new_visa_str.replace('.', '').isdigit() else 0.0
-                        except ValueError:
-                            new_visa = 0.0
-                        
-                        # حساب الفرق
-                        difference = new_visa - old_visa
-                        
-                        if difference == 0:
-                            continue  # لا يوجد تغيير فعلي
-                        
-                        # البحث عن الزبون في البيانات الأصلية للحصول على الرصيد والسحب
-                        original_customer = None
-                        for cust in self.original_customers_data:
-                            if cust.get('id') == customer_id:
-                                original_customer = cust
-                                break
-                        
-                        if not original_customer:
-                            failed_updates.append(f"الزبون {customer_id}: لم يتم العثور على البيانات الأصلية")
-                            continue
-                        
-                        # الحصول على القيم الأصلية
-                        old_balance = float(original_customer.get('الرصيد الحالي', 0))
-                        old_withdrawal = float(original_customer.get('السحب الحالي', 0))
-                        
-                        # حساب القيم الجديدة
-                        new_balance = old_balance - difference
-                        new_withdrawal = difference
-                        
-                        # التحديث في قاعدة البيانات
-                        cursor.execute("""
-                            UPDATE customers 
-                            SET visa_balance = %s,
-                                current_balance = %s,
-                                withdrawal_amount = %s,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE id = %s
-                        """, (new_visa, new_balance, new_withdrawal, customer_id))
-                        
-                        # تسجيل في السجل التاريخي
-                        cursor.execute("""
-                            INSERT INTO customer_history 
-                            (customer_id, action_type, transaction_type, amount, 
-                             balance_before, balance_after,
-                             current_balance_before, current_balance_after,
-                             old_value, new_value, notes, created_by)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            customer_id,
-                            'visa_update',
-                            'تحديث تأشيرة',
-                            difference,
-                            old_visa,
-                            new_visa,
-                            old_balance,
-                            new_balance,
-                            old_visa,
-                            new_visa,
-                            f'تعديل مباشر - تأشيرة من {old_visa:,.0f} إلى {new_visa:,.0f}',
-                            self.user_id
-                        ))
-                        
-                        total_updated += 1
-                        logger.info(f"تم تحديث الزبون {customer_id} بتأشيرة {new_visa:,.0f}")
-                        
-                    except Exception as e:
-                        failed_updates.append(f"الزبون {modified_row.get('علبة', '')}/{modified_row.get('مسلسل', '')}: {str(e)}")
-                        logger.error(f"خطأ في تحديث الزبون: {e}")
-            
-            # إظهار النتائج
-            if total_updated > 0:
-                message = f"✅ تم تحديث {total_updated} زبون بنجاح"
-                if failed_updates:
-                    message += f"\n❌ فشل تحديث {len(failed_updates)} زبون"
-                    message += "\n\nالأخطاء:\n" + "\n".join(failed_updates[:5])
-                    if len(failed_updates) > 5:
-                        message += f"\n... و{len(failed_updates) - 5} خطأ آخر"
-                
-                messagebox.showinfo("نتيجة الحفظ", message)
-                
-                # إعادة تحميل البيانات لتعكس التغييرات
-                self.load_customers()
-            else:
-                if failed_updates:
-                    messagebox.showerror("خطأ", "فشل تحديث جميع الزبائن:\n" + "\n".join(failed_updates[:10]))
-                else:
-                    messagebox.showinfo("لا توجد تغييرات", "لم يتم تحديث أي زبون")
-        
-        except Exception as e:
-            logger.error(f"خطأ في حفظ التعديلات: {e}")
-            messagebox.showerror("خطأ", f"فشل حفظ التعديلات: {e}")
-    
-    def reset_changes(self):
-        """استعادة القيم الأصلية"""
-        if hasattr(self, 'table'):
-            if messagebox.askyesno("استعادة", "هل تريد استعادة جميع التعديلات؟"):
-                self.load_customers()
-    
-    def export_to_excel(self):
-        """تصدير البيانات إلى ملف Excel"""
-        try:
-            if not hasattr(self, 'table'):
-                messagebox.showwarning("لا توجد بيانات", "لا توجد بيانات للتصدير")
-                return
-            
-            import pandas as pd
-            from datetime import datetime
-            
-            # الحصول على جميع البيانات
-            all_data = self.table.get_all_data()
-            
-            if not all_data:
-                messagebox.showwarning("لا توجد بيانات", "لا توجد بيانات للتصدير")
-                return
-            
-            # تحويل البيانات إلى DataFrame
-            df_data = []
-            for row in all_data:
-                df_row = {}
-                for key, value in row.items():
-                    df_row[key] = value
-                df_data.append(df_row)
-            
-            df = pd.DataFrame(df_data)
-            
-            # إضافة عمود "الفرق" إذا كانت هناك تعديلات
-            modified_data = self.table.get_modified_data()
-            if modified_data:
-                differences = []
-                for mod_row in modified_data:
-                    differences.append(float(mod_row['التأشيرة_الجديدة'].replace(',', '')) - 
-                                      float(mod_row['التأشيرة_الحالية_أصلية']))
-                
-                # إضافة الفروق إلى DataFrame
-                diff_series = pd.Series(differences, index=[i for i in range(len(differences))])
-                df['الفرق'] = diff_series
-            
-            # اختيار الملف للتصدير
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_filename = f"تأشيرات_{self.sector_name}_{timestamp}.xlsx"
-            
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-                initialfile=default_filename
-            )
-            
-            if file_path:
-                # تصدير إلى Excel
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                messagebox.showinfo("نجاح", f"تم التصدير إلى:\n{file_path}")
-                
-        except ImportError:
-            messagebox.showerror("خطأ", "لم يتم العثور على مكتبة pandas. الرجاء تثبيتها باستخدام: pip install pandas openpyxl")
-        except Exception as e:
-            logger.error(f"خطأ في التصدير: {e}")
-            messagebox.showerror("خطأ", f"فشل التصدير: {e}")
 
 
 class VisaEditor:
@@ -1588,6 +948,7 @@ class VisaEditor:
         
         # مركز النافذة
         self.center_window()
+        
     
     def start_save_button_updater(self):
         """بدء تحديث تلقائي لحالة زر الحفظ"""
@@ -1874,9 +1235,10 @@ class VisaEditor:
                     self.table.tree.selection_set(item)
                     self.table.update_selection(item)
                     break
-                
+                    
+    # في VisaEditor.load_customers()
     def load_customers(self):
-        """تحميل جميع عدادات القطاع المحدد بالترتيب الهرمي (جميع الأنواع)"""
+        """تحميل جميع عدادات القطاع المحدد بالترتيب الهرمي (جميع الأنواع) مع updated_at"""
         if not self.sector_id:
             messagebox.showwarning("تحذير", "الرجاء اختيار قطاع أولاً")
             return
@@ -1888,13 +1250,46 @@ class VisaEditor:
         self.window.update()
 
         try:
-            from modules.customers import CustomerManager
-            cm = CustomerManager()
-            # جلب جميع العقد بالترتيب الهرمي (جميع الأنواع)
-            all_nodes = cm.get_customer_hierarchy(sector_id=self.sector_id)
-
-            # ترتيب العقد حسب path_names (نفس الترتيب العميق أولاً)
-            all_nodes.sort(key=lambda x: x['path_names'])
+            # استعلام مباشر لجلب البيانات مع updated_at
+            with db.get_cursor() as cursor:
+                # جلب جميع العقد (العدادات) مع updated_at
+                # هنا نستخدم استعلام عودي للحصول على التسلسل الهرمي كاملاً
+                query = """
+                    WITH RECURSIVE meter_tree AS (
+                        SELECT 
+                            id, name, meter_type, financial_category, visa_balance,
+                            box_number, serial_number, parent_meter_id, sector_id,
+                            current_balance, withdrawal_amount, updated_at,
+                            0 AS level,
+                            ARRAY[id] AS path,
+                            ARRAY[name]::VARCHAR[] AS path_names
+                        FROM customers
+                        WHERE is_active = TRUE
+                        AND parent_meter_id IS NULL
+                        AND (sector_id = %s OR %s IS NULL)
+                        
+                        UNION ALL
+                        
+                        SELECT 
+                            c.id, c.name, c.meter_type, c.financial_category, c.visa_balance,
+                            c.box_number, c.serial_number, c.parent_meter_id, c.sector_id,
+                            c.current_balance, c.withdrawal_amount, c.updated_at,
+                            mt.level + 1,
+                            mt.path || c.id,
+                            mt.path_names || c.name
+                        FROM customers c
+                        INNER JOIN meter_tree mt ON c.parent_meter_id = mt.id
+                        WHERE c.is_active = TRUE
+                    )
+                    SELECT 
+                        mt.*,
+                        s.name as sector_name
+                    FROM meter_tree mt
+                    LEFT JOIN sectors s ON mt.sector_id = s.id
+                    ORDER BY mt.path   -- ترتيب حسب المعرفات للحفاظ على الترتيب الهرمي
+                """
+                cursor.execute(query, (self.sector_id, self.sector_id))
+                all_nodes = cursor.fetchall()
 
             # تحويل إلى صيغة العرض
             display_data = []
@@ -1906,16 +1301,17 @@ class VisaEditor:
                     'علبة': node.get('box_number', ''),
                     'مسلسل': node.get('serial_number', ''),
                     'اسم الزبون': node['name'],
-                    'نوع العداد': node.get('meter_type', ''),  # عمود جديد
+                    'نوع العداد': node.get('meter_type', ''),
                     'القطاع': node.get('sector_name', ''),
                     'التأشيرة الحالية': node.get('visa_balance', 0),
                     'التأشيرة الجديدة': node.get('visa_balance', 0),
                     'الرصيد الحالي': node.get('current_balance', 0),
                     'السحب الحالي': node.get('withdrawal_amount', 0),
+                    'updated_at': node.get('updated_at')   # <-- هذا السطر الجديد
                 }
                 display_data.append(row_display)
 
-                # البيانات الأصلية للحفظ
+                # البيانات الأصلية للحفظ مع updated_at
                 original_row = {
                     'id': node['id'],
                     'علبة': node.get('box_number', ''),
@@ -1926,6 +1322,7 @@ class VisaEditor:
                     'التأشيرة الجديدة': float(node.get('visa_balance', 0)),
                     'الرصيد الحالي': float(node.get('current_balance', 0)),
                     'السحب الحالي': float(node.get('withdrawal_amount', 0)),
+                    'updated_at': node.get('updated_at')   # إضافة updated_at
                 }
                 self.original_customers_data.append(original_row)
 
@@ -1937,7 +1334,7 @@ class VisaEditor:
             visible_columns = ["علبة", "مسلسل", "اسم الزبون", "نوع العداد", "القطاع", "التأشيرة الحالية", "التأشيرة الجديدة"]
             self.display_customers(display_data, visible_columns)
 
-            # تحديث الإحصاءات (مع تغيير النص إلى "عدادات" بدلاً من "زبائن")
+            # تحديث الإحصاءات
             self.stats_label.config(
                 text=f"عدد العدادات: {len(all_nodes)} | إجمالي التأشيرات: {total_visa:,.0f} | إجمالي الأرصدة: {total_balance:,.0f}"
             )
@@ -1968,7 +1365,7 @@ class VisaEditor:
         # تحديث ملصق الحالة
         self.status_label.config(text=f"تم تحميل {len(data)} عداد - يمكنك التعديل الآن")
         
-        # تحديد الأعمدة المرئية (إذا لم تمرر نستخدم القائمة الافتراضية مع إضافة نوع العداد)
+        # تحديد الأعمدة المرئية
         if visible_columns is None:
             visible_columns = ["علبة", "مسلسل", "اسم الزبون", "نوع العداد", "القطاع", 
                             "التأشيرة الحالية", "التأشيرة الجديدة"]
@@ -1983,157 +1380,6 @@ class VisaEditor:
         
         # تحديث حالة الزر
         self.save_status_label.config(text="✅ البيانات جاهزة للتعديل", foreground='green')
-        
-            
-    def save_changes(self):
-        """حفظ التعديلات في قاعدة البيانات"""
-        if not hasattr(self, 'table'):
-            messagebox.showinfo("لا توجد بيانات", "لا توجد بيانات للحفظ")
-            return
-        
-        # الحصول على البيانات المعدلة فقط
-        modified_data = self.table.get_modified_data()
-        
-        if not modified_data:
-            messagebox.showinfo("لا توجد تغييرات", "لم تقم بأي تعديلات")
-            return
-        
-        # تغيير مظهر زر الحفظ أثناء الحفظ
-        self.save_btn.config(state='disabled', text="⏳ جاري الحفظ...", bg='#FF9800')
-        self.save_bottom_btn.config(state='disabled', text="⏳ جاري الحفظ...", bg='#FF9800')
-        self.save_status_label.config(text="⏳ جاري حفظ التعديلات...", foreground='orange')
-        self.window.update()
-        
-        # طلب تأكيد
-        if not messagebox.askyesno("تأكيد الحفظ", 
-                                  f"تم العثور على {len(modified_data)} تعديلات. هل تريد المتابعة؟"):
-            self.update_save_button_status()
-            return
-        
-        try:
-            total_updated = 0
-            failed_updates = []
-            
-            with db.get_cursor() as cursor:
-                for modified_row in modified_data:
-                    try:
-                        customer_id = modified_row['id']
-                        
-                        if not customer_id:
-                            failed_updates.append(f"الزبون {modified_row.get('علبة')}/{modified_row.get('مسلسل')}: لا يوجد معرف")
-                            continue
-                        
-                        # الحصول على القيم الأصلية والجديدة
-                        old_visa = float(modified_row['التأشيرة_الحالية_أصلية'])
-                        new_visa_str = str(modified_row['التأشيرة_الجديدة']).replace(',', '')
-                        
-                        try:
-                            new_visa = float(new_visa_str) if new_visa_str.replace('.', '').isdigit() else 0.0
-                        except ValueError:
-                            new_visa = 0.0
-                        
-                        # حساب الفرق
-                        difference = new_visa - old_visa
-                        
-                        if difference == 0:
-                            continue  # لا يوجد تغيير فعلي
-                        
-                        # البحث عن الزبون في البيانات الأصلية للحصول على الرصيد والسحب
-                        original_customer = None
-                        for cust in self.original_customers_data:
-                            if cust.get('id') == customer_id:
-                                original_customer = cust
-                                break
-                        
-                        if not original_customer:
-                            failed_updates.append(f"الزبون {customer_id}: لم يتم العثور على البيانات الأصلية")
-                            continue
-                        
-                        # الحصول على القيم الأصلية
-                        old_balance = float(original_customer.get('الرصيد الحالي', 0))
-                        old_withdrawal = float(original_customer.get('السحب الحالي', 0))
-                        
-                        # حساب القيم الجديدة
-                        new_balance = old_balance - difference
-                        new_withdrawal = old_withdrawal + difference
-                        
-                        # التحديث في قاعدة البيانات
-                        cursor.execute("""
-                            UPDATE customers 
-                            SET visa_balance = %s,
-                                current_balance = %s,
-                                withdrawal_amount = %s,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE id = %s
-                        """, (new_visa, new_balance, new_withdrawal, customer_id))
-                        
-                        # تسجيل في السجل التاريخي
-                        cursor.execute("""
-                            INSERT INTO customer_history 
-                            (customer_id, action_type, transaction_type, amount, 
-                             balance_before, balance_after,
-                             current_balance_before, current_balance_after,
-                             old_value, new_value, notes, created_by)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """, (
-                            customer_id,
-                            'visa_update',
-                            'تحديث تأشيرة',
-                            difference,
-                            old_visa,
-                            new_visa,
-                            old_balance,
-                            new_balance,
-                            old_visa,
-                            new_visa,
-                            f'تعديل مباشر - تأشيرة من {old_visa:,.0f} إلى {new_visa:,.0f}',
-                            self.user_id
-                        ))
-                        
-                        total_updated += 1
-                        logger.info(f"تم تحديث الزبون {customer_id} بتأشيرة {new_visa:,.0f}")
-                        
-                    except Exception as e:
-                        failed_updates.append(f"الزبون {modified_row.get('علبة', '')}/{modified_row.get('مسلسل', '')}: {str(e)}")
-                        logger.error(f"خطأ في تحديث الزبون: {e}")
-            
-            # إظهار النتائج
-            if total_updated > 0:
-                message = f"✅ تم تحديث {total_updated} زبون بنجاح"
-                if failed_updates:
-                    message += f"\n❌ فشل تحديث {len(failed_updates)} زبون"
-                    message += "\n\nالأخطاء:\n" + "\n".join(failed_updates[:5])
-                    if len(failed_updates) > 5:
-                        message += f"\n... و{len(failed_updates) - 5} خطأ آخر"
-                
-                messagebox.showinfo("نتيجة الحفظ", message)
-                
-                # تغيير مظهر زر الحفظ بعد النجاح
-                self.save_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
-                self.save_bottom_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
-                self.save_status_label.config(text=f"✅ تم حفظ {total_updated} تعديل بنجاح", foreground='green')
-                
-                # إعادة تحميل البيانات لتعكس التغييرات بعد 2 ثانية
-                self.window.after(2000, self.load_customers)
-            else:
-                if failed_updates:
-                    messagebox.showerror("خطأ", "فشل تحديث جميع الزبائن:\n" + "\n".join(failed_updates[:10]))
-                    self.save_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-                    self.save_bottom_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-                    self.save_status_label.config(text="❌ فشل في حفظ التعديلات", foreground='red')
-                else:
-                    messagebox.showinfo("لا توجد تغييرات", "لم يتم تحديث أي زبون")
-                    self.update_save_button_status()
-        
-        except Exception as e:
-            logger.error(f"خطأ في حفظ التعديلات: {e}")
-            messagebox.showerror("خطأ", f"فشل حفظ التعديلات: {e}")
-            self.save_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-            self.save_bottom_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-            self.save_status_label.config(text="❌ حدث خطأ أثناء الحفظ", foreground='red')
-        
-        # استعادة المظهر الطبيعي بعد 3 ثوان
-        self.window.after(3000, self.update_save_button_status)
     
     def reset_changes(self):
         """استعادة القيم الأصلية"""
