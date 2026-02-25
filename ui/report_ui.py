@@ -194,6 +194,7 @@ class ReportUI(tk.Frame):
             ("💰 تقرير المبيعات", self.show_sales_report),
             ("🧾 تقرير الفواتير", self.show_invoice_report),
             ("🖨️ أوراق التأشيرات", self.show_visa_report),
+            ("📋 جرد الدورة", self.show_cycle_inventory_report),
         ]
 
         for report_name, command in reports:
@@ -1157,6 +1158,10 @@ class ReportUI(tk.Frame):
                 success, filepath = self.report_manager.export_accountant_collections_to_excel(
                     self.current_report, filename
                 )
+            elif report_type == 'cycle_inventory':
+                success, filepath = self.report_manager.export_cycle_inventory_to_excel(
+                    self.current_report, filename
+                )       
             else:
                 messagebox.showwarning("تحذير", "نوع التقرير غير مدعوم للتصدير")
                 return
@@ -1540,3 +1545,230 @@ class ReportUI(tk.Frame):
                     f"{summ['total_collected']:,.0f}"
                 ))
             summary_tree.pack(fill='x')
+
+
+    def show_cycle_inventory_report(self):
+        """عرض تقرير جرد الدورة"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+
+        # يمكن إضافة نافذة لاختيار التاريخ، لكن سنستخدم الفترة الافتراضية الآن
+        # نافذة بسيطة لاختيار التاريخين (اختياري)
+        self._ask_cycle_dates()
+
+    def _ask_cycle_dates(self):
+        """نافذة إدخال تاريخي البداية والنهاية (يمكن تخطيها لاستخدام الافتراضي)"""
+        import tkinter.simpledialog as simpledialog
+        from datetime import datetime, timedelta
+
+        # تاريخ افتراضي: الأحد الحالي
+        today = datetime.now().date()
+        days_until_sunday = (6 - today.weekday()) % 7
+        default_end = today + timedelta(days=days_until_sunday)
+        default_start = default_end - timedelta(days=6)
+
+        end_str = simpledialog.askstring(
+            "تاريخ النهاية",
+            "أدخل تاريخ النهاية (YYYY-MM-DD):",
+            initialvalue=default_end.strftime('%Y-%m-%d')
+        )
+        if not end_str:
+            end_str = default_end.strftime('%Y-%m-%d')
+        start_str = simpledialog.askstring(
+            "تاريخ البداية",
+            "أدخل تاريخ البداية (YYYY-MM-DD):",
+            initialvalue=default_start.strftime('%Y-%m-%d')
+        )
+        if not start_str:
+            start_str = default_start.strftime('%Y-%m-%d')
+
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_cycle_inventory_report(start_str, end_str)
+            if 'error' in report:
+                self.show_error(report['error'])
+                return
+            self.current_report = report
+            self.current_report_type = 'cycle_inventory'
+            self.export_excel_btn.config(state='normal')
+            self.filter_btn.config(state='normal')
+            self.setup_export_options('cycle_inventory')
+            self.display_cycle_inventory_report(report)
+            self.update_status("تم توليد تقرير جرد الدورة")
+        except Exception as e:
+            self.show_error(f"خطأ في توليد التقرير: {e}")
+
+    def display_cycle_inventory_report(self, report):
+        """عرض محتوى تقرير جرد الدورة في results_frame"""
+        for widget in self.results_frame.winfo_children():
+            widget.destroy()
+
+        main_frame = tk.Frame(self.results_frame, bg='white')
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # عنوان
+        title_lbl = tk.Label(main_frame, text=report['report_title'],
+                            font=('Arial', 14, 'bold'), bg='white')
+        title_lbl.pack(pady=(0,10))
+
+        # معلومات الفترة
+        period = report.get('period', {})
+        period_lbl = tk.Label(main_frame,
+                            text=f"الفترة: {period.get('start')}  →  {period.get('end')}",
+                            font=('Arial', 10), bg='white', fg='gray')
+        period_lbl.pack()
+
+        # إنشاء notebook داخلي لتقسيم الأقسام
+        nb = ttk.Notebook(main_frame)
+        nb.pack(fill='both', expand=True, pady=10)
+
+        # ---- القسم 1: لنا وعلينا ----
+        tab1 = tk.Frame(nb, bg='white')
+        nb.add(tab1, text='لنا وعلينا')
+        self._display_we_vs_them_tab(tab1, report['sections']['we_vs_them'])
+
+        # ---- القسم 2: هدر العلب ----
+        tab2 = tk.Frame(nb, bg='white')
+        nb.add(tab2, text='هدر العلب')
+        self._display_waste_tab(tab2, report['sections']['waste'])
+
+        # ---- القسم 3: أرصدة المجاني ----
+        tab3 = tk.Frame(nb, bg='white')
+        nb.add(tab3, text='أرصدة المجاني')
+        self._display_free_tab(tab3, report['sections']['free_balances'])
+
+        # ---- القسم 4: إحصائيات الفواتير ----
+        tab4 = tk.Frame(nb, bg='white')
+        nb.add(tab4, text='الكيليات المقطوعة')
+        self._display_invoices_tab(tab4, report['sections']['invoices'])
+
+    def _display_we_vs_them_tab(self, parent, data):
+        """عرض جدول لنا وعلينا"""
+        # إنشاء Treeview
+        tree = ttk.Treeview(parent, columns=('sector','lana_count','lana_amt','alayna_count','alayna_amt','net'),
+                            show='headings', height=12)
+        tree.heading('sector', text='القطاع')
+        tree.heading('lana_count', text='عدد لنا')
+        tree.heading('lana_amt', text='مجموع لنا (ك.و)')
+        tree.heading('alayna_count', text='عدد علينا')
+        tree.heading('alayna_amt', text='مجموع علينا (ك.و)')
+        tree.heading('net', text='الصافي')
+
+        tree.column('sector', width=150)
+        tree.column('lana_count', width=70, anchor='center')
+        tree.column('lana_amt', width=100, anchor='center')
+        tree.column('alayna_count', width=70, anchor='center')
+        tree.column('alayna_amt', width=100, anchor='center')
+        tree.column('net', width=100, anchor='center')
+
+        for sec in data.get('sectors', []):
+            net = sec['alayna_amount'] - sec['lana_amount']
+            tree.insert('', 'end', values=(
+                sec['sector_name'],
+                sec['lana_count'],
+                f"{sec['lana_amount']:,.0f}",
+                sec['alayna_count'],
+                f"{sec['alayna_amount']:,.0f}",
+                f"{net:,.0f}"
+            ))
+        tree.pack(side='left', fill='both', expand=True, padx=5, pady=5)
+
+        # شريط تمرير
+        scroll = ttk.Scrollbar(parent, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right', fill='y')
+
+        # إجمالي
+        totals = data.get('totals', {})
+        total_net = totals['total_alayna_amount'] - totals['total_lana_amount']
+        total_frame = tk.Frame(parent, bg='#f0f0f0', relief='sunken', borderwidth=1)
+        total_frame.pack(fill='x', padx=5, pady=5)
+        tk.Label(total_frame,
+                text=f"الإجمالي العام: لنا {totals['total_lana_amount']:,.0f} (عدد {totals['total_lana_count']})  |  علينا {totals['total_alayna_amount']:,.0f} (عدد {totals['total_alayna_count']})  |  الصافي {total_net:,.0f}",
+                font=('Arial', 10, 'bold'), bg='#f0f0f0').pack(pady=5)
+
+    def _display_waste_tab(self, parent, data):
+        """عرض جدول هدر العلب"""
+        tree = ttk.Treeview(parent, columns=('sector','cust_withdrawal','main_withdrawal','waste','waste%'),
+                            show='headings', height=12)
+        tree.heading('sector', text='القطاع')
+        tree.heading('cust_withdrawal', text='سحب الزبائن')
+        tree.heading('main_withdrawal', text='سحب الرئيسيات')
+        tree.heading('waste', text='الهدر')
+        tree.heading('waste%', text='نسبة الهدر %')
+
+        tree.column('sector', width=150)
+        tree.column('cust_withdrawal', width=120, anchor='center')
+        tree.column('main_withdrawal', width=120, anchor='center')
+        tree.column('waste', width=100, anchor='center')
+        tree.column('waste%', width=100, anchor='center')
+
+        for sec in data.get('sectors', []):
+            tree.insert('', 'end', values=(
+                sec['sector_name'],
+                f"{sec['customers_withdrawal']:,.0f}",
+                f"{sec['main_meters_withdrawal']:,.0f}",
+                f"{sec['waste']:,.0f}",
+                f"{sec['waste_percentage']:.1f}%"
+            ))
+        tree.pack(side='left', fill='both', expand=True, padx=5, pady=5)
+
+        scroll = ttk.Scrollbar(parent, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right', fill='y')
+
+        totals = data.get('totals', {})
+        total_frame = tk.Frame(parent, bg='#f0f0f0', relief='sunken', borderwidth=1)
+        total_frame.pack(fill='x', padx=5, pady=5)
+        tk.Label(total_frame,
+                text=f"الإجمالي: سحب الزبائن {totals['total_customers_withdrawal']:,.0f}  |  سحب الرئيسيات {totals['total_main_withdrawal']:,.0f}  |  إجمالي الهدر {totals['total_waste']:,.0f}",
+                font=('Arial', 10, 'bold'), bg='#f0f0f0').pack(pady=5)
+
+    def _display_free_tab(self, parent, data):
+        """عرض أرصدة المجاني"""
+        info_frame = tk.Frame(parent, bg='white')
+        info_frame.pack(fill='both', expand=True, padx=20, pady=20)
+
+        tk.Label(info_frame, text="الزبائن المجانيون (free + free_vip)",
+                font=('Arial', 12, 'bold'), bg='white').pack(pady=(0,10))
+
+        stats = [
+            ('عدد الزبائن المجانيين', f"{data.get('count',0):,}"),
+            ('إجمالي الرصيد المتبقي (ك.و)', f"{data.get('total_free_remaining',0):,.0f}"),
+            ('إجمالي سحب المجانيين (ك.و)', f"{data.get('total_free_withdrawal',0):,.0f}"),
+        ]
+        for label, value in stats:
+            row = tk.Frame(info_frame, bg='white')
+            row.pack(fill='x', pady=5)
+            tk.Label(row, text=label+':', font=('Arial', 11, 'bold'),
+                    bg='white', width=25, anchor='e').pack(side='left')
+            tk.Label(row, text=value, font=('Arial', 11),
+                    bg='white', fg='#2c3e50', anchor='w').pack(side='left', padx=10)
+
+    def _display_invoices_tab(self, parent, data):
+        """عرض إحصائيات الفواتير"""
+        info_frame = tk.Frame(parent, bg='white')
+        info_frame.pack(fill='both', expand=True, padx=20, pady=20)
+
+        period_lbl = tk.Label(info_frame,
+                            text=f"الفترة: {data.get('start_date')} → {data.get('end_date')}",
+                            font=('Arial', 11, 'italic'), bg='white', fg='gray')
+        period_lbl.pack(pady=(0,15))
+
+        stats = [
+            ('عدد الفواتير', f"{data.get('invoice_count',0):,}"),
+            ('مجموع الكيليلات (ك.و)', f"{data.get('total_kilowatts',0):,.1f}"),
+            ('مجموع الكيليلات المجانية (ك.و)', f"{data.get('total_free_kilowatts',0):,.1f}"),
+            ('مجموع الحسميات (ل.س)', f"{data.get('total_discount',0):,.0f}"),
+            ('المبلغ الكلي (ل.س)', f"{data.get('total_amount',0):,.0f}"),
+        ]
+        for label, value in stats:
+            row = tk.Frame(info_frame, bg='white')
+            row.pack(fill='x', pady=5)
+            tk.Label(row, text=label+':', font=('Arial', 11, 'bold'),
+                    bg='white', width=25, anchor='e').pack(side='left')
+            tk.Label(row, text=value, font=('Arial', 11),
+                    bg='white', fg='#2c3e50', anchor='w').pack(side='left', padx=10)
+
+

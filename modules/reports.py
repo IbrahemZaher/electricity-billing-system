@@ -1973,3 +1973,281 @@ class ReportManager:
         except Exception as e:
             logger.error(f"خطأ في تصدير تقرير جبايات المحاسب: {e}")
             return False, str(e)
+
+
+    def get_cycle_inventory_report(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """
+        تقرير جرد الدورة (لنا وعلينا، هدر العلب، أرصدة المجاني، إحصائيات الفواتير)
+        
+        Args:
+            start_date: تاريخ بداية الفترة (YYYY-MM-DD) - افتراضياً الاثنين الماضي
+            end_date: تاريخ نهاية الفترة (YYYY-MM-DD) - افتراضياً الأحد الحالي
+        
+        Returns:
+            dict يحتوي على الأقسام الأربعة
+        """
+        from datetime import datetime, timedelta
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # تعيين الفترة الافتراضية: الاثنين الماضي → الأحد الحالي
+        if not end_date:
+            today = datetime.now().date()
+            # الأحد الحالي = اليوم + (6 - weekday) إذا كان اليوم ≠ الأحد
+            days_until_sunday = (6 - today.weekday()) % 7
+            end_date = (today + timedelta(days=days_until_sunday)).strftime('%Y-%m-%d')
+        if not start_date:
+            # الاثنين الماضي = end_date - 6 أيام
+            end = datetime.strptime(end_date, '%Y-%m-%d').date()
+            start_date = (end - timedelta(days=6)).strftime('%Y-%m-%d')
+
+        result = {
+            'report_title': '📋 جرد الدورة',
+            'period': {'start': start_date, 'end': end_date},
+            'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'sections': {}
+        }
+
+        try:
+            # ========== 1. لنا وعلينا (حسب القطاعات) ==========
+            # نستخدم الدالة الموجودة في CustomerManager
+            from modules.customers import CustomerManager
+            cm = CustomerManager()
+            balance_stats = cm.get_customer_balance_by_sector()
+            result['sections']['we_vs_them'] = {
+                'title': 'لنا وعلينا حسب القطاع',
+                'sectors': balance_stats['sectors'],
+                'totals': {
+                    'total_lana_amount': balance_stats['total_lana_amount'],
+                    'total_alayna_amount': balance_stats['total_alayna_amount'],
+                    'total_lana_count': balance_stats['total_lana_count'],
+                    'total_alayna_count': balance_stats['total_alayna_count'],
+                }
+            }
+
+            # ========== 2. هدر العلب ==========
+            # لكل قطاع: مجموع سحب الزبائن - مجموع سحب الرئيسيات
+            waste_query = """
+                SELECT
+                    s.id as sector_id,
+                    s.name as sector_name,
+                    COALESCE(SUM(CASE WHEN c.meter_type = 'زبون' THEN c.withdrawal_amount ELSE 0 END), 0) as customers_withdrawal,
+                    COALESCE(SUM(CASE WHEN c.meter_type = 'رئيسية' THEN c.withdrawal_amount ELSE 0 END), 0) as main_meters_withdrawal
+                FROM sectors s
+                LEFT JOIN customers c ON s.id = c.sector_id AND c.is_active = TRUE
+                WHERE s.is_active = TRUE
+                GROUP BY s.id, s.name
+                ORDER BY s.name
+            """
+            with db.get_cursor() as cursor:
+                cursor.execute(waste_query)
+                rows = cursor.fetchall()
+                waste_by_sector = []
+                total_customers_withdrawal = 0
+                total_main_withdrawal = 0
+                for row in rows:
+                    sector_id = row['sector_id']
+                    sector_name = row['sector_name']
+                    cust_w = float(row['customers_withdrawal'] or 0)
+                    main_w = float(row['main_meters_withdrawal'] or 0)
+                    waste = main_w - cust_w   # هدر = ما سُحب من الرئيسيات - ما وصل للزبائن
+                    total_customers_withdrawal += cust_w
+                    total_main_withdrawal += main_w
+                    waste_by_sector.append({
+                        'sector_id': sector_id,
+                        'sector_name': sector_name,
+                        'customers_withdrawal': cust_w,
+                        'main_meters_withdrawal': main_w,
+                        'waste': waste,
+                        'waste_percentage': (waste / main_w * 100) if main_w > 0 else 0
+                    })
+            result['sections']['waste'] = {
+                'title': 'هدر العلب (الفرق بين سحب الرئيسيات والزبائن)',
+                'sectors': waste_by_sector,
+                'totals': {
+                    'total_customers_withdrawal': total_customers_withdrawal,
+                    'total_main_withdrawal': total_main_withdrawal,
+                    'total_waste': total_main_withdrawal - total_customers_withdrawal,
+                }
+            }
+
+            # ========== 3. أرصدة المجاني ==========
+            free_query = """
+                SELECT
+                    COUNT(*) as free_customers_count,
+                    COALESCE(SUM(free_remaining), 0) as total_free_remaining,
+                    COALESCE(SUM(withdrawal_amount), 0) as total_free_withdrawal
+                FROM customers
+                WHERE financial_category IN ('free', 'free_vip')
+                AND is_active = TRUE
+            """
+            with db.get_cursor() as cursor:
+                cursor.execute(free_query)
+                free_row = cursor.fetchone()
+            result['sections']['free_balances'] = {
+                'title': 'أرصدة الزبائن المجانيين',
+                'count': free_row['free_customers_count'] if free_row else 0,
+                'total_free_remaining': float(free_row['total_free_remaining']) if free_row else 0,
+                'total_free_withdrawal': float(free_row['total_free_withdrawal']) if free_row else 0,
+            }
+
+            # ========== 4. إحصائيات الفواتير في الفترة ==========
+            invoice_query = """
+                SELECT
+                    COUNT(*) as invoice_count,
+                    COALESCE(SUM(kilowatt_amount), 0) as total_kilowatts,
+                    COALESCE(SUM(free_kilowatt), 0) as total_free_kilowatts,
+                    COALESCE(SUM(discount), 0) as total_discount,
+                    COALESCE(SUM(total_amount), 0) as total_amount
+                FROM invoices
+                WHERE payment_date BETWEEN %s AND %s
+                AND status = 'active'
+            """
+            with db.get_cursor() as cursor:
+                cursor.execute(invoice_query, (start_date, end_date))
+                inv_row = cursor.fetchone()
+            result['sections']['invoices'] = {
+                'title': f'الكيليات المقطوعة من {start_date} إلى {end_date}',
+                'start_date': start_date,
+                'end_date': end_date,
+                'invoice_count': inv_row['invoice_count'] if inv_row else 0,
+                'total_kilowatts': float(inv_row['total_kilowatts']) if inv_row else 0,
+                'total_free_kilowatts': float(inv_row['total_free_kilowatts']) if inv_row else 0,
+                'total_discount': float(inv_row['total_discount']) if inv_row else 0,
+                'total_amount': float(inv_row['total_amount']) if inv_row else 0,
+            }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"خطأ في تقرير جرد الدورة: {e}", exc_info=True)
+            return {'error': str(e)}            
+
+
+    def export_cycle_inventory_to_excel(self, report_data: Dict[str, Any], filename: str = None) -> Tuple[bool, str]:
+        """
+        تصدير تقرير جرد الدورة إلى Excel مع 4 أوراق منفصلة.
+        """
+        try:
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"جرد_الدورة_{timestamp}.xlsx"
+
+            export_dir = "exports"
+            os.makedirs(export_dir, exist_ok=True)
+            filepath = os.path.join(export_dir, filename)
+
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                sections = report_data.get('sections', {})
+
+                # ========== ورقة معلومات عامة ==========
+                info_data = [
+                    ['تقرير جرد الدورة', report_data.get('report_title', '')],
+                    ['تاريخ الإنشاء', report_data.get('generated_at', '')],
+                    ['الفترة من', report_data.get('period', {}).get('start', '')],
+                    ['الفترة إلى', report_data.get('period', {}).get('end', '')],
+                ]
+                df_info = pd.DataFrame(info_data)
+                df_info.to_excel(writer, sheet_name='معلومات', index=False, header=False)
+
+                # ========== 1. لنا وعلينا ==========
+                we_vs_them = sections.get('we_vs_them', {})
+                sectors_we = we_vs_them.get('sectors', [])
+                if sectors_we:
+                    data_we = []
+                    for sec in sectors_we:
+                        data_we.append([
+                            sec['sector_name'],
+                            sec.get('lana_count', 0),
+                            sec.get('lana_amount', 0),
+                            sec.get('alayna_count', 0),
+                            sec.get('alayna_amount', 0),
+                            sec.get('alayna_amount', 0) - sec.get('lana_amount', 0)
+                        ])
+                    df_we = pd.DataFrame(data_we, columns=[
+                        'القطاع', 'عدد لنا', 'مجموع لنا (ك.و)', 'عدد علينا', 'مجموع علينا (ك.و)', 'الصافي'
+                    ])
+                    # إضافة صف الإجماليات
+                    totals = we_vs_them.get('totals', {})
+                    total_row = pd.DataFrame([[
+                        'الإجمالي العام',
+                        totals.get('total_lana_count', 0),
+                        totals.get('total_lana_amount', 0),
+                        totals.get('total_alayna_count', 0),
+                        totals.get('total_alayna_amount', 0),
+                        totals.get('total_alayna_amount', 0) - totals.get('total_lana_amount', 0)
+                    ]], columns=df_we.columns)
+                    df_we = pd.concat([df_we, total_row], ignore_index=True)
+                    df_we.to_excel(writer, sheet_name='لنا وعلينا', index=False)
+
+                # ========== 2. هدر العلب ==========
+                waste = sections.get('waste', {})
+                sectors_waste = waste.get('sectors', [])
+                if sectors_waste:
+                    data_waste = []
+                    for sec in sectors_waste:
+                        data_waste.append([
+                            sec['sector_name'],
+                            sec.get('customers_withdrawal', 0),
+                            sec.get('main_meters_withdrawal', 0),
+                            sec.get('waste', 0),
+                            sec.get('waste_percentage', 0)
+                        ])
+                    df_waste = pd.DataFrame(data_waste, columns=[
+                        'القطاع', 'سحب الزبائن (ك.و)', 'سحب الرئيسيات (ك.و)', 'الهدر (ك.و)', 'نسبة الهدر %'
+                    ])
+                    # إجماليات
+                    tot_waste = waste.get('totals', {})
+                    total_row = pd.DataFrame([[
+                        'الإجمالي',
+                        tot_waste.get('total_customers_withdrawal', 0),
+                        tot_waste.get('total_main_withdrawal', 0),
+                        tot_waste.get('total_waste', 0),
+                        ''
+                    ]], columns=df_waste.columns)
+                    df_waste = pd.concat([df_waste, total_row], ignore_index=True)
+                    df_waste.to_excel(writer, sheet_name='هدر العلب', index=False)
+
+                # ========== 3. أرصدة المجاني ==========
+                free = sections.get('free_balances', {})
+                if free:
+                    free_data = [
+                        ['عدد الزبائن المجانيين', free.get('count', 0)],
+                        ['إجمالي الرصيد المتبقي (ك.و)', free.get('total_free_remaining', 0)],
+                        ['إجمالي سحب المجانيين (ك.و)', free.get('total_free_withdrawal', 0)]
+                    ]
+                    df_free = pd.DataFrame(free_data)
+                    df_free.to_excel(writer, sheet_name='أرصدة المجاني', index=False, header=False)
+
+                # ========== 4. إحصائيات الفواتير ==========
+                invoices = sections.get('invoices', {})
+                if invoices:
+                    inv_data = [
+                        ['عدد الفواتير', invoices.get('invoice_count', 0)],
+                        ['مجموع الكيليلات (ك.و)', invoices.get('total_kilowatts', 0)],
+                        ['مجموع الكيليلات المجانية (ك.و)', invoices.get('total_free_kilowatts', 0)],
+                        ['مجموع الحسميات (ل.س)', invoices.get('total_discount', 0)],
+                        ['المبلغ الكلي (ل.س)', invoices.get('total_amount', 0)]
+                    ]
+                    df_inv = pd.DataFrame(inv_data)
+                    df_inv.to_excel(writer, sheet_name='إحصائيات الفواتير', index=False, header=False)
+
+                # ========== تنسيق الأعمدة (اختياري) ==========
+                for sheet_name in writer.sheets:
+                    worksheet = writer.sheets[sheet_name]
+                    for col in worksheet.columns:
+                        max_len = 0
+                        col_letter = col[0].column_letter
+                        for cell in col:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_len:
+                                    max_len = len(str(cell.value))
+                            except:
+                                pass
+                        worksheet.column_dimensions[col_letter].width = min(max_len + 2, 50)
+
+            return True, filepath
+
+        except Exception as e:
+            logger.error(f"خطأ في تصدير تقرير جرد الدورة: {e}")
+            return False, str(e)                        
