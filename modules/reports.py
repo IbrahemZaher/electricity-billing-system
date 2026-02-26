@@ -1975,13 +1975,111 @@ class ReportManager:
             return False, str(e)
 
 
-    def get_cycle_inventory_report(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    def _get_we_vs_them_with_visa_adjustment(self, start_date: str, end_date: str, after: bool = True) -> Dict:
+        """
+        حساب لنا وعلينا مع إمكانية تعديل تأثير التأشيرات.
+        after=True: يستخدم الرصيد الحالي (بعد التأشيرات).
+        after=False: يطرح التأشيرات المضافة في الفترة للحصول على الرصيد قبل التأشيرات.
+        """
+        from collections import defaultdict
+
+        with db.get_cursor() as cursor:
+            # جلب جميع الزبائن النشطين مع بيانات القطاع والرصيد الحالي
+            cursor.execute("""
+                SELECT c.id, c.sector_id, s.name as sector_name, c.current_balance
+                FROM customers c
+                JOIN sectors s ON c.sector_id = s.id
+                WHERE c.is_active = TRUE
+            """)
+            customers = cursor.fetchall()
+
+            # إذا كنا نريد before، نجمع تأثير التأشيرات لكل زبون خلال الفترة
+            visa_effects = {}
+            if not after:
+                cursor.execute("""
+                    SELECT customer_id, COALESCE(SUM(amount), 0) as total_visa
+                    FROM customer_history
+                    WHERE transaction_type IN ('weekly_visa', 'visa_update', 'visa_adjustment')
+                    AND created_at BETWEEN %s AND %s
+                    GROUP BY customer_id
+                """, (start_date, end_date))
+                for row in cursor.fetchall():
+                    visa_effects[row['customer_id']] = float(row['total_visa'])
+
+        # تجميع النتائج حسب القطاع
+        sectors_dict = defaultdict(lambda: {
+            'sector_name': '',
+            'lana_count': 0,
+            'lana_amount': 0.0,
+            'alayna_count': 0,
+            'alayna_amount': 0.0,
+        })
+
+        for cust in customers:
+            cust_id = cust['id']
+            sector_id = cust['sector_id']
+            sector_name = cust['sector_name']
+            current_balance = float(cust['current_balance'])
+
+            # الرصيد المعدل
+            if after:
+                balance = current_balance
+            else:
+                visa = visa_effects.get(cust_id, 0.0)
+                balance = current_balance - visa  # نطرح التأشيرات المضافة
+
+            # تصنيف الرصيد
+            if balance < 0:
+                sectors_dict[sector_id]['lana_count'] += 1
+                sectors_dict[sector_id]['lana_amount'] += balance
+            elif balance > 0:
+                sectors_dict[sector_id]['alayna_count'] += 1
+                sectors_dict[sector_id]['alayna_amount'] += balance
+            # صفر يتجاهل
+
+            # تأكد من وجود اسم القطاع
+            sectors_dict[sector_id]['sector_name'] = sector_name
+
+        # تحويل القاموس إلى قائمة مع الإجماليات
+        sectors_list = []
+        total_lana_count = 0
+        total_lana_amount = 0.0
+        total_alayna_count = 0
+        total_alayna_amount = 0.0
+
+        for sector_id, data in sectors_dict.items():
+            sectors_list.append({
+                'sector_id': sector_id,
+                'sector_name': data['sector_name'],
+                'lana_count': data['lana_count'],
+                'lana_amount': data['lana_amount'],
+                'alayna_count': data['alayna_count'],
+                'alayna_amount': data['alayna_amount'],
+            })
+            total_lana_count += data['lana_count']
+            total_lana_amount += data['lana_amount']
+            total_alayna_count += data['alayna_count']
+            total_alayna_amount += data['alayna_amount']
+
+        return {
+            'sectors': sectors_list,
+            'totals': {
+                'total_lana_count': total_lana_count,
+                'total_lana_amount': total_lana_amount,
+                'total_alayna_count': total_alayna_count,
+                'total_alayna_amount': total_alayna_amount,
+            }
+        }            
+
+
+    def get_cycle_inventory_report(self, start_date=None, end_date=None, include_visa_effect=False):
         """
         تقرير جرد الدورة (لنا وعلينا، هدر العلب، أرصدة المجاني، إحصائيات الفواتير)
         
         Args:
-            start_date: تاريخ بداية الفترة (YYYY-MM-DD) - افتراضياً الاثنين الماضي
-            end_date: تاريخ نهاية الفترة (YYYY-MM-DD) - افتراضياً الأحد الحالي
+            start_date: تاريخ بداية الفترة (YYYY-MM-DD) - اختياري
+            end_date: تاريخ نهاية الفترة (YYYY-MM-DD) - اختياري
+            include_visa_effect: إذا كان True يتم تضمين بيانات لنا وعلينا قبل وبعد التأشيرات
         
         Returns:
             dict يحتوي على الأقسام الأربعة
@@ -1990,14 +2088,12 @@ class ReportManager:
         import logging
         logger = logging.getLogger(__name__)
 
-        # تعيين الفترة الافتراضية: الاثنين الماضي → الأحد الحالي
+        # تعيين الفترة الافتراضية إذا لم تكن محددة (الاثنين الماضي → الأحد الحالي)
         if not end_date:
             today = datetime.now().date()
-            # الأحد الحالي = اليوم + (6 - weekday) إذا كان اليوم ≠ الأحد
             days_until_sunday = (6 - today.weekday()) % 7
             end_date = (today + timedelta(days=days_until_sunday)).strftime('%Y-%m-%d')
         if not start_date:
-            # الاثنين الماضي = end_date - 6 أيام
             end = datetime.strptime(end_date, '%Y-%m-%d').date()
             start_date = (end - timedelta(days=6)).strftime('%Y-%m-%d')
 
@@ -2009,119 +2105,145 @@ class ReportManager:
         }
 
         try:
-            # ========== 1. لنا وعلينا (حسب القطاعات) ==========
-            # نستخدم الدالة الموجودة في CustomerManager
-            from modules.customers import CustomerManager
-            cm = CustomerManager()
-            balance_stats = cm.get_customer_balance_by_sector()
-            result['sections']['we_vs_them'] = {
-                'title': 'لنا وعلينا حسب القطاع',
-                'sectors': balance_stats['sectors'],
-                'totals': {
-                    'total_lana_amount': balance_stats['total_lana_amount'],
-                    'total_alayna_amount': balance_stats['total_alayna_amount'],
-                    'total_lana_count': balance_stats['total_lana_count'],
-                    'total_alayna_count': balance_stats['total_alayna_count'],
-                }
-            }
+            # ====== 1. لنا وعلينا ======
+            try:
+                if include_visa_effect:
+                    before = self._get_we_vs_them_with_visa_adjustment(start_date, end_date, after=False)
+                    after = self._get_we_vs_them_with_visa_adjustment(start_date, end_date, after=True)
+                    result['sections']['we_vs_them'] = {
+                        'title': 'لنا وعلينا (قبل وبعد التأشيرات)',
+                        'before': before,
+                        'after': after,
+                    }
+                else:
+                    from modules.customers import CustomerManager
+                    cm = CustomerManager()
+                    balance_stats = cm.get_customer_balance_by_sector()
+                    result['sections']['we_vs_them'] = {
+                        'title': 'لنا وعلينا حسب القطاع',
+                        'sectors': balance_stats.get('sectors', []),
+                        'totals': {
+                            'total_lana_amount': balance_stats.get('total_lana_amount', 0),
+                            'total_alayna_amount': balance_stats.get('total_alayna_amount', 0),
+                            'total_lana_count': balance_stats.get('total_lana_count', 0),
+                            'total_alayna_count': balance_stats.get('total_alayna_count', 0),
+                        }
+                    }
+            except Exception as e:
+                logger.error(f"فشل جلب بيانات لنا وعلينا: {e}")
+                result['sections']['we_vs_them'] = {'sectors': [], 'totals': {}}
 
-            # ========== 2. هدر العلب ==========
-            # لكل قطاع: مجموع سحب الزبائن - مجموع سحب الرئيسيات
-            waste_query = """
-                SELECT
-                    s.id as sector_id,
-                    s.name as sector_name,
-                    COALESCE(SUM(CASE WHEN c.meter_type = 'زبون' THEN c.withdrawal_amount ELSE 0 END), 0) as customers_withdrawal,
-                    COALESCE(SUM(CASE WHEN c.meter_type = 'رئيسية' THEN c.withdrawal_amount ELSE 0 END), 0) as main_meters_withdrawal
-                FROM sectors s
-                LEFT JOIN customers c ON s.id = c.sector_id AND c.is_active = TRUE
-                WHERE s.is_active = TRUE
-                GROUP BY s.id, s.name
-                ORDER BY s.name
-            """
-            with db.get_cursor() as cursor:
-                cursor.execute(waste_query)
-                rows = cursor.fetchall()
-                waste_by_sector = []
-                total_customers_withdrawal = 0
-                total_main_withdrawal = 0
-                for row in rows:
-                    sector_id = row['sector_id']
-                    sector_name = row['sector_name']
-                    cust_w = float(row['customers_withdrawal'] or 0)
-                    main_w = float(row['main_meters_withdrawal'] or 0)
-                    waste = main_w - cust_w   # هدر = ما سُحب من الرئيسيات - ما وصل للزبائن
-                    total_customers_withdrawal += cust_w
-                    total_main_withdrawal += main_w
-                    waste_by_sector.append({
-                        'sector_id': sector_id,
-                        'sector_name': sector_name,
-                        'customers_withdrawal': cust_w,
-                        'main_meters_withdrawal': main_w,
-                        'waste': waste,
-                        'waste_percentage': (waste / main_w * 100) if main_w > 0 else 0
-                    })
-            result['sections']['waste'] = {
-                'title': 'هدر العلب (الفرق بين سحب الرئيسيات والزبائن)',
-                'sectors': waste_by_sector,
-                'totals': {
-                    'total_customers_withdrawal': total_customers_withdrawal,
-                    'total_main_withdrawal': total_main_withdrawal,
-                    'total_waste': total_main_withdrawal - total_customers_withdrawal,
-                }
-            }
+            # ====== 2. هدر العلب ======
+            try:
+                waste_query = """
+                    SELECT
+                        s.id as sector_id,
+                        s.name as sector_name,
+                        COALESCE(SUM(CASE WHEN c.meter_type = 'زبون' THEN c.withdrawal_amount ELSE 0 END), 0) as customers_withdrawal,
+                        COALESCE(SUM(CASE WHEN c.meter_type = 'رئيسية' THEN c.withdrawal_amount ELSE 0 END), 0) as main_meters_withdrawal
+                    FROM sectors s
+                    LEFT JOIN customers c ON s.id = c.sector_id AND c.is_active = TRUE
+                    WHERE s.is_active = TRUE
+                    GROUP BY s.id, s.name
+                    ORDER BY s.name
+                """
+                with db.get_cursor() as cursor:
+                    cursor.execute(waste_query)
+                    rows = cursor.fetchall()
+                    waste_by_sector = []
+                    total_customers_withdrawal = 0
+                    total_main_withdrawal = 0
 
-            # ========== 3. أرصدة المجاني ==========
-            free_query = """
-                SELECT
-                    COUNT(*) as free_customers_count,
-                    COALESCE(SUM(free_remaining), 0) as total_free_remaining,
-                    COALESCE(SUM(withdrawal_amount), 0) as total_free_withdrawal
-                FROM customers
-                WHERE financial_category IN ('free', 'free_vip')
-                AND is_active = TRUE
-            """
-            with db.get_cursor() as cursor:
-                cursor.execute(free_query)
-                free_row = cursor.fetchone()
-            result['sections']['free_balances'] = {
-                'title': 'أرصدة الزبائن المجانيين',
-                'count': free_row['free_customers_count'] if free_row else 0,
-                'total_free_remaining': float(free_row['total_free_remaining']) if free_row else 0,
-                'total_free_withdrawal': float(free_row['total_free_withdrawal']) if free_row else 0,
-            }
+                    for row in rows:
+                        cust_w = float(row['customers_withdrawal'] or 0)
+                        main_w = float(row['main_meters_withdrawal'] or 0)
+                        waste = main_w - cust_w
+                        waste_pct = (waste / main_w * 100) if main_w > 0 else 0
 
-            # ========== 4. إحصائيات الفواتير في الفترة ==========
-            invoice_query = """
-                SELECT
-                    COUNT(*) as invoice_count,
-                    COALESCE(SUM(kilowatt_amount), 0) as total_kilowatts,
-                    COALESCE(SUM(free_kilowatt), 0) as total_free_kilowatts,
-                    COALESCE(SUM(discount), 0) as total_discount,
-                    COALESCE(SUM(total_amount), 0) as total_amount
-                FROM invoices
-                WHERE payment_date BETWEEN %s AND %s
-                AND status = 'active'
-            """
-            with db.get_cursor() as cursor:
-                cursor.execute(invoice_query, (start_date, end_date))
-                inv_row = cursor.fetchone()
-            result['sections']['invoices'] = {
-                'title': f'الكيليات المقطوعة من {start_date} إلى {end_date}',
-                'start_date': start_date,
-                'end_date': end_date,
-                'invoice_count': inv_row['invoice_count'] if inv_row else 0,
-                'total_kilowatts': float(inv_row['total_kilowatts']) if inv_row else 0,
-                'total_free_kilowatts': float(inv_row['total_free_kilowatts']) if inv_row else 0,
-                'total_discount': float(inv_row['total_discount']) if inv_row else 0,
-                'total_amount': float(inv_row['total_amount']) if inv_row else 0,
-            }
+                        waste_by_sector.append({
+                            'sector_id': row['sector_id'],
+                            'sector_name': row['sector_name'],
+                            'customers_withdrawal': cust_w,
+                            'main_meters_withdrawal': main_w,
+                            'waste': waste,
+                            'waste_percentage': waste_pct,
+                        })
+
+                        total_customers_withdrawal += cust_w
+                        total_main_withdrawal += main_w
+
+                    result['sections']['waste'] = {
+                        'title': 'هدر العلب (الفرق بين سحب الرئيسيات والزبائن)',
+                        'sectors': waste_by_sector,
+                        'totals': {
+                            'total_customers_withdrawal': total_customers_withdrawal,
+                            'total_main_withdrawal': total_main_withdrawal,
+                            'total_waste': total_main_withdrawal - total_customers_withdrawal,
+                        }
+                    }
+            except Exception as e:
+                logger.error(f"فشل جلب بيانات الهدر: {e}")
+                result['sections']['waste'] = {'sectors': [], 'totals': {}}
+
+            # ====== 3. أرصدة المجاني ======
+            try:
+                free_query = """
+                    SELECT
+                        COUNT(*) as free_customers_count,
+                        COALESCE(SUM(current_balance), 0) as total_free_remaining,
+                        COALESCE(SUM(withdrawal_amount), 0) as total_free_withdrawal
+                    FROM customers
+                    WHERE financial_category IN ('free', 'free_vip')
+                    AND is_active = TRUE
+                """
+                with db.get_cursor() as cursor:
+                    cursor.execute(free_query)
+                    free_row = cursor.fetchone()
+                    result['sections']['free_balances'] = {
+                        'title': 'أرصدة الزبائن المجانيين',
+                        'count': free_row['free_customers_count'] if free_row else 0,
+                        'total_free_remaining': float(free_row['total_free_remaining']) if free_row else 0,
+                        'total_free_withdrawal': float(free_row['total_free_withdrawal']) if free_row else 0,
+                    }
+            except Exception as e:
+                logger.error(f"فشل جلب أرصدة المجاني: {e}")
+                result['sections']['free_balances'] = {'count': 0, 'total_free_remaining': 0, 'total_free_withdrawal': 0}
+
+            # ====== 4. إحصائيات الفواتير ======
+            try:
+                invoice_query = """
+                    SELECT
+                        COUNT(*) as invoice_count,
+                        COALESCE(SUM(kilowatt_amount), 0) as total_kilowatts,
+                        COALESCE(SUM(free_kilowatt), 0) as total_free_kilowatts,
+                        COALESCE(SUM(discount), 0) as total_discount,
+                        COALESCE(SUM(total_amount), 0) as total_amount
+                    FROM invoices
+                    WHERE payment_date BETWEEN %s AND %s
+                    AND status = 'active'
+                """
+                with db.get_cursor() as cursor:
+                    cursor.execute(invoice_query, (start_date, end_date))
+                    inv_row = cursor.fetchone()
+                    result['sections']['invoices'] = {
+                        'title': f'الكيليات المقطوعة من {start_date} إلى {end_date}',
+                        'start_date': start_date,
+                        'end_date': end_date,
+                        'invoice_count': inv_row['invoice_count'] if inv_row else 0,
+                        'total_kilowatts': float(inv_row['total_kilowatts']) if inv_row else 0,
+                        'total_free_kilowatts': float(inv_row['total_free_kilowatts']) if inv_row else 0,
+                        'total_discount': float(inv_row['total_discount']) if inv_row else 0,
+                        'total_amount': float(inv_row['total_amount']) if inv_row else 0,
+                    }
+            except Exception as e:
+                logger.error(f"فشل جلب إحصائيات الفواتير: {e}")
+                result['sections']['invoices'] = {}
 
             return result
 
         except Exception as e:
-            logger.error(f"خطأ في تقرير جرد الدورة: {e}", exc_info=True)
-            return {'error': str(e)}            
+            logger.error(f"خطأ عام في تقرير جرد الدورة: {e}", exc_info=True)
+            return {'error': str(e)}
 
 
     def export_cycle_inventory_to_excel(self, report_data: Dict[str, Any], filename: str = None) -> Tuple[bool, str]:
@@ -2152,6 +2274,15 @@ class ReportManager:
 
                 # ========== 1. لنا وعلينا ==========
                 we_vs_them = sections.get('we_vs_them', {})
+                if 'before' in we_vs_them and 'after' in we_vs_them:
+                    # تصدير قبل
+                    self._write_we_vs_them_sheet(writer, we_vs_them['before'], 'لنا وعلينا قبل')
+                    # تصدير بعد
+                    self._write_we_vs_them_sheet(writer, we_vs_them['after'], 'لنا وعلينا بعد')
+                else:
+                    # تصدير عادي
+                    self._write_we_vs_them_sheet(writer, we_vs_them, 'لنا وعلينا')
+
                 sectors_we = we_vs_them.get('sectors', [])
                 if sectors_we:
                     data_we = []
@@ -2250,4 +2381,32 @@ class ReportManager:
 
         except Exception as e:
             logger.error(f"خطأ في تصدير تقرير جرد الدورة: {e}")
-            return False, str(e)                        
+            return False, str(e)
+
+    def _write_we_vs_them_sheet(self, writer, data, sheet_name):
+        """يكتب ورقة Excel لبيانات لنا وعلينا"""
+        sectors = data.get('sectors', [])
+        if not sectors:
+            return
+        rows = []
+        for sec in sectors:
+            rows.append([
+                sec['sector_name'],
+                sec['lana_count'],
+                sec['lana_amount'],
+                sec['alayna_count'],
+                sec['alayna_amount'],
+                sec['alayna_amount'] - sec['lana_amount']
+            ])
+        df = pd.DataFrame(rows, columns=['القطاع', 'عدد لنا', 'مجموع لنا', 'عدد علينا', 'مجموع علينا', 'الصافي'])
+        totals = data.get('totals', {})
+        total_row = pd.DataFrame([[
+            'الإجمالي',
+            totals.get('total_lana_count', 0),
+            totals.get('total_lana_amount', 0),
+            totals.get('total_alayna_count', 0),
+            totals.get('total_alayna_amount', 0),
+            totals.get('total_alayna_amount', 0) - totals.get('total_lana_amount', 0)
+        ]], columns=df.columns)
+        df = pd.concat([df, total_row], ignore_index=True)
+        df.to_excel(writer, sheet_name=sheet_name[:31], index=False)                                    

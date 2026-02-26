@@ -1558,46 +1558,70 @@ class ReportUI(tk.Frame):
         self._ask_cycle_dates()
 
     def _ask_cycle_dates(self):
-        """نافذة إدخال تاريخي البداية والنهاية (يمكن تخطيها لاستخدام الافتراضي)"""
+        """نافذة إدخال تاريخي البداية والنهاية وخيار تأثير التأشيرات"""
         import tkinter.simpledialog as simpledialog
         from datetime import datetime, timedelta
 
-        # تاريخ افتراضي: الأحد الحالي
+        # نافذة مخصصة
+        dialog = tk.Toplevel(self)
+        dialog.title("إعدادات جرد الدورة")
+        dialog.geometry("400x250")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        tk.Label(dialog, text="تقرير جرد الدورة", font=('Arial', 14, 'bold')).pack(pady=10)
+
+        frame = tk.Frame(dialog, padx=20, pady=10)
+        frame.pack(fill='both', expand=True)
+
+        # تاريخ النهاية
+        tk.Label(frame, text="تاريخ النهاية (YYYY-MM-DD):").pack(anchor='w')
+        end_var = tk.StringVar()
         today = datetime.now().date()
         days_until_sunday = (6 - today.weekday()) % 7
         default_end = today + timedelta(days=days_until_sunday)
+        end_entry = tk.Entry(frame, textvariable=end_var, width=25)
+        end_entry.pack(fill='x', pady=5)
+        end_var.set(default_end.strftime('%Y-%m-%d'))
+
+        # تاريخ البداية
+        tk.Label(frame, text="تاريخ البداية (YYYY-MM-DD):").pack(anchor='w')
+        start_var = tk.StringVar()
         default_start = default_end - timedelta(days=6)
+        start_entry = tk.Entry(frame, textvariable=start_var, width=25)
+        start_entry.pack(fill='x', pady=5)
+        start_var.set(default_start.strftime('%Y-%m-%d'))
 
-        end_str = simpledialog.askstring(
-            "تاريخ النهاية",
-            "أدخل تاريخ النهاية (YYYY-MM-DD):",
-            initialvalue=default_end.strftime('%Y-%m-%d')
-        )
-        if not end_str:
-            end_str = default_end.strftime('%Y-%m-%d')
-        start_str = simpledialog.askstring(
-            "تاريخ البداية",
-            "أدخل تاريخ البداية (YYYY-MM-DD):",
-            initialvalue=default_start.strftime('%Y-%m-%d')
-        )
-        if not start_str:
-            start_str = default_start.strftime('%Y-%m-%d')
+        # خيار تضمين تأثير التأشيرات
+        visa_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(frame, text="تضمين تأثير التأشيرات (قبل/بعد)", variable=visa_var).pack(anchor='w', pady=10)
 
-        self.clear_frames()
-        try:
-            report = self.report_manager.get_cycle_inventory_report(start_str, end_str)
-            if 'error' in report:
-                self.show_error(report['error'])
-                return
-            self.current_report = report
-            self.current_report_type = 'cycle_inventory'
-            self.export_excel_btn.config(state='normal')
-            self.filter_btn.config(state='normal')
-            self.setup_export_options('cycle_inventory')
-            self.display_cycle_inventory_report(report)
-            self.update_status("تم توليد تقرير جرد الدورة")
-        except Exception as e:
-            self.show_error(f"خطأ في توليد التقرير: {e}")
+        def on_ok():
+            start = start_var.get().strip()
+            end = end_var.get().strip()
+            include_visa = visa_var.get()
+            dialog.destroy()
+            self.clear_frames()
+            try:
+                report = self.report_manager.get_cycle_inventory_report(start, end, include_visa_effect=include_visa)
+                if 'error' in report:
+                    self.show_error(report['error'])
+                    return
+                self.current_report = report
+                self.current_report_type = 'cycle_inventory'
+                self.export_excel_btn.config(state='normal')
+                self.filter_btn.config(state='normal')
+                self.setup_export_options('cycle_inventory')
+                self.display_cycle_inventory_report(report)
+                self.update_status("تم توليد تقرير جرد الدورة")
+            except Exception as e:
+                self.show_error(f"خطأ في توليد التقرير: {e}")
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text="موافق", command=on_ok, bg='#27ae60', fg='white', width=10).pack(side='left', padx=5)
+        tk.Button(btn_frame, text="إلغاء", command=dialog.destroy, bg='#e74c3c', fg='white', width=10).pack(side='left', padx=5)
 
     def display_cycle_inventory_report(self, report):
         """عرض محتوى تقرير جرد الدورة في results_frame"""
@@ -1644,8 +1668,28 @@ class ReportUI(tk.Frame):
         self._display_invoices_tab(tab4, report['sections']['invoices'])
 
     def _display_we_vs_them_tab(self, parent, data):
-        """عرض جدول لنا وعلينا"""
-        # إنشاء Treeview
+        """عرض جدول لنا وعلينا (يدعم قبل/بعد إذا وجد)"""
+        if 'before' in data and 'after' in data:
+            # حالة قبل/بعد: نعرض جدولين جنباً إلى جنب أو تبويبين داخليين
+            nb = ttk.Notebook(parent)
+            nb.pack(fill='both', expand=True)
+
+            # تبويب قبل التأشيرات
+            before_frame = tk.Frame(nb)
+            nb.add(before_frame, text='قبل التأشيرات')
+            self._display_single_we_vs_them(before_frame, data['before'])
+
+            # تبويب بعد التأشيرات
+            after_frame = tk.Frame(nb)
+            nb.add(after_frame, text='بعد التأشيرات')
+            self._display_single_we_vs_them(after_frame, data['after'])
+
+        else:
+            # حالة عادية (بدون تأثير)
+            self._display_single_we_vs_them(parent, data)
+
+    def _display_single_we_vs_them(self, parent, data):
+        """عرض جدول واحد لنا وعلينا"""
         tree = ttk.Treeview(parent, columns=('sector','lana_count','lana_amt','alayna_count','alayna_amt','net'),
                             show='headings', height=12)
         tree.heading('sector', text='القطاع')
@@ -1674,12 +1718,10 @@ class ReportUI(tk.Frame):
             ))
         tree.pack(side='left', fill='both', expand=True, padx=5, pady=5)
 
-        # شريط تمرير
         scroll = ttk.Scrollbar(parent, orient='vertical', command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
         scroll.pack(side='right', fill='y')
 
-        # إجمالي
         totals = data.get('totals', {})
         total_net = totals['total_alayna_amount'] - totals['total_lana_amount']
         total_frame = tk.Frame(parent, bg='#f0f0f0', relief='sunken', borderwidth=1)
