@@ -158,8 +158,8 @@ class CustomerManager:
                     if not parent:
                         raise ValueError("العلبة الأم غير موجودة")
                     
-                    if parent['sector_id'] != customer_data.get('sector_id'):
-                        raise ValueError("العلبة الأم يجب أن تكون في نفس القطاع")
+                    #if parent['sector_id'] != customer_data.get('sector_id'):
+                    #    raise ValueError("العلبة الأم يجب أن تكون في نفس القطاع")
                     
                     # التحقق من توافق أنواع العدادات
                     meter_type = customer_data.get('meter_type', 'زبون')
@@ -446,8 +446,8 @@ class CustomerManager:
                     """, (customer_id,))
                     current = cursor.fetchone()
                     
-                    if parent['sector_id'] != (update_data.get('sector_id') or (current['sector_id'] if current else None)):
-                        raise ValueError("العلبة الأم يجب أن تكون في نفس القطاع")
+                    #if parent['sector_id'] != (update_data.get('sector_id') or (current['sector_id'] if current else None)):
+                    #    raise ValueError("العلبة الأم يجب أن تكون في نفس القطاع")
                     
                     # التحقق من توافق أنواع العدادات
                     meter_type = update_data.get('meter_type') or (current['meter_type'] if current else 'زبون')

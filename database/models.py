@@ -242,7 +242,8 @@ class Models:
                 name VARCHAR(50) UNIQUE NOT NULL,
                 code VARCHAR(10) UNIQUE NOT NULL,
                 description TEXT,
-                is_active BOOLEAN DEFAULT TRUE
+                is_active BOOLEAN DEFAULT TRUE,
+                default_generator_id INTEGER REFERENCES customers(id)
             )
             """,
             
@@ -1184,7 +1185,8 @@ class Models:
                     ('vip_expiry_date', 'DATE'),
                     ('vip_grace_period', 'INTEGER DEFAULT 0'),
                     ('parent_meter_id', 'INTEGER'),
-                    ('meter_type', "VARCHAR(50) DEFAULT 'زبون'"),  # أضف هذا العمود
+                    ('meter_type', "VARCHAR(50) DEFAULT 'زبون'"),
+                    ('default_generator_id', 'INTEGER REFERENCES customers(id)'),  # أضف هذا العمود
                 ]
                 
                 for column_name, column_type in new_columns:

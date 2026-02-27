@@ -22,35 +22,56 @@ class HierarchicalWasteCalculator:
         }
         
     # ==================== التحليل الهيكلي الأساسي ====================
-    
+        
     def analyze_sector_hierarchy(self, sector_id: int) -> Dict[str, Any]:
         """
-        تحليل كامل للهيكل الهرمي لقطاع معين
+        تحليل كامل للهيكل الهرمي لقطاع معين، مع دعم المولدة الافتراضية.
         """
         try:
             from database.connection import db
-            
             with db.get_cursor() as cursor:
-                # 1. جلب عداد المولدة للقطاع
-                cursor.execute("""
-                    SELECT c.id, c.name, c.withdrawal_amount, c.box_number,
-                           c.serial_number, c.sector_id, s.name as sector_name
-                    FROM customers c
-                    LEFT JOIN sectors s ON c.sector_id = s.id
-                    WHERE c.sector_id = %s 
-                    AND c.meter_type = 'مولدة'
-                    AND c.parent_meter_id IS NULL
-                    AND c.is_active = TRUE
-                """, (sector_id,))
+                # 1. جلب القطاع لمعرفة المولدة الافتراضية
+                cursor.execute("SELECT default_generator_id FROM sectors WHERE id = %s", (sector_id,))
+                sector = cursor.fetchone()
+                default_generator_id = sector['default_generator_id'] if sector else None
+
+                generator = None
+                if default_generator_id:
+                    # 2. إذا كان هناك مولدة افتراضية، استخدمها
+                    cursor.execute("""
+                        SELECT c.id, c.name, c.withdrawal_amount, c.box_number,
+                            c.serial_number, c.sector_id, s.name as sector_name
+                        FROM customers c
+                        LEFT JOIN sectors s ON c.sector_id = s.id
+                        WHERE c.id = %s AND c.is_active = TRUE
+                    """, (default_generator_id,))
+                    generator = cursor.fetchone()
+                    if not generator:
+                        logger.warning(f"المولدة الافتراضية {default_generator_id} غير موجودة أو غير نشطة")
                 
-                generator = cursor.fetchone()
                 if not generator:
-                    return {'success': False, 'error': 'عداد المولدة غير موجود في هذا القطاع'}
-                
+                    # 3. إذا لم توجد مولدة افتراضية، ابحث عن مولدة داخل القطاع (السلوك القديم)
+                    cursor.execute("""
+                        SELECT c.id, c.name, c.withdrawal_amount, c.box_number,
+                            c.serial_number, c.sector_id, s.name as sector_name
+                        FROM customers c
+                        LEFT JOIN sectors s ON c.sector_id = s.id
+                        WHERE c.sector_id = %s
+                        AND c.meter_type = 'مولدة'
+                        AND c.parent_meter_id IS NULL
+                        AND c.is_active = TRUE
+                    """, (sector_id,))
+                    generator = cursor.fetchone()
+
+                if not generator:
+                    return {'success': False, 'error': 'لا توجد مولدة محددة لهذا القطاع ولا مولدة داخلية'}
+
                 generator_withdrawal = float(generator.get('withdrawal_amount') or 0)
-                
-                # 2. تحليل جميع المستويات تحت المولدة
+
+                # 4. تحليل جميع المستويات تحت المولدة (قد تكون في قطاع آخر)
                 hierarchy = self._analyze_meter_hierarchy(generator['id'])
+
+            # ... باقي الكود كما هو ...
                 
                 # 3. حساب الهدر على كل مستوى
                 waste_analysis = self._calculate_waste_by_level(hierarchy)
