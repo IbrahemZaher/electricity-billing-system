@@ -234,6 +234,39 @@ class AccountingUI(tk.Frame):
         # العمود الأيسر
         left_frame = tk.Frame(self.info_inner, bg='white')
         left_frame.pack(side='left', fill='both', expand=True, padx=(0, 10))
+
+        # إنشاء إطار الملاحظات
+        # بعد الأعمدة اليمنى واليسرى (right_frame, left_frame) وقبل نهاية الدالة
+        # إنشاء إطار الملاحظات
+        notes_frame = tk.Frame(self.info_inner, bg='white', padx=15, pady=50)
+        notes_frame.pack(fill='x', pady=(10, 0))
+
+        # عنوان الملاحظات مع أيقونة
+        header_frame = tk.Frame(notes_frame, bg='white')
+        header_frame.pack(fill='x')
+        tk.Label(header_frame, text="📝 ملاحظات:", font=('Segoe UI', 12, 'bold'),
+                bg='white', fg=self.colors['primary']).pack(side='right')
+
+        # متغير لتخزين نص الملاحظات (اختياري، يمكنك استخدام النص مباشرة)
+        self.notes_var = tk.StringVar(value="")
+
+        # حقل عرض الملاحظات (نص قابل للتمرير إذا طال)
+        self.notes_text = scrolledtext.ScrolledText(
+            notes_frame, 
+            font=('Segoe UI', 11),
+            bg='#FFF9C4',           # خلفية صفراء فاتحة لجذب الانتباه
+            fg=self.colors['text_dark'],
+            wrap='word',            # التفاف النص تلقائياً
+            height=3,               # ارتفاع مناسب لـ 3 أسطر (يزيد تلقائياً عند الحاجة)
+            relief='flat',
+            bd=1,
+            highlightbackground='#E0E0E0'
+        )
+        self.notes_text.pack(fill='x', pady=(5, 0))
+        self.notes_text.config(state='disabled')   # للقراءة فقط (يمكن جعله قابلاً للتحرير لاحقاً)
+
+        # ربط تغيير حجم النافذة بفحص شريط التمرير (إذا أردت)
+        self.notes_text.bind('<Configure>', lambda e: self.check_scroll_needed())
         
         for label, key in left_fields:
             row = tk.Frame(left_frame, bg='white', pady=5)
@@ -483,7 +516,7 @@ class AccountingUI(tk.Frame):
         if hasattr(self, 'search_results_data') and idx < len(self.search_results_data):
             customer = self.search_results_data[idx]
             self.select_customer(customer['id'])
-    
+        
     def select_customer(self, customer_id):
         """تحديد زبون وعرض بياناته (بدون تغيير في المنطق) + تحديث التصنيف"""
         try:
@@ -496,18 +529,41 @@ class AccountingUI(tk.Frame):
                 return
             self.last_invoice_result = None   # فاتورة سابقة لم تعد صالحة لهذا الزبون    
             self.selected_customer = customer_data
-            self.info_vars['name'].set(customer_data.get('name', '---'))
-            self.info_vars['sector'].set(customer_data.get('sector_name', '---'))
-            self.info_vars['box'].set(customer_data.get('box_number', '---'))
-            self.info_vars['serial'].set(customer_data.get('serial_number', '---'))
-            self.info_vars['reading'].set(f"{customer_data.get('last_counter_reading', 0):,.0f}")
-            self.info_vars['balance'].set(f"{customer_data.get('current_balance', 0):,.0f} ك.واط")
-            self.info_vars['visa'].set(f"{customer_data.get('visa_balance', 0):,.0f}")
-            self.info_vars['withdrawal'].set(f"{customer_data.get('withdrawal_amount', 0):,.0f}")
+            
+            # الحقول النصية (مع تحويل None إلى '---')
+            self.info_vars['name'].set(customer_data.get('name') or '---')
+            self.info_vars['sector'].set(customer_data.get('sector_name') or '---')
+            self.info_vars['box'].set(customer_data.get('box_number') or '---')
+            self.info_vars['serial'].set(customer_data.get('serial_number') or '---')
+            
+            # الحقول الرقمية (مع تحويل None إلى 0)
+            last_reading = customer_data.get('last_counter_reading')
+            self.info_vars['reading'].set(f"{float(last_reading) if last_reading is not None else 0:,.0f}")
+            
+            current_balance = customer_data.get('current_balance')
+            self.info_vars['balance'].set(f"{float(current_balance) if current_balance is not None else 0:,.0f} ك.واط")
+            
+            visa_balance = customer_data.get('visa_balance')
+            self.info_vars['visa'].set(f"{float(visa_balance) if visa_balance is not None else 0:,.0f}")
+            
+            withdrawal_amount = customer_data.get('withdrawal_amount')
+            self.info_vars['withdrawal'].set(f"{float(withdrawal_amount) if withdrawal_amount is not None else 0:,.0f}")
+            
             self.kilowatt_var.set("")
             self.free_var.set("0")
             self.price_var.set("7200")
             self.discount_var.set("0")
+            
+            # تحديث الملاحظات (التعامل الآمن مع None)
+            notes = customer_data.get('notes')
+            self.notes_text.config(state='normal')
+            self.notes_text.delete(1.0, tk.END)
+            if notes and str(notes).strip():
+                self.notes_text.insert(tk.END, str(notes).strip())
+            else:
+                self.notes_text.insert(tk.END, "(لا توجد ملاحظات)")
+            self.notes_text.config(state='disabled')
+            
             self.process_btn.config(state='normal', bg=self.colors['secondary'])
             self.print_btn.config(state='normal', bg=self.colors['primary'])
             
@@ -515,8 +571,8 @@ class AccountingUI(tk.Frame):
             self.update_financial_category_display(customer_data)
             
             self.show_result_message(f"✅ تم تحديد الزبون: {customer_data.get('name', '')}\n"
-                                    f"الرصيد الحالي: {customer_data.get('current_balance', 0):,.0f} ك.واط\n"
-                                    f"آخر قراءة عداد: {customer_data.get('last_counter_reading', 0):,.0f}\n\n"
+                                    f"الرصيد الحالي: {float(current_balance) if current_balance is not None else 0:,.0f} ك.واط\n"
+                                    f"آخر قراءة عداد: {float(last_reading) if last_reading is not None else 0:,.0f}\n\n"
                                     f"⚠️ أدخل كمية الدفع والمجاني ثم اضغط على 'معالجة سريعة'")
             self.kilowatt_entry.focus_set()
             
@@ -526,7 +582,8 @@ class AccountingUI(tk.Frame):
         except Exception as e:
             logger.error(f"خطأ في تحديد الزبون: {e}")
             messagebox.showerror("خطأ", f"فشل تحميل بيانات الزبون: {str(e)}")
-    
+            
+                
     # ----- دوال التصنيف المالي (جديدة) -----
     def update_financial_category_display(self, customer_data):
         """تحديث عرض التصنيف المالي مع إخفاء الشريط والسكرول للزبون العادي"""
@@ -978,3 +1035,8 @@ class AccountingUI(tk.Frame):
         if self.category_progress:
             self.category_progress.destroy()
             self.category_progress = None
+
+        # مسح الملاحظات
+        self.notes_text.config(state='normal')
+        self.notes_text.delete(1.0, tk.END)
+        self.notes_text.config(state='disabled')            

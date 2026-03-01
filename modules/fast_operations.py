@@ -74,6 +74,7 @@ class FastOperations:
                         c.financial_category,
                         c.free_reason, c.free_amount, c.free_remaining, c.free_expiry_date,
                         c.vip_reason, c.vip_no_cut_days, c.vip_expiry_date, c.vip_grace_period,
+                        c.notes,
                         (
                             SELECT invoice_number
                             FROM invoices
