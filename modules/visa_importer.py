@@ -24,6 +24,10 @@ class ExcelLikeTable(tk.Frame):
         self.entry = None  # حقل التعديل العائم
         self.current_cell = None  # الخلية الحالية (item, column)
         self.last_edit_value = None  # آخر قيمة قبل التعديل
+        self.tooltip = None
+        self.tooltip_text = None
+        self.current_hover_item = None
+        self.current_hover_column = None
         self.setup_ui()
         
     def setup_ui(self):
@@ -67,8 +71,8 @@ class ExcelLikeTable(tk.Frame):
         x_scrollbar.config(command=self.tree.xview)
         
         # تلوين الصفوف بالتناوب
-        self.tree.tag_configure('evenbox', background='#e8f5e9')  # أخضر فاتح
-        self.tree.tag_configure('oddbox', background='#f1f8e9')   # أخضر أفتح
+        #self.tree.tag_configure('evenbox', background='#e8f5e9')  # أخضر فاتح
+        #self.tree.tag_configure('oddbox', background='#f1f8e9')   # أخضر أفتح
         self.tree.tag_configure('selected', background='#e3f2fd')
         self.tree.tag_configure('search_result', background='#fff9c4')
         self.tree.tag_configure('modified', background='#ffeaa7')
@@ -76,6 +80,15 @@ class ExcelLikeTable(tk.Frame):
         self.tree.tag_configure('recently_modified', background='#b3e5fc')   # <-- أضف هذا
         self.tree.tag_configure('test', background='red')
         self.apply_row_colors()
+
+        # في setup_ui، بعد تعريف التاغات
+        self.tree.tag_configure('evenbox', background='#e8f5e9')  # أخضر فاتح
+        self.tree.tag_configure('oddbox', background='#f1f8e9')   # أخضر أفتح
+        self.tree.tag_configure('selected', background='#e3f2fd')
+        self.tree.tag_configure('search_result', background='#fff9c4')
+        self.tree.tag_configure('modified', background='#FFA07A')      # سمون فاتح
+        self.tree.tag_configure('separator', background='#e0e0e0')
+        self.tree.tag_configure('recently_modified', background='#FFB6C1')  # وردي فاتح        
         
         # التركيز على الجدول
         self.tree.focus_set()
@@ -87,7 +100,7 @@ class ExcelLikeTable(tk.Frame):
         self.cells = {}
         item_id_counter = 0
         now = datetime.now()  # استخدم التوقيت المحلي
-        twenty_four_hours_ago = now - timedelta(hours=24)
+        twenty_four_hours_ago = now - timedelta(hours=96)
 
         for idx, row in enumerate(self.data):
             values = [row.get(col, '') for col in self.columns]
@@ -185,6 +198,9 @@ class ExcelLikeTable(tk.Frame):
         
         # تحديد مباشر عند الكتابة
         self.tree.bind('<KeyPress>', self.on_direct_edit)
+
+        self.tree.bind('<Motion>', self.on_mouse_motion)
+        self.tree.bind('<Leave>', self.on_mouse_leave)        
     
     def on_cell_click(self, event):
         """عند النقر على خلية"""
@@ -664,7 +680,7 @@ class ExcelLikeTable(tk.Frame):
             self.update_selection(results[0])
         
         return results
-    
+        
     def get_modified_data(self):
         """الحصول على البيانات المعدلة فقط"""
         modified_rows = []
@@ -697,6 +713,8 @@ class ExcelLikeTable(tk.Frame):
                         'مسلسل': row_data.get('مسلسل', ''),
                         'التأشيرة_الحالية_أصلية': original_row.get('التأشيرة الحالية', ''),
                         'التأشيرة_الجديدة': row_data.get('التأشيرة الجديدة', ''),
+                        'previous_withdrawal': original_row.get('previous_withdrawal', 0),      # السحب القديم الأصلي
+                        'withdrawal_updated_at': original_row.get('withdrawal_updated_at'),    # وقت آخر تحديث للسحب
                         'row_data': row_data,
                         'original_data': original_row.copy()
                     }
@@ -716,6 +734,89 @@ class ExcelLikeTable(tk.Frame):
         
         return all_data
 
+    # ... داخل ExcelLikeTable ...
+
+    def on_mouse_motion(self, event):
+        """تتبع حركة الماوس لعرض التلميحات"""
+        region = self.tree.identify_region(event.x, event.y)
+        if region == 'cell':
+            item = self.tree.identify_row(event.y)
+            column = self.tree.identify_column(event.x)
+            if item and column:
+                if (item, column) != (self.current_hover_item, self.current_hover_column):
+                    self.current_hover_item = item
+                    self.current_hover_column = column
+                    self.show_tooltip(event, item, column)
+        else:
+            self.hide_tooltip()
+
+    def on_mouse_leave(self, event):
+        self.hide_tooltip()
+
+    def show_tooltip(self, event, item, column):
+        """عرض تلميح يحتوي على معلومات الخلية"""
+        self.hide_tooltip()
+        
+        if item not in self.cells:
+            return
+        
+        col_index = int(column.replace('#', '')) - 1
+        col_name = self.columns[col_index] if col_index < len(self.columns) else None
+        if not col_name:
+            return
+        
+        row_data = self.cells[item]['row_data']
+        original_row = self.cells[item]['original_row']
+        
+        lines = []
+        
+        # آخر تعديل
+        updated_at = row_data.get('updated_at')
+        if updated_at:
+            if isinstance(updated_at, datetime):
+                lines.append(f"آخر تعديل: {updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                lines.append(f"آخر تعديل: {updated_at}")
+        else:
+            lines.append("آخر تعديل: غير معروف")
+        
+        # معلومات حسب العمود
+        if col_name == 'التأشيرة الجديدة':
+            prev_visa = original_row.get('التأشيرة الحالية', '')
+            curr_visa = row_data.get('التأشيرة الجديدة', '')
+            lines.append(f"التأشيرة السابقة: {prev_visa}")
+            lines.append(f"التأشيرة الحالية: {curr_visa}")
+        elif col_name == 'السحب الحالي':
+            prev_withdrawal = original_row.get('previous_withdrawal', 0)
+            curr_withdrawal = row_data.get('السحب الحالي', 0)
+            lines.append(f"السحب السابق: {prev_withdrawal}")
+            lines.append(f"السحب الحالي: {curr_withdrawal}")
+        else:
+            original_val = original_row.get(col_name, '')
+            current_val = row_data.get(col_name, '')
+            if str(original_val) != str(current_val):
+                lines.append(f"القيمة الأصلية: {original_val}")
+                lines.append(f"القيمة الحالية: {current_val}")
+        
+        if not lines:
+            return
+        
+        # إنشاء نافذة التلميح
+        self.tooltip = tk.Toplevel(self.tree)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+        
+        label = tk.Label(self.tooltip, text="\n".join(lines), justify='right',
+                        background="#ffffe0", relief='solid', borderwidth=1,
+                        font=("Arial", 10))
+        label.pack()
+
+    def hide_tooltip(self):
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
+            self.current_hover_item = None
+            self.current_hover_column = None
 
 
 
@@ -1250,16 +1351,15 @@ class VisaEditor:
         self.window.update()
 
         try:
-            # استعلام مباشر لجلب البيانات مع updated_at
+            # استعلام مباشر لجلب البيانات مع previous_withdrawal و withdrawal_updated_at
             with db.get_cursor() as cursor:
-                # جلب جميع العقد (العدادات) مع updated_at
-                # هنا نستخدم استعلام عودي للحصول على التسلسل الهرمي كاملاً
                 query = """
                     WITH RECURSIVE meter_tree AS (
                         SELECT 
                             id, name, meter_type, financial_category, visa_balance,
                             box_number, serial_number, parent_meter_id, sector_id,
                             current_balance, withdrawal_amount, updated_at,
+                            previous_withdrawal, withdrawal_updated_at,  -- الأعمدة الجديدة
                             0 AS level,
                             ARRAY[id] AS path,
                             ARRAY[name]::VARCHAR[] AS path_names
@@ -1274,6 +1374,7 @@ class VisaEditor:
                             c.id, c.name, c.meter_type, c.financial_category, c.visa_balance,
                             c.box_number, c.serial_number, c.parent_meter_id, c.sector_id,
                             c.current_balance, c.withdrawal_amount, c.updated_at,
+                            c.previous_withdrawal, c.withdrawal_updated_at,
                             mt.level + 1,
                             mt.path || c.id,
                             mt.path_names || c.name
@@ -1286,7 +1387,7 @@ class VisaEditor:
                         s.name as sector_name
                     FROM meter_tree mt
                     LEFT JOIN sectors s ON mt.sector_id = s.id
-                    ORDER BY mt.path   -- ترتيب حسب المعرفات للحفاظ على الترتيب الهرمي
+                    ORDER BY mt.path
                 """
                 cursor.execute(query, (self.sector_id, self.sector_id))
                 all_nodes = cursor.fetchall()
@@ -1294,7 +1395,19 @@ class VisaEditor:
             # تحويل إلى صيغة العرض
             display_data = []
             self.original_customers_data = []
+            now = datetime.now()
+
             for node in all_nodes:
+                # تحديد ما إذا كان يجب عرض السحب القديم (خلال 3 أيام)
+                withdrawal_updated_at = node.get('withdrawal_updated_at')
+                show_previous = False
+                if withdrawal_updated_at and isinstance(withdrawal_updated_at, datetime):
+                    if (now - withdrawal_updated_at).days < 3:
+                        show_previous = True
+
+                # قيمة السحب القديم المعروضة
+                previous_display = node.get('previous_withdrawal', 0) if show_previous else node.get('withdrawal_amount', 0)
+
                 # بيانات العرض
                 row_display = {
                     'id': node['id'],
@@ -1306,12 +1419,15 @@ class VisaEditor:
                     'التأشيرة الحالية': node.get('visa_balance', 0),
                     'التأشيرة الجديدة': node.get('visa_balance', 0),
                     'الرصيد الحالي': node.get('current_balance', 0),
-                    'السحب الحالي': node.get('withdrawal_amount', 0),
-                    'updated_at': node.get('updated_at')   # <-- هذا السطر الجديد
+                    'السحب الحالي': node.get('withdrawal_amount', 0),   # هذا هو السحب الجديد (بعد آخر تحديث)
+                    'السحب القديم': previous_display,                    # القيمة التي سيتم عرضها (حسب الشرط)
+                    'updated_at': node.get('updated_at'),
+                    'previous_withdrawal': node.get('previous_withdrawal', 0),
+                    'withdrawal_updated_at': withdrawal_updated_at,
                 }
                 display_data.append(row_display)
 
-                # البيانات الأصلية للحفظ مع updated_at
+                # البيانات الأصلية للحفظ
                 original_row = {
                     'id': node['id'],
                     'علبة': node.get('box_number', ''),
@@ -1322,7 +1438,9 @@ class VisaEditor:
                     'التأشيرة الجديدة': float(node.get('visa_balance', 0)),
                     'الرصيد الحالي': float(node.get('current_balance', 0)),
                     'السحب الحالي': float(node.get('withdrawal_amount', 0)),
-                    'updated_at': node.get('updated_at')   # إضافة updated_at
+                    'previous_withdrawal': float(node.get('previous_withdrawal', 0)),
+                    'withdrawal_updated_at': withdrawal_updated_at,
+                    'updated_at': node.get('updated_at')
                 }
                 self.original_customers_data.append(original_row)
 
@@ -1330,8 +1448,9 @@ class VisaEditor:
             total_visa = sum(float(c['التأشيرة الحالية']) for c in self.original_customers_data)
             total_balance = sum(float(c['الرصيد الحالي']) for c in self.original_customers_data)
 
-            # عرض البيانات في الجدول مع إضافة عمود نوع العداد
-            visible_columns = ["علبة", "مسلسل", "اسم الزبون", "نوع العداد", "القطاع", "التأشيرة الحالية", "التأشيرة الجديدة"]
+            # عرض البيانات في الجدول مع إضافة عمودي السحب القديم والجديد
+            visible_columns = ["علبة", "مسلسل", "اسم الزبون", "نوع العداد", "القطاع", 
+                            "التأشيرة الحالية", "التأشيرة الجديدة", "السحب القديم", "السحب الحالي"]
             self.display_customers(display_data, visible_columns)
 
             # تحديث الإحصاءات
@@ -1523,93 +1642,112 @@ class VisaEditor:
             return formatted
         except (ValueError, TypeError):
             return str(value)
-    
+        
     def save_changes(self):
-        """حفظ التعديلات في قاعدة البيانات مع معالجة أفضل للأرقام"""
+        """حفظ التعديلات مع السماح بالتخفيض فقط بإدخال الرمز"""
         if not hasattr(self, 'table'):
             messagebox.showinfo("لا توجد بيانات", "لا توجد بيانات للحفظ")
             return
         
-        # الحصول على البيانات المعدلة فقط
         modified_data = self.table.get_modified_data()
-        
         if not modified_data:
             messagebox.showinfo("لا توجد تغييرات", "لم تقم بأي تعديلات")
             return
         
-        # تغيير مظهر زر الحفظ أثناء الحفظ
+        # تغيير مظهر زر الحفظ
         self.save_btn.config(state='disabled', text="⏳ جاري الحفظ...", bg='#FF9800')
         self.save_bottom_btn.config(state='disabled', text="⏳ جاري الحفظ...", bg='#FF9800')
         self.save_status_label.config(text="⏳ جاري حفظ التعديلات...", foreground='orange')
         self.window.update()
         
-        # طلب تأكيد
-        if not messagebox.askyesno("تأكيد الحفظ", 
-                                  f"تم العثور على {len(modified_data)} تعديلات. هل تريد المتابعة؟"):
-            self.update_save_button_status()
-            return
+        # فحص وجود تخفيضات
+        decrease_rows = []
+        for mod_row in modified_data:
+            old_visa = self.parse_number(mod_row['التأشيرة_الحالية_أصلية'])
+            new_visa = self.parse_number(mod_row['التأشيرة_الجديدة'])
+            if new_visa < old_visa:
+                decrease_rows.append(mod_row)
+        
+        allow_decrease = False
+        if decrease_rows:
+            # طلب الرمز الخاص
+            special_code = simpledialog.askstring(
+                "تأكيد التخفيض",
+                f"يوجد {len(decrease_rows)} تعديل(ات) بقيمة أقل من السابق.\n"
+                "الرجاء إدخال الرمز الخاص للموافقة على هذه التخفيضات:",
+                parent=self.window,
+                show='*'
+            )
+            allow_decrease = (special_code == "eyadkasem")
+            if not allow_decrease and special_code is not None:
+                # الرمز خاطئ – سنحفظ فقط الزيادات ونتجاهل التخفيضات
+                messagebox.showwarning("تنبيه", 
+                    "الرمز غير صحيح. سيتم حفظ التعديلات التي تزيد القيمة فقط،\n"
+                    "أما التخفيضات فلن يتم حفظها.")
+            elif special_code is None:
+                # المستخدم ألغى
+                self.update_save_button_status()
+                return
         
         try:
             total_updated = 0
+            skipped_decreases = 0
             failed_updates = []
             
             with db.get_cursor() as cursor:
-                for modified_row in modified_data:
+                for mod_row in modified_data:
                     try:
-                        customer_id = modified_row['id']
-                        
+                        customer_id = mod_row['id']
                         if not customer_id:
-                            failed_updates.append(f"الزبون {modified_row.get('علبة')}/{modified_row.get('مسلسل')}: لا يوجد معرف")
+                            failed_updates.append(f"الزبون {mod_row.get('علبة')}/{mod_row.get('مسلسل')}: لا يوجد معرف")
                             continue
                         
-                        # الحصول على القيم الأصلية والجديدة باستخدام الدالة الجديدة
-                        old_visa = self.parse_number(modified_row['التأشيرة_الحالية_أصلية'])
-                        new_visa = self.parse_number(modified_row['التأشيرة_الجديدة'])
-                        
-                        # حساب الفرق
+                        old_visa = self.parse_number(mod_row['التأشيرة_الحالية_أصلية'])
+                        new_visa = self.parse_number(mod_row['التأشيرة_الجديدة'])
                         difference = new_visa - old_visa
                         
-                        if abs(difference) < 0.01:  # تحمل صغير للفرق
-                            continue  # لا يوجد تغيير فعلي
+                        if abs(difference) < 0.01:
+                            continue  # لا تغيير فعلي
                         
-                        # البحث عن الزبون في البيانات الأصلية للحصول على الرصيد والسحب
-                        original_customer = None
-                        for cust in self.original_customers_data:
-                            if cust.get('id') == customer_id:
-                                original_customer = cust
-                                break
+                        # إذا كان تخفيضاً والرمز غير مسموح → نتخطاه
+                        if difference < 0 and not allow_decrease:
+                            skipped_decreases += 1
+                            continue
                         
+                        # البحث عن البيانات الأصلية الكاملة
+                        original_customer = next(
+                            (c for c in self.original_customers_data if c.get('id') == customer_id),
+                            None
+                        )
                         if not original_customer:
                             failed_updates.append(f"الزبون {customer_id}: لم يتم العثور على البيانات الأصلية")
                             continue
                         
-                        # الحصول على القيم الأصلية باستخدام الدالة الجديدة
                         old_balance = self.parse_number(original_customer.get('الرصيد الحالي', 0))
                         old_withdrawal = self.parse_number(original_customer.get('السحب الحالي', 0))
                         
-                        # حساب القيم الجديدة
                         new_balance = old_balance - difference
                         new_withdrawal = difference
                         
-                        # التأكد من أن القيم غير سالبة (حسب منطق العمل)
-                        #
-                        # التحديث في قاعدة البيانات
+                        # تحديث قاعدة البيانات
                         cursor.execute("""
                             UPDATE customers 
                             SET visa_balance = %s,
                                 current_balance = %s,
                                 withdrawal_amount = %s,
+                                previous_withdrawal = %s,
+                                withdrawal_updated_at = CURRENT_TIMESTAMP,
                                 updated_at = CURRENT_TIMESTAMP
                             WHERE id = %s
-                        """, (new_visa, new_balance, new_withdrawal, customer_id))
+                        """, (new_visa, new_balance, new_withdrawal, old_withdrawal, customer_id))
                         
-                        # تسجيل في السجل التاريخي
+                        # سجل تاريخي
                         cursor.execute("""
                             INSERT INTO customer_history 
                             (customer_id, action_type, transaction_type, amount, 
-                             balance_before, balance_after,
-                             current_balance_before, current_balance_after,
-                             old_value, new_value, notes, created_by)
+                            balance_before, balance_after,
+                            current_balance_before, current_balance_after,
+                            old_value, new_value, notes, created_by)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             customer_id,
@@ -1627,60 +1765,64 @@ class VisaEditor:
                         ))
                         
                         total_updated += 1
-                        logger.info(f"تم تحديث الزبون {customer_id} بتأشيرة {new_visa:,.0f}")
                         
                     except Exception as e:
-                        customer_info = f"{modified_row.get('علبة', '')}/{modified_row.get('مسلسل', '')}"
-                        error_msg = f"الزبون {customer_info}: {str(e)}"
-                        failed_updates.append(error_msg)
-                        logger.error(f"خطأ في تحديث الزبون: {error_msg}")
+                        customer_info = f"{mod_row.get('علبة', '')}/{mod_row.get('مسلسل', '')}"
+                        failed_updates.append(f"{customer_info}: {str(e)}")
             
-            # إظهار النتائج
-            if total_updated > 0:
-                message = f"✅ تم تحديث {total_updated} زبون بنجاح"
+            # عرض النتيجة
+            if total_updated > 0 or skipped_decreases > 0:
+                msg_parts = []
+                if total_updated > 0:
+                    msg_parts.append(f"✅ تم تحديث {total_updated} زبون بنجاح")
+                if skipped_decreases > 0:
+                    msg_parts.append(f"⏭️ تم تخطي {skipped_decreases} تخفيض (غير مصرح به)")
                 if failed_updates:
-                    message += f"\n❌ فشل تحديث {len(failed_updates)} زبون"
-                    message += "\n\nالأخطاء:\n" + "\n".join(failed_updates[:5])
-                    if len(failed_updates) > 5:
-                        message += f"\n... و{len(failed_updates) - 5} خطأ آخر"
+                    msg_parts.append(f"❌ فشل تحديث {len(failed_updates)} زبون")
+                    if len(failed_updates) <= 5:
+                        msg_parts.append("الأخطاء:\n" + "\n".join(failed_updates))
+                    else:
+                        msg_parts.append(f"أول 5 أخطاء:\n" + "\n".join(failed_updates[:5]))
                 
-                messagebox.showinfo("نتيجة الحفظ", message)
+                messagebox.showinfo("نتيجة الحفظ", "\n\n".join(msg_parts))
                 
-                # تغيير مظهر زر الحفظ بعد النجاح
                 self.save_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
                 self.save_bottom_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
-                self.save_status_label.config(text=f"✅ تم حفظ {total_updated} تعديل بنجاح", foreground='green')
+                self.save_status_label.config(
+                    text=f"✅ تم حفظ {total_updated} تعديل" + 
+                        (f" (تخطي {skipped_decreases} تخفيض)" if skipped_decreases else ""),
+                    foreground='green'
+                )
                 
-                # إعادة تحميل البيانات لتعكس التغييرات بعد 2 ثانية
+                # إعادة تحميل البيانات بعد ثانيتين
                 self.window.after(2000, self.load_customers)
             else:
                 if failed_updates:
-                    error_message = "فشل تحديث جميع الزبائن:\n" + "\n".join(failed_updates[:10])
-                    if len(failed_updates) > 10:
-                        error_message += f"\n... و{len(failed_updates) - 10} خطأ آخر"
-                    messagebox.showerror("خطأ", error_message)
-                    self.save_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-                    self.save_bottom_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-                    self.save_status_label.config(text="❌ فشل في حفظ التعديلات", foreground='red')
+                    messagebox.showerror("خطأ", "فشل تحديث جميع الزبائن:\n" + "\n".join(failed_updates[:10]))
                 else:
                     messagebox.showinfo("لا توجد تغييرات", "لم يتم تحديث أي زبون")
-                    self.update_save_button_status()
+                self.update_save_button_status()
         
         except Exception as e:
             logger.error(f"خطأ في حفظ التعديلات: {e}")
             messagebox.showerror("خطأ", f"فشل حفظ التعديلات: {e}")
             self.save_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-            self.save_bottom_btn.config(text="❌ فشل الحفظ", bg='#f44336')
+            self.save_bottom_btn.config(text="❌ فشل الحفظ', bg='#f44336'")
             self.save_status_label.config(text="❌ حدث خطأ أثناء الحفظ", foreground='red')
         
-        # استعادة المظهر الطبيعي بعد 3 ثوان
         self.window.after(3000, self.update_save_button_status)
+
+
+        
     
 
 def open_visa_editor(parent, user_id: int):
     """فتح محرر التأشيرات"""
     editor = VisaEditor(parent, user_id)
     return editor.window
+
+
+   
 
 if __name__ == "__main__":
     root = tk.Tk()

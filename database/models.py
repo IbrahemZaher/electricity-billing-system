@@ -1186,7 +1186,10 @@ class Models:
                     ('vip_grace_period', 'INTEGER DEFAULT 0'),
                     ('parent_meter_id', 'INTEGER'),
                     ('meter_type', "VARCHAR(50) DEFAULT 'زبون'"),
-                    ('default_generator_id', 'INTEGER REFERENCES customers(id)'),  # أضف هذا العمود
+                    ('default_generator_id', 'INTEGER REFERENCES customers(id)'),
+                    # الأعمدة الجديدة للسحب القديم وتوقيت التحديث
+                    ('previous_withdrawal', 'DECIMAL(15, 2) DEFAULT 0'),
+                    ('withdrawal_updated_at', 'TIMESTAMP'),
                 ]
                 
                 for column_name, column_type in new_columns:
@@ -1204,6 +1207,13 @@ class Models:
                         """)
                         logger.info(f"تم إضافة العمود {column_name} إلى جدول customers")
                         
+                # تعيين قيمة افتراضية للصفوف الموجودة في withdrawal_updated_at
+                cursor.execute("""
+                    UPDATE customers 
+                    SET withdrawal_updated_at = CURRENT_TIMESTAMP 
+                    WHERE withdrawal_updated_at IS NULL
+                """)
+                
         except Exception as e:
             logger.error(f"خطأ في تحديث جدول customers: {e}")
 
