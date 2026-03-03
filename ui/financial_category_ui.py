@@ -1,4 +1,4 @@
-# ui/financial_category_ui
+# ui/financial_category_ui.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
@@ -79,7 +79,7 @@ class FinancialCategoryUI:
         def _on_mousewheel(event):
             self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         
-        self.dialog.bind_all("<MouseWheel>", _on_mousewheel)
+        self.dialog.bind("<MouseWheel>", _on_mousewheel)
         # إلغاء الربط عند إغلاق النافذة لتجنب التأثير على النوافذ الأخرى
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -250,17 +250,18 @@ class FinancialCategoryUI:
             'normal': '#3498db',   # أزرق
             'free': '#2ecc71',     # أخضر
             'vip': '#e67e22',      # برتقالي
-            'free_vip': '#9b59b6'  # بنفسجي
+            'free_vip': '#9b59b6',  # بنفسجي
+            'mobile_accountant': '#f1c40f'   # أصفر ذهبي
         }
         return colors.get(category, '#7f8c8d')
-    
+        
     def get_category_icon(self, category):
-        """الحصول على أيقونة للتصنيف"""
         icons = {
             'normal': '👤',
             'free': '🎁',
             'vip': '⭐',
-            'free_vip': '🌟'
+            'free_vip': '🌟',
+            'mobile_accountant': '📱'   # أيقونة الهاتف
         }
         return icons.get(category, '❓')
     
@@ -297,9 +298,9 @@ class FinancialCategoryUI:
             ('عادي', 'normal'),
             ('مجاني', 'free'),
             ('VIP', 'vip'),
-            ('مجاني + VIP', 'free_vip')
-        ]
-        
+            ('مجاني + VIP', 'free_vip'),
+            ('محاسبة جوالة', 'mobile_accountant')
+        ]        
         for name, value in categories:
             rb = tk.Radiobutton(category_frame, text=name, value=value,
                               variable=self.category_var,
@@ -307,6 +308,29 @@ class FinancialCategoryUI:
                               bg='white',
                               command=self.on_category_changed)
             rb.pack(anchor='w', pady=2)
+        
+        # ========== إضافة إطار المحصل (للتصنيف محاسبة جوالة) ==========
+        self.collector_frame = tk.LabelFrame(content_frame, 
+                                              text="تعيين محصل",
+                                              font=('Arial', 11, 'bold'),
+                                              bg='white', fg='#9b59b6',
+                                              relief='groove', borderwidth=1)
+        self.collector_frame.pack(fill='x', padx=20, pady=10)
+        
+        tk.Label(self.collector_frame, text="اختر المحصل:",
+                font=('Arial', 10), bg='white').pack(anchor='w', padx=5, pady=5)
+        
+        self.collector_var = tk.StringVar()
+        self.collector_combo = ttk.Combobox(self.collector_frame, textvariable=self.collector_var,
+                                             state='readonly', width=40)
+        self.collector_combo.pack(pady=5, padx=5, fill='x')
+        
+        # تحميل قائمة المحصلين النشطين
+        self.load_collectors_list()
+        
+        # إخفاء الإطار في البداية (سيظهر عند اختيار التصنيف المناسب)
+        self.collector_frame.pack_forget()
+        # ============================================================
         
         # إطار تفاصيل المجاني
         self.free_details_frame = tk.LabelFrame(content_frame, 
@@ -402,6 +426,28 @@ class FinancialCategoryUI:
         # إخفاء الإطارات في البداية
         self.free_details_frame.pack_forget()
         self.vip_details_frame.pack_forget()
+        # collector_frame مخفي بالفعل بواسطة pack_forget أعلاه
+    
+    def load_collectors_list(self):
+        """تحميل قائمة المحصلين النشطين"""
+        try:
+            from database.connection import db
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, full_name, username 
+                    FROM users 
+                    WHERE role = 'collector' AND is_active = TRUE 
+                    ORDER BY full_name
+                """)
+                collectors = cursor.fetchall()
+                self.collector_map = {
+                    f"{c['full_name']} ({c['username']})": c['id'] 
+                    for c in collectors
+                }
+                self.collector_combo['values'] = list(self.collector_map.keys())
+        except Exception as e:
+            logger.error(f"خطأ في تحميل قائمة المحصلين: {e}")
+            self.collector_map = {}
     
     def on_category_changed(self):
         """عند تغيير اختيار التصنيف"""
@@ -417,6 +463,12 @@ class FinancialCategoryUI:
             self.vip_details_frame.pack(fill='x', padx=20, pady=10)
         else:
             self.vip_details_frame.pack_forget()
+        
+        # إظهار/إخفاء إطار المحصل حسب التصنيف
+        if category == 'mobile_accountant':
+            self.collector_frame.pack(fill='x', padx=20, pady=10)
+        else:
+            self.collector_frame.pack_forget()
     
     def create_history_tab(self, parent):
         """إنشاء تبويب سجل التغييرات"""
@@ -526,26 +578,42 @@ class FinancialCategoryUI:
             return
         
         try:
-            # جمع البيانات
+            category = self.category_var.get()
             category_data = {
-                'financial_category': self.category_var.get(),
+                'financial_category': category,
                 'user_id': self.user_data.get('id', 1),
                 'change_notes': self.change_notes_text.get('1.0', 'end-1c').strip()
             }
             
             # بيانات المجاني
-            if self.category_var.get() in ['free', 'free_vip']:
+            if category in ['free', 'free_vip']:
                 category_data['free_reason'] = self.free_reason_text.get('1.0', 'end-1c').strip()
                 category_data['free_amount'] = float(self.free_amount_var.get() or 0)
                 category_data['free_remaining'] = float(self.free_amount_var.get() or 0)
                 category_data['free_expiry_date'] = self.free_expiry_var.get() or None
             
             # بيانات VIP
-            if self.category_var.get() in ['vip', 'free_vip']:
+            if category in ['vip', 'free_vip']:
                 category_data['vip_reason'] = self.vip_reason_text.get('1.0', 'end-1c').strip()
                 category_data['vip_no_cut_days'] = int(self.vip_days_var.get() or 0)
                 category_data['vip_expiry_date'] = self.vip_expiry_var.get() or None
                 category_data['vip_grace_period'] = int(self.vip_grace_var.get() or 0)
+            
+            # ===== بيانات المحصل للتصنيف "محاسبة جوالة" =====
+            if category == 'mobile_accountant':
+                selected = self.collector_var.get()
+                if not selected:
+                    messagebox.showerror("خطأ", "يجب اختيار محصل للتصنيف 'محاسبة جوالة'")
+                    return
+                collector_id = self.collector_map.get(selected)
+                if not collector_id:
+                    messagebox.showerror("خطأ", "المحصل المحدد غير صالح")
+                    return
+                category_data['assigned_collector_id'] = collector_id
+            else:
+                # إذا لم يكن التصنيف محاسبة جوالة، نضمن إلغاء التعيين (إذا كان موجوداً سابقاً)
+                category_data['assigned_collector_id'] = None
+            # ================================================
             
             # حفظ التغييرات
             result = self.customer_manager.update_financial_category(

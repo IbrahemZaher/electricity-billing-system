@@ -162,6 +162,7 @@ class MainWindow:
             ("📝 سجل النشاط", "activity_log"),
             ("⚙️ الإعدادات", "settings"),
             ("🔄 النسخ الاحتياطي", "backup"),
+            ("📱 المحاسبة الجوالة", "mobile_accounting"),
             ("❌ خروج", "logout")
         ]
         
@@ -240,6 +241,19 @@ class MainWindow:
                 self.show_waste_analysis()
             else:
                 messagebox.showerror("صلاحيات", "ليس لديك صلاحية عرض تحليل الهدر")
+        elif command == "mobile_accounting":
+            if has_permission('mobile.view'):
+                self.show_mobile_accounting()
+            else:
+                messagebox.showerror("صلاحيات", "ليس لديك صلاحية الدخول للمحاسبة الجوالة")
+
+
+    def show_mobile_accounting(self):
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        from ui.mobile_accounting_ui import MobileAccountingUI
+        mobile_ui = MobileAccountingUI(self.content_frame, self.user_data)
+        mobile_ui.pack(fill='both', expand=True)                               
 
 
 

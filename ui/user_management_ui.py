@@ -281,7 +281,7 @@ class UsersUI:
         ttk.Label(top, text="الدور:*").pack(pady=5)
         role_var = tk.StringVar()
         role_combo = ttk.Combobox(top, textvariable=role_var,
-                                  values=['admin', 'accountant', 'cashier', 'viewer'])
+                                  values=['admin', 'accountant', 'cashier', 'viewer', 'collector'])
         role_combo.pack(pady=5)
 
         ttk.Label(top, text="كلمة المرور:*").pack(pady=5)
@@ -309,10 +309,9 @@ class UsersUI:
                 messagebox.showerror("خطأ", "كلمة المرور غير متطابقة")
                 return
 
-            if role not in ('admin', 'accountant', 'cashier', 'viewer'):
+            if role not in ('admin', 'accountant', 'cashier', 'viewer', 'collector'):
                 messagebox.showerror("خطأ", "الدور غير صالح")
                 return
-
             # التحقق من عدم تكرار اسم المستخدم أو البريد الإلكتروني (note: atomicity handled by register_user)
             try:
                 with db.get_cursor() as cursor:  # تغيير هنا
@@ -405,7 +404,7 @@ class UsersUI:
         ttk.Label(top, text="الدور:*").pack(pady=5)
         role_var = tk.StringVar()
         role_combo = ttk.Combobox(top, textvariable=role_var,
-                                values=['admin', 'accountant', 'cashier', 'viewer'])
+                                values=['admin', 'accountant', 'cashier', 'viewer', 'collector'])
         role_combo.set(current_user['role'])
         role_combo.pack(pady=5)
 
@@ -431,10 +430,9 @@ class UsersUI:
                 messagebox.showerror("خطأ", "جميع الحقول المميزة ب * إلزامية")
                 return
 
-            if role not in ('admin', 'accountant', 'cashier', 'viewer'):
+            if role not in ('admin', 'accountant', 'cashier', 'viewer', 'collector'):
                 messagebox.showerror("خطأ", "الدور غير صالح")
                 return
-
             # التحقق من كلمة المرور إذا تم إدخالها
             new_password_hash = None
             if password or password_confirm:

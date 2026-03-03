@@ -198,7 +198,7 @@ class AccountingUI(tk.Frame):
         # ربط عجلة الفأرة للتمرير داخل الـ Canvas
         def on_mousewheel(event):
             self.info_canvas.yview_scroll(int(-1*(event.delta/120)), 'units')
-        self.info_canvas.bind_all('<MouseWheel>', on_mousewheel)
+        self.info_canvas.bind('<MouseWheel>', on_mousewheel)
 
         # الآن ننقل الحقول إلى self.info_inner
         self.info_vars = {}

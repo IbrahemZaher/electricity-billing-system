@@ -467,7 +467,40 @@ class Models:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(user_id, permission_key)
             )
+            """,
+            # في قائمة tables_sql (داخل create_tables)، أضف ما يلي:
+
+            # ... (بعد جدول user_permissions مثلاً)
+
+            # جدول سجل عمليات التحصيل الميداني
             """
+            CREATE TABLE IF NOT EXISTS collection_logs (
+                id SERIAL PRIMARY KEY,
+                collector_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE,
+                collection_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                collected_amount DECIMAL(15, 2) NOT NULL,
+                expected_amount DECIMAL(15, 2),
+                notes TEXT,
+                location_lat DECIMAL(10, 8),
+                location_lon DECIMAL(11, 8),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+
+            # جدول أهداف الأداء اليومية/الشهرية
+            """
+            CREATE TABLE IF NOT EXISTS collector_targets (
+                id SERIAL PRIMARY KEY,
+                collector_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                target_date DATE NOT NULL,
+                target_amount DECIMAL(15, 2) NOT NULL,
+                achieved_amount DECIMAL(15, 2) DEFAULT 0,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
         ]
         
         try:
@@ -622,6 +655,10 @@ class Models:
             # أضف هذا السطر في permissions_data ضمن seed_initial_data
             ('customers.manage_children', 'إدارة الأبناء (العدادات التابعة)', 'customers'),
             ('customers.view_balance_stats', 'عرض إحصائيات لنا/علينا', 'customers'),
+            # ... المحاسبة الجوالة
+            ('mobile.view', 'عرض المحاسبة الجوالة', 'mobile'),
+            ('mobile.collect', 'تسجيل تحصيل ميداني', 'mobile'),
+            ('mobile.reports', 'تقارير أداء المحصلين', 'mobile'),
         ]
 
         for permission_key, name, category in permissions_data:
@@ -653,6 +690,11 @@ class Models:
             
             'viewer': [
                 'customers.view', 'reports.view'
+            ],
+            'collector': [
+                'mobile.view',
+                'mobile.collect',
+                'customers.view', 
             ]
         }
 
@@ -688,27 +730,40 @@ class Models:
             """, (key, value, description))
 
     def update_users_table(self):
-        """تحديث جدول المستخدمين بإضافة الأعمدة المفقودة"""
+        """تحديث جدول المستخدمين بإضافة الأعمدة المفقودة وتحديث قيم الدور"""
         try:
             with db.get_cursor() as cursor:
-                # التحقق من وجود عمود email وإضافته إذا لم يكن موجوداً
+                # ---------- إضافة عمود email إذا لم يكن موجوداً ----------
                 cursor.execute("""
                     SELECT column_name 
                     FROM information_schema.columns 
                     WHERE table_name = 'users' 
                     AND column_name = 'email'
                 """)
-                
                 if not cursor.fetchone():
-                    # إضافة العمود إذا لم يكن موجوداً
-                    cursor.execute("""
-                        ALTER TABLE users 
-                        ADD COLUMN email VARCHAR(255)
-                    """)
+                    cursor.execute("ALTER TABLE users ADD COLUMN email VARCHAR(255)")
                     logger.info("تم إضافة العمود email إلى جدول users")
                 else:
                     logger.info("العمود email موجود بالفعل في جدول users")
-                
+
+                # ---------- تحديث قيد CHECK على عمود role ----------
+                # حذف القيد القديم إذا كان موجوداً (الاسم المفترض: users_role_check)
+                cursor.execute("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check') THEN
+                            ALTER TABLE users DROP CONSTRAINT users_role_check;
+                        END IF;
+                    END $$;
+                """)
+                # إضافة القيد الجديد بالقيم المحدثة (admin, accountant, cashier, viewer, collector)
+                cursor.execute("""
+                    ALTER TABLE users
+                    ADD CONSTRAINT users_role_check
+                    CHECK (role IN ('admin', 'accountant', 'cashier', 'viewer', 'collector'))
+                """)
+                logger.info("تم تحديث قيد role في جدول users ليشمل collector")
+
         except Exception as e:
             logger.error(f"خطأ في تحديث جدول users: {e}")
 
@@ -1190,6 +1245,7 @@ class Models:
                     # الأعمدة الجديدة للسحب القديم وتوقيت التحديث
                     ('previous_withdrawal', 'DECIMAL(15, 2) DEFAULT 0'),
                     ('withdrawal_updated_at', 'TIMESTAMP'),
+                    ('assigned_collector_id', 'INTEGER REFERENCES users(id)'),
                 ]
                 
                 for column_name, column_type in new_columns:

@@ -1138,15 +1138,15 @@ class CustomerManager:
     # إضافة دوال التصنيف المالي إلى الكلاس
 
     """مدير عمليات الزبائن مع دعم التصنيفات المالية"""
-    
+        
     def update_financial_category(self, customer_id: int, category_data: Dict) -> Dict:
-        """تحديث التصنيف المالي للزبون"""
+        """تحديث التصنيف المالي للزبون مع دعم تعيين المحصل الجوال"""
         try:
             with db.get_cursor() as cursor:
                 # جلب التصنيف الحالي
                 cursor.execute("""
                     SELECT financial_category, free_amount, free_remaining,
-                           vip_no_cut_days, vip_expiry_date
+                        vip_no_cut_days, vip_expiry_date
                     FROM customers WHERE id = %s
                 """, (customer_id,))
                 
@@ -1158,7 +1158,8 @@ class CustomerManager:
                 new_category = category_data.get('financial_category', old_category)
                 
                 # التحقق من صحة البيانات
-                if new_category not in ['normal', 'free', 'vip', 'free_vip']:
+                valid_categories = ['normal', 'free', 'vip', 'free_vip', 'mobile_accountant']
+                if new_category not in valid_categories:
                     return {'success': False, 'error': 'تصنيف غير صالح'}
                 
                 # إعداد بيانات التحديث
@@ -1168,6 +1169,12 @@ class CustomerManager:
                 # تحديث التصنيف الأساسي
                 update_fields.append("financial_category = %s")
                 update_values.append(new_category)
+                
+                # ===== التعديل: دعم assigned_collector_id =====
+                if 'assigned_collector_id' in category_data:
+                    update_fields.append("assigned_collector_id = %s")
+                    update_values.append(category_data['assigned_collector_id'])
+                # ==============================================
                 
                 # معالجة تفاصيل المجاني
                 if 'free' in new_category:
@@ -1234,17 +1241,25 @@ class CustomerManager:
                 
                 cursor.execute(query, tuple(update_values))
                 
-                # تسجيل التغيير في السجل
+                # تسجيل التغيير في سجل التصنيفات المالية
+                # تحديد نوع التصنيف المناسب (يجب أن يكون قصيراً)
+                if new_category == 'free_vip':
+                    cat_type = 'both'
+                elif new_category == 'mobile_accountant':
+                    cat_type = 'mobile'   # قيمة قصيرة تناسب قاعدة البيانات
+                else:
+                    cat_type = new_category
+
                 cursor.execute("""
                     INSERT INTO customer_financial_logs 
                     (customer_id, old_category, new_category, category_type,
-                     free_reason, free_amount, free_remaining, free_expiry_date,
-                     vip_reason, vip_no_cut_days, vip_expiry_date, vip_grace_period,
-                     changed_by, change_notes)
+                    free_reason, free_amount, free_remaining, free_expiry_date,
+                    vip_reason, vip_no_cut_days, vip_expiry_date, vip_grace_period,
+                    changed_by, change_notes)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     customer_id, old_category, new_category,
-                    'both' if new_category == 'free_vip' else new_category,
+                    cat_type,
                     category_data.get('free_reason', ''),
                     category_data.get('free_amount', 0),
                     category_data.get('free_remaining', 0),
@@ -1277,12 +1292,12 @@ class CustomerManager:
             return {'success': False, 'error': str(e)}
     
     def get_category_name(self, category_code: str) -> str:
-        """تحويل رمز التصنيف إلى اسم عربي"""
         categories = {
             'normal': 'عادي',
             'free': 'مجاني',
             'vip': 'VIP',
-            'free_vip': 'مجاني + VIP'
+            'free_vip': 'مجاني + VIP',
+            'mobile_accountant': 'محاسبة جوالة'
         }
         return categories.get(category_code, 'غير معروف')
     
@@ -1909,4 +1924,49 @@ class CustomerManager:
                 
         except Exception as e:
             logger.error(f"خطأ في تحديث الأبناء: {e}")
-            return {'success': False, 'error': str(e)}                                
+            return {'success': False, 'error': str(e)}
+
+    def assign_collector(self, customer_id: int, collector_id: int) -> Dict:
+        """تعيين محصل جوال لزبون معين"""
+        try:
+            with db.get_cursor() as cursor:
+                # التحقق من وجود المحصل ودوره
+                cursor.execute("SELECT role FROM users WHERE id = %s AND is_active = TRUE", (collector_id,))
+                user = cursor.fetchone()
+                if not user or user['role'] != 'collector':
+                    return {'success': False, 'error': 'المستخدم المحدد ليس محصلاً جوالاً أو غير نشط'}
+
+                # تحديث customer (تحتاج إلى إضافة العمود assigned_collector_id أولاً)
+                # تأكد من وجود العمود في جدول customers
+                cursor.execute("""
+                    UPDATE customers
+                    SET assigned_collector_id = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id
+                """, (collector_id, customer_id))
+
+                if cursor.fetchone():
+                    logger.info(f"تم تعيين محصل {collector_id} للزبون {customer_id}")
+                    return {'success': True, 'message': 'تم التعيين بنجاح'}
+                else:
+                    return {'success': False, 'error': 'الزبون غير موجود'}
+        except Exception as e:
+            logger.error(f"خطأ في تعيين المحصل: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_customers_by_collector(self, collector_id: int) -> List[Dict]:
+        """جلب جميع الزبائن المخصصين لمحصل معين"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT c.*, s.name as sector_name
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    WHERE c.assigned_collector_id = %s AND c.is_active = TRUE
+                    ORDER BY c.name
+                """, (collector_id,))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"خطأ في جلب زبائن المحصل: {e}")
+            return []                                            

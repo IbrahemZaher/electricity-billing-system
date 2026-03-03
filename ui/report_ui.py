@@ -196,6 +196,7 @@ class ReportUI(tk.Frame):
             ("🖨️ أوراق التأشيرات", self.show_visa_report),
             ("📋 جرد الدورة", self.show_cycle_inventory_report),
             ("👑 تقرير VIP شامل", self.show_vip_full_report),
+            ("📱 تقرير محاسبة جوالة شامل", self.show_mobile_accountant_full_report),  # <-- جديد
         ]
 
         for report_name, command in reports:
@@ -395,12 +396,13 @@ class ReportUI(tk.Frame):
         # التصنيفات المالية المستثناة
         category_frame = tk.LabelFrame(main_frame, text="استبعاد التصنيفات", padx=10, pady=10)
         category_frame.pack(fill='x', pady=10)
-        categories = ['normal', 'free', 'vip', 'free_vip']
+        categories = ['normal', 'free', 'vip', 'free_vip', 'mobile_accountant']
         category_names = {
             'normal': 'عادي',
             'free': 'مجاني',
             'vip': 'VIP',
-            'free_vip': 'مجاني + VIP'
+            'free_vip': 'مجاني + VIP',
+            'mobile_accountant': 'محاسبة جوالة'
         }
         category_vars = {}
         for i, category in enumerate(categories):
@@ -1166,7 +1168,11 @@ class ReportUI(tk.Frame):
             elif report_type == "vip_full":
                 success, filepath = self.report_manager.export_vip_report_to_excel(
                     self.current_report, filename
-                )                       
+                )
+            elif report_type == "mobile_accountant_full":
+                success, filepath = self.report_manager.export_mobile_accountant_report_to_excel(
+                    self.current_report, filename
+                )    
             else:
                 messagebox.showwarning("تحذير", "نوع التقرير غير مدعوم للتصدير")
                 return
@@ -1253,12 +1259,13 @@ class ReportUI(tk.Frame):
         # التصنيفات المالية المستثناة
         category_frame = tk.LabelFrame(main_frame, text="استبعاد التصنيفات", padx=10, pady=10)
         category_frame.pack(fill='x', pady=10)
-        categories = ['normal', 'free', 'vip', 'free_vip']
+        categories = ['normal', 'free', 'vip', 'free_vip', 'mobile_accountant']
         category_names = {
             'normal': 'عادي',
             'free': 'مجاني',
             'vip': 'VIP',
-            'free_vip': 'مجاني + VIP'
+            'free_vip': 'مجاني + VIP',
+            'mobile_accountant': 'محاسبة جوالة'
         }
         category_vars = {}
         for i, category in enumerate(categories):
@@ -1952,4 +1959,135 @@ class ReportUI(tk.Frame):
             f"إجمالي المتبقي من المجاني: {grand_total.get('total_free_remaining', 0):,.0f}"
         )
         tk.Label(total_frame, text=total_text, font=('Arial', 10, 'bold')).pack()
+
+
+    def show_mobile_accountant_full_report(self):
+        """عرض تقرير المحاسبة الجوالة الشامل مع إمكانية فلترة حسب القطاع"""
+        if not self.report_manager:
+            self.show_error("لم يتم تحميل نظام التقارير")
+            return
+
+        # نافذة اختيار القطاع (مثل تقرير VIP)
+        sector_window = tk.Toplevel(self)
+        sector_window.title("فلترة تقرير المحاسبة الجوالة")
+        sector_window.geometry("300x200")
+        sector_window.transient(self)
+        sector_window.grab_set()
+
+        tk.Label(sector_window, text="اختر القطاع (اترك الكل للجميع):",
+                font=('Arial', 11)).pack(pady=10)
+
+        sectors = self.report_manager.get_available_sectors()
+        sector_names = ['الكل'] + [s['name'] for s in sectors]
+        sector_var = tk.StringVar(value='الكل')
+        sector_combo = ttk.Combobox(sector_window, textvariable=sector_var,
+                                    values=sector_names, state='readonly', width=25)
+        sector_combo.pack(pady=5)
+
+        def on_select():
+            selected = sector_var.get()
+            sector_id = None
+            if selected != 'الكل':
+                for s in sectors:
+                    if s['name'] == selected:
+                        sector_id = s['id']
+                        break
+            sector_window.destroy()
+            self._generate_mobile_accountant_report(sector_id)
+
+        tk.Button(sector_window, text="توليد التقرير", command=on_select,
+                bg='#27ae60', fg='white', font=('Arial', 11)).pack(pady=20)
+
+    def _generate_mobile_accountant_report(self, sector_id):
+        """توليد وعرض تقرير المحاسبة الجوالة"""
+        self.clear_frames()
+        try:
+            report = self.report_manager.get_mobile_accountant_full_report(sector_id=sector_id)
+            if not report.get('success'):
+                self.show_error(report.get('error', 'فشل توليد التقرير'))
+                return
+
+            self.display_mobile_accountant_report(report)
+            self.current_report = report
+            self.current_report_type = "mobile_accountant_full"
+            self.export_excel_btn.config(state='normal')
+            self.setup_export_options("mobile_accountant_full")
+            self.update_status("تم توليد تقرير المحاسبة الجوالة الشامل")
+        except Exception as e:
+            self.show_error(f"خطأ في عرض التقرير: {e}")
+
+    def display_mobile_accountant_report(self, report):
+        """عرض تقرير المحاسبة الجوالة في شجرة هرمية (مثل تقرير VIP)"""
+        frame = tk.Frame(self.results_frame)
+        frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # معلومات التقرير
+        info_frame = tk.LabelFrame(frame, text="معلومات التقرير", padx=10, pady=10)
+        info_frame.pack(fill='x', pady=(0, 10))
+
+        tk.Label(info_frame, text=f"عنوان التقرير: {report.get('report_title', '')}",
+                anchor='w').pack(fill='x')
+        tk.Label(info_frame, text=f"تاريخ الإنشاء: {report.get('generated_at', '')}",
+                anchor='w').pack(fill='x')
+
+        filters = report.get('filters', {})
+        if filters.get('sector_id'):
+            tk.Label(info_frame, text=f"القطاع: {filters['sector_id']}", anchor='w').pack(fill='x')
+
+        # إنشاء شجرة مع تمرير
+        tree_frame = tk.Frame(frame)
+        tree_frame.pack(fill='both', expand=True)
+
+        vsb = ttk.Scrollbar(tree_frame, orient='vertical')
+        hsb = ttk.Scrollbar(tree_frame, orient='horizontal')
+
+        columns = ('الاسم', 'القطاع', 'الرصيد', 'التأشيرة', 'السحب', 'آخر قراءة')
+        tree = ttk.Treeview(tree_frame, columns=columns, show='tree headings',
+                            yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb.config(command=tree.yview)
+        hsb.config(command=tree.xview)
+
+        # رؤوس الأعمدة
+        tree.heading('#0', text='المعرف')
+        tree.column('#0', width=60, anchor='center')
+        for col in columns:
+            tree.heading(col, text=col)
+            tree.column(col, width=120, anchor='center')
+
+        # تعبئة البيانات
+        for sector in report.get('sectors', []):
+            sector_id = tree.insert('', 'end', text='',
+                                    values=(f"قطاع: {sector['sector_name']}", '', '', '', '', ''),
+                                    tags=('sector',))
+            for cust in sector.get('customers', []):
+                values = (
+                    cust.get('name', ''),
+                    cust.get('sector_name', ''),
+                    f"{cust.get('current_balance', 0):,.0f}",
+                    f"{cust.get('visa_balance', 0):,.0f}",
+                    f"{cust.get('withdrawal_amount', 0):,.0f}",
+                    f"{cust.get('last_counter_reading', 0):,.0f}"
+                )
+                tree.insert(sector_id, 'end', text=cust['id'], values=values)
+
+        tree.tag_configure('sector', font=('Arial', 10, 'bold'), background='#f0f0f0')
+
+        tree.grid(row=0, column=0, sticky='nsew')
+        vsb.grid(row=0, column=1, sticky='ns')
+        hsb.grid(row=1, column=0, sticky='ew')
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        # الإجماليات
+        grand_total = report.get('grand_total', {})
+        total_frame = tk.LabelFrame(frame, text="الإجماليات", padx=10, pady=10)
+        total_frame.pack(fill='x', pady=10)
+
+        total_text = (
+            f"عدد الزبائن: {grand_total.get('customer_count', 0):,}  |  "
+            f"إجمالي الرصيد: {grand_total.get('total_balance', 0):,.0f}  |  "
+            f"إجمالي التأشيرة: {grand_total.get('total_visa', 0):,.0f}  |  "
+            f"إجمالي السحب: {grand_total.get('total_withdrawal', 0):,.0f}"
+        )
+        tk.Label(total_frame, text=total_text, font=('Arial', 10, 'bold')).pack()        
 

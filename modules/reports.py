@@ -1082,7 +1082,7 @@ class ReportManager:
             return []
 
     def get_financial_categories(self) -> List[str]:
-        return ['normal', 'free', 'vip', 'free_vip']
+        return ['normal', 'free', 'vip', 'free_vip', 'mobile_accountant']
 
     def get_meter_types(self) -> List[str]:
         return ['مولدة', 'علبة توزيع', 'رئيسية', 'زبون']
@@ -2650,3 +2650,214 @@ class ReportManager:
         except Exception as e:
             logger.error(f"خطأ في تصدير تقرير VIP: {e}")
             return False, str(e)                                                    
+
+
+    def get_mobile_accountant_full_report(self, sector_id: int = None) -> Dict[str, Any]:
+        """
+        تقرير شامل لزبائن محاسبة جوالة (mobile_accountant) مع جميع القيم المالية.
+        """
+        try:
+            with db.get_cursor() as cursor:
+                query = """
+                    SELECT
+                        c.id,
+                        c.name,
+                        c.box_number,
+                        c.serial_number,
+                        c.phone_number,
+                        c.current_balance,
+                        c.visa_balance,
+                        c.withdrawal_amount,
+                        c.financial_category,
+                        c.last_counter_reading,
+                        c.notes,
+                        s.name as sector_name,
+                        s.id as sector_id,
+                        parent.name as parent_name,
+                        parent.box_number as parent_box_number,
+                        parent.meter_type as parent_meter_type
+                    FROM customers c
+                    LEFT JOIN sectors s ON c.sector_id = s.id
+                    LEFT JOIN customers parent ON c.parent_meter_id = parent.id
+                    WHERE c.is_active = TRUE
+                    AND c.financial_category = 'mobile_accountant'
+                """
+                params = []
+                if sector_id:
+                    query += " AND c.sector_id = %s"
+                    params.append(sector_id)
+                query += " ORDER BY s.name, c.name"
+
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+
+                # تجميع البيانات حسب القطاع
+                sectors_dict = {}
+                for row in rows:
+                    sector = row['sector_name'] or 'بدون قطاع'
+                    if sector not in sectors_dict:
+                        sectors_dict[sector] = {
+                            'customers': [],
+                            'total_balance': 0,
+                            'total_visa': 0,
+                            'total_withdrawal': 0
+                        }
+                    customer = dict(row)
+                    sectors_dict[sector]['customers'].append(customer)
+                    sectors_dict[sector]['total_balance'] += float(customer.get('current_balance', 0))
+                    sectors_dict[sector]['total_visa'] += float(customer.get('visa_balance', 0))
+                    sectors_dict[sector]['total_withdrawal'] += float(customer.get('withdrawal_amount', 0))
+
+                # تحويل إلى قائمة
+                sectors_list = []
+                grand_total = {
+                    'customer_count': 0,
+                    'total_balance': 0,
+                    'total_visa': 0,
+                    'total_withdrawal': 0
+                }
+                for sector_name, data in sectors_dict.items():
+                    sector_info = {
+                        'sector_name': sector_name,
+                        'customers': data['customers'],
+                        'customer_count': len(data['customers']),
+                        'total_balance': data['total_balance'],
+                        'total_visa': data['total_visa'],
+                        'total_withdrawal': data['total_withdrawal']
+                    }
+                    sectors_list.append(sector_info)
+                    grand_total['customer_count'] += len(data['customers'])
+                    grand_total['total_balance'] += data['total_balance']
+                    grand_total['total_visa'] += data['total_visa']
+                    grand_total['total_withdrawal'] += data['total_withdrawal']
+
+                return {
+                    'success': True,
+                    'sectors': sectors_list,
+                    'grand_total': grand_total,
+                    'filters': {'sector_id': sector_id},
+                    'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'report_title': 'تقرير المحاسبة الجوالة الشامل'
+                }
+
+        except Exception as e:
+            logger.error(f"خطأ في تقرير المحاسبة الجوالة الشامل: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }            
+
+
+    def export_mobile_accountant_report_to_excel(self, report_data: Dict[str, Any], filename: str = None) -> Tuple[bool, str]:
+        """
+        تصدير تقرير المحاسبة الجوالة الشامل إلى Excel.
+        """
+        try:
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"تقرير_محاسبة_جوالة_{timestamp}.xlsx"
+
+            export_dir = "exports"
+            os.makedirs(export_dir, exist_ok=True)
+            filepath = os.path.join(export_dir, filename)
+
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+                # ورقة الإجماليات
+                summary_data = []
+                summary_data.append(['تقرير المحاسبة الجوالة الشامل', report_data.get('report_title', '')])
+                summary_data.append(['تاريخ الإنشاء', report_data.get('generated_at', '')])
+                summary_data.append([''])
+                summary_data.append(['الإجماليات:'])
+
+                grand_total = report_data.get('grand_total', {})
+                summary_data.append(['عدد الزبائن', f"{grand_total.get('customer_count', 0):,}"])
+                summary_data.append(['إجمالي الرصيد', f"{grand_total.get('total_balance', 0):,.0f}"])
+                summary_data.append(['إجمالي التأشيرة', f"{grand_total.get('total_visa', 0):,.0f}"])
+                summary_data.append(['إجمالي السحب', f"{grand_total.get('total_withdrawal', 0):,.0f}"])
+                summary_data.append([''])
+
+                filters = report_data.get('filters', {})
+                summary_data.append(['الفلاتر المطبقة:'])
+                summary_data.append(['القطاع', filters.get('sector_id', 'الكل')])
+
+                df_summary = pd.DataFrame(summary_data)
+                df_summary.to_excel(writer, sheet_name='ملخص', index=False, header=False)
+
+                # ورقة لكل قطاع
+                for sector_data in report_data.get('sectors', []):
+                    sector_name = sector_data['sector_name']
+                    customers = sector_data.get('customers', [])
+                    if not customers:
+                        continue
+
+                    data_list = []
+                    for customer in customers:
+                        # بناء نص العلبة الأم
+                        parent_info = ''
+                        if customer.get('parent_name'):
+                            parent_parts = []
+                            if customer.get('parent_box_number'):
+                                parent_parts.append(f"علبة: {customer['parent_box_number']}")
+                            parent_parts.append(customer['parent_name'])
+                            if customer.get('parent_meter_type'):
+                                parent_parts.append(f"({customer['parent_meter_type']})")
+                            parent_info = ' - '.join(parent_parts)
+
+                        data_list.append([
+                            customer.get('id'),
+                            customer.get('name'),
+                            customer.get('box_number'),
+                            customer.get('serial_number'),
+                            customer.get('phone_number'),
+                            customer.get('current_balance', 0),
+                            customer.get('visa_balance', 0),
+                            customer.get('withdrawal_amount', 0),
+                            customer.get('financial_category'),
+                            customer.get('last_counter_reading', 0),
+                            customer.get('notes', ''),
+                            parent_info,
+                            customer.get('sector_name')
+                        ])
+
+                    columns = [
+                        'المعرف', 'الاسم', 'رقم العلبة', 'المسلسل', 'الهاتف',
+                        'الرصيد الحالي', 'رصيد التأشيرة', 'السحب', 'التصنيف',
+                        'آخر قراءة عداد', 'ملاحظات', 'العلبة الأم', 'القطاع'
+                    ]
+
+                    df_sector = pd.DataFrame(data_list, columns=columns)
+
+                    # إضافة صف إجمالي
+                    total_row = [
+                        f"إجمالي {sector_name}", '',
+                        f"{sector_data['customer_count']} زبون", '', '',
+                        f"{sector_data['total_balance']:,.0f}",
+                        f"{sector_data['total_visa']:,.0f}",
+                        f"{sector_data['total_withdrawal']:,.0f}",
+                        '', '', '', '', ''
+                    ]
+                    total_row = total_row[:len(columns)]
+                    df_sector = pd.concat([df_sector, pd.DataFrame([total_row], columns=columns)], ignore_index=True)
+
+                    sheet_name = sector_name[:31]
+                    df_sector.to_excel(writer, sheet_name=sheet_name, index=False)
+
+                    # تنسيق عرض الأعمدة
+                    worksheet = writer.sheets[sheet_name]
+                    for column in worksheet.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = min(max_length + 2, 50)
+                        worksheet.column_dimensions[column_letter].width = adjusted_width
+
+            return True, filepath
+
+        except Exception as e:
+            logger.error(f"خطأ في تصدير تقرير المحاسبة الجوالة: {e}")
+            return False, str(e)            
