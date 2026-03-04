@@ -221,6 +221,11 @@ class CustomerUI(tk.Frame):
         self.tree.tag_configure('zero', foreground='#7f8c8d')
         self.tree.tag_configure('inactive', background='#f2f2f2', foreground='#bdc3c7')
 
+        # ألوان خلفية للأنواع
+        self.tree.tag_configure('type_moleda', background='#d7bde2')    # أرجواني متوسط
+        self.tree.tag_configure('type_distribution', background='#f9e79f')  # أصفر فاتح
+        self.tree.tag_configure('type_main', background='#a9dfbf')     # فيروزي فاتح
+
         self.tree.bind('<Double-Button-1>', self.on_double_click)
         self.tree.bind('<<TreeviewSelect>>', self.on_selection_changed)
 
@@ -333,6 +338,14 @@ class CustomerUI(tk.Frame):
                         if parent_node:
                             parent_name = parent_node['name']
 
+                    # إضافة وسم النوع
+                    if node['meter_type'] == 'مولدة':
+                        tags.append('type_moleda')
+                    elif node['meter_type'] == 'علبة توزيع':
+                        tags.append('type_distribution')
+                    elif node['meter_type'] == 'رئيسية':
+                        tags.append('type_main')
+
                     iid = self.tree.insert(
                         parent_iid, 'end',
                         text=f" {node['name']}",
@@ -353,6 +366,34 @@ class CustomerUI(tk.Frame):
                     insert_node(node['id'], iid)
 
             insert_node(None)
+
+            # إذا كان هناك مصطلح بحث، قم بتوسيع المسار إلى العناصر المطابقة وتحديد أولها
+            if search_term:
+                # البحث عن جميع العناصر التي تطابق search_term في النص أو القيم
+                matching_items = []
+                for item in self.tree.get_children():
+                    # فحص العنصر نفسه وأبنائه بشكل متكرر
+                    def collect_matching(parent_item):
+                        item_text = self.tree.item(parent_item, 'text')
+                        item_values = self.tree.item(parent_item, 'values')
+                        if (search_term_lower in item_text.lower() or
+                            any(search_term_lower in str(val).lower() for val in item_values if val)):
+                            matching_items.append(parent_item)
+                        for child in self.tree.get_children(parent_item):
+                            collect_matching(child)
+                    collect_matching(item)
+
+                if matching_items:
+                    # توسيع جميع الآباء لأول عنصر مطابق
+                    first_match = matching_items[0]
+                    parent = self.tree.parent(first_match)
+                    while parent:
+                        self.tree.item(parent, open=True)
+                        parent = self.tree.parent(parent)
+                    # تحديد أول عنصر مطابق وجعله مرئياً
+                    self.tree.selection_set(first_match)
+                    self.tree.see(first_match)
+                    self.tree.focus(first_match)            
 
             # تحديث الإحصائيات
             customer_count = len([n for n in filtered_nodes if n['meter_type'] == 'زبون'])
