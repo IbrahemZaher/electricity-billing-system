@@ -38,6 +38,9 @@ class AccountingUI(tk.Frame):
             'terminal_fg': '#81C784',            # نص أخضر في منطقة النتائج
             'border_strong': '#B37D7D'           # حدود واضحة بلون أساسي
         }
+        # ⬇️ أضف هذين السطرين
+        self.info_labels = {}          # لتخزين مراجع عناصر Label
+        self.last_visa_update = None   # (اختياري) لتخزين آخر تاريخ تحديث للتأشيرة
         
         self.selected_customer = None
         self.sectors = []
@@ -227,9 +230,11 @@ class AccountingUI(tk.Frame):
             tk.Label(row, text=label, font=('Segoe UI', 12), bg='white', 
                     fg='#7F8C8D', anchor='e').pack(fill='x')
             var = tk.StringVar(value="---")
-            tk.Label(row, textvariable=var, font=('Segoe UI', 14, 'bold'), 
-                    bg='white', fg=self.colors['text_dark'], anchor='e').pack(fill='x')
+            lbl = tk.Label(row, textvariable=var, font=('Segoe UI', 14, 'bold'), 
+                    bg='white', fg=self.colors['text_dark'], anchor='e')
+            lbl.pack(fill='x')
             self.info_vars[key] = var
+            self.info_labels[key] = lbl   # حفظ المرجع للاستخدام في التلميحات
         
         # العمود الأيسر
         left_frame = tk.Frame(self.info_inner, bg='white')
@@ -267,16 +272,19 @@ class AccountingUI(tk.Frame):
 
         # ربط تغيير حجم النافذة بفحص شريط التمرير (إذا أردت)
         self.notes_text.bind('<Configure>', lambda e: self.check_scroll_needed())
-        
+                
         for label, key in left_fields:
             row = tk.Frame(left_frame, bg='white', pady=5)
             row.pack(fill='x')
             tk.Label(row, text=label, font=('Segoe UI', 12), bg='white', 
                     fg='#7F8C8D', anchor='e').pack(fill='x')
             var = tk.StringVar(value="---")
-            tk.Label(row, textvariable=var, font=('Segoe UI', 14, 'bold'), 
-                    bg='white', fg=self.colors['text_dark'], anchor='e').pack(fill='x')
+            # ⬇️ أنشئ مرجعاً للـ Label
+            lbl = tk.Label(row, textvariable=var, font=('Segoe UI', 14, 'bold'), 
+                    bg='white', fg=self.colors['text_dark'], anchor='e')
+            lbl.pack(fill='x')
             self.info_vars[key] = var
+            self.info_labels[key] = lbl   # ⬅️ احفظ المرجع هنا
         
         # ---- العمود الأيمن (الإدخال والمعالجة) ----
         right_column = tk.Frame(self.work_area, bg=self.colors['bg_main'], width=500)
@@ -569,6 +577,8 @@ class AccountingUI(tk.Frame):
             
             # تحديث عرض التصنيف المالي
             self.update_financial_category_display(customer_data)
+            # ⬇️ أضف هذا السطر لربط التلميح بالتأشيرة
+            self.bind_visa_tooltip(customer_id)
             
             self.show_result_message(f"✅ تم تحديد الزبون: {customer_data.get('name', '')}\n"
                                     f"الرصيد الحالي: {float(current_balance) if current_balance is not None else 0:,.0f} ك.واط\n"
@@ -942,7 +952,92 @@ class AccountingUI(tk.Frame):
         except Exception as e:
             logger.error(f"خطأ في المعالجة: {e}")
             messagebox.showerror("خطأ", f"حدث خطأ غير متوقع: {str(e)}")
-    
+
+
+    def _get_visa_history(self, customer_id):
+        """
+        جلب جميع تعديلات التأشيرة للزبون من جدول customer_history.
+        يتم جلب كل السجلات أولاً ثم تصفيتها في بايثون لتجنب مشاكل SQL.
+        """
+        if not customer_id:
+            return []
+        try:
+            from database.connection import db
+            with db.get_cursor() as cursor:
+                # جلب كل السجلات لهذا الزبون
+                cursor.execute("""
+                    SELECT created_at, old_value, new_value, notes, transaction_type
+                    FROM customer_history
+                    WHERE customer_id = %s
+                    ORDER BY created_at DESC
+                """, (customer_id,))
+                all_records = cursor.fetchall()
+                
+                # تصفية السجلات التي تتعلق بالتأشيرة
+                visa_records = []
+                for record in all_records:
+                    transaction_type = record.get('transaction_type', '') or ''
+                    notes = record.get('notes', '') or ''
+                    
+                    # التحقق من وجود كلمات مفتاحية تشير إلى تعديل التأشيرة
+                    if ('visa' in transaction_type.lower() or 
+                        'تأشيرة' in transaction_type or
+                        'visa' in notes.lower() or 
+                        'تأشيرة' in notes):
+                        visa_records.append(record)
+                
+                # للتشخيص
+                print(f"عدد سجلات التأشيرة للزبون {customer_id}: {len(visa_records)} (من أصل {len(all_records)})")
+                return visa_records
+                
+        except Exception as e:
+            logger.error(f"خطأ في جلب سجل التأشيرات: {e}")
+            return []
+
+    def bind_visa_tooltip(self, customer_id):
+        visa_label = self.info_labels.get('visa')
+        if not visa_label:
+            return
+
+        history = self._get_visa_history(customer_id)
+        print(f"عدد سجلات التأشيرة التي تم جلبها: {len(history)}")   # تشخيص
+
+        if not history:
+            tooltip_text = "لا توجد تعديلات سابقة على رصيد التأشيرة."
+        else:
+            # ... باقي الكود ...
+
+            lines = []
+            for record in history:
+                created_at = record['created_at']
+                if isinstance(created_at, datetime):
+                    date_str = created_at.strftime('%Y-%m-%d %H:%M')
+                else:
+                    date_str = str(created_at)
+
+                old_val = record.get('old_value')
+                new_val = record.get('new_value')
+                notes = record.get('notes', '') or ''
+
+                if old_val is not None and new_val is not None:
+                    try:
+                        old_float = float(old_val)
+                        new_float = float(new_val)
+                        diff = new_float - old_float
+                        sign = '+' if diff > 0 else ''
+                        lines.append(f"{date_str}: {old_float:,.0f} → {new_float:,.0f} ({sign}{diff:,.0f})")
+                    except (ValueError, TypeError):
+                        lines.append(f"{date_str}: تعديل (القيم: {old_val} → {new_val})")
+                elif notes:
+                    lines.append(f"{date_str}: {notes}")
+                else:
+                    lines.append(f"{date_str}: تعديل")
+
+            tooltip_text = "\n".join(lines)
+
+        self.bind_tooltip(visa_label, tooltip_text)
+
+
     def fast_process(self):
         """الواجهة الجديدة للمعالجة: تعرض نافذة التأكيد بدلاً من messagebox"""
         self.show_custom_confirm_dialog()

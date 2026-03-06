@@ -1642,24 +1642,24 @@ class VisaEditor:
             return formatted
         except (ValueError, TypeError):
             return str(value)
-        
+            
     def save_changes(self):
         """حفظ التعديلات مع السماح بالتخفيض فقط بإدخال الرمز"""
         if not hasattr(self, 'table'):
             messagebox.showinfo("لا توجد بيانات", "لا توجد بيانات للحفظ")
             return
-        
+
         modified_data = self.table.get_modified_data()
         if not modified_data:
             messagebox.showinfo("لا توجد تغييرات", "لم تقم بأي تعديلات")
             return
-        
+
         # تغيير مظهر زر الحفظ
         self.save_btn.config(state='disabled', text="⏳ جاري الحفظ...", bg='#FF9800')
         self.save_bottom_btn.config(state='disabled', text="⏳ جاري الحفظ...", bg='#FF9800')
         self.save_status_label.config(text="⏳ جاري حفظ التعديلات...", foreground='orange')
         self.window.update()
-        
+
         # فحص وجود تخفيضات
         decrease_rows = []
         for mod_row in modified_data:
@@ -1667,10 +1667,9 @@ class VisaEditor:
             new_visa = self.parse_number(mod_row['التأشيرة_الجديدة'])
             if new_visa < old_visa:
                 decrease_rows.append(mod_row)
-        
+
         allow_decrease = False
         if decrease_rows:
-            # طلب الرمز الخاص
             special_code = simpledialog.askstring(
                 "تأكيد التخفيض",
                 f"يوجد {len(decrease_rows)} تعديل(ات) بقيمة أقل من السابق.\n"
@@ -1680,20 +1679,18 @@ class VisaEditor:
             )
             allow_decrease = (special_code == "eyadkasem")
             if not allow_decrease and special_code is not None:
-                # الرمز خاطئ – سنحفظ فقط الزيادات ونتجاهل التخفيضات
-                messagebox.showwarning("تنبيه", 
+                messagebox.showwarning("تنبيه",
                     "الرمز غير صحيح. سيتم حفظ التعديلات التي تزيد القيمة فقط،\n"
                     "أما التخفيضات فلن يتم حفظها.")
             elif special_code is None:
-                # المستخدم ألغى
                 self.update_save_button_status()
                 return
-        
+
         try:
             total_updated = 0
             skipped_decreases = 0
             failed_updates = []
-            
+
             with db.get_cursor() as cursor:
                 for mod_row in modified_data:
                     try:
@@ -1701,20 +1698,18 @@ class VisaEditor:
                         if not customer_id:
                             failed_updates.append(f"الزبون {mod_row.get('علبة')}/{mod_row.get('مسلسل')}: لا يوجد معرف")
                             continue
-                        
+
                         old_visa = self.parse_number(mod_row['التأشيرة_الحالية_أصلية'])
                         new_visa = self.parse_number(mod_row['التأشيرة_الجديدة'])
                         difference = new_visa - old_visa
-                        
+
                         if abs(difference) < 0.01:
-                            continue  # لا تغيير فعلي
-                        
-                        # إذا كان تخفيضاً والرمز غير مسموح → نتخطاه
+                            continue
+
                         if difference < 0 and not allow_decrease:
                             skipped_decreases += 1
                             continue
-                        
-                        # البحث عن البيانات الأصلية الكاملة
+
                         original_customer = next(
                             (c for c in self.original_customers_data if c.get('id') == customer_id),
                             None
@@ -1722,14 +1717,14 @@ class VisaEditor:
                         if not original_customer:
                             failed_updates.append(f"الزبون {customer_id}: لم يتم العثور على البيانات الأصلية")
                             continue
-                        
+
                         old_balance = self.parse_number(original_customer.get('الرصيد الحالي', 0))
                         old_withdrawal = self.parse_number(original_customer.get('السحب الحالي', 0))
-                        
+
                         new_balance = old_balance - difference
                         new_withdrawal = difference
-                        
-                        # تحديث قاعدة البيانات
+
+                        # تحديث بيانات الزبون
                         cursor.execute("""
                             UPDATE customers 
                             SET visa_balance = %s,
@@ -1740,15 +1735,15 @@ class VisaEditor:
                                 updated_at = CURRENT_TIMESTAMP
                             WHERE id = %s
                         """, (new_visa, new_balance, new_withdrawal, old_withdrawal, customer_id))
-                        
-                        # سجل تاريخي
+
+                        # إدراج سجل تاريخي مع created_at بشكل صريح
                         cursor.execute("""
                             INSERT INTO customer_history 
                             (customer_id, action_type, transaction_type, amount, 
                             balance_before, balance_after,
                             current_balance_before, current_balance_after,
-                            old_value, new_value, notes, created_by)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            old_value, new_value, notes, created_by, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         """, (
                             customer_id,
                             'visa_update',
@@ -1763,53 +1758,52 @@ class VisaEditor:
                             f'تعديل مباشر - تأشيرة من {self.format_number(old_visa)} إلى {self.format_number(new_visa)}',
                             self.user_id
                         ))
-                        
+
                         total_updated += 1
-                        
+
                     except Exception as e:
                         customer_info = f"{mod_row.get('علبة', '')}/{mod_row.get('مسلسل', '')}"
                         failed_updates.append(f"{customer_info}: {str(e)}")
-            
-            # عرض النتيجة
-            if total_updated > 0 or skipped_decreases > 0:
-                msg_parts = []
-                if total_updated > 0:
-                    msg_parts.append(f"✅ تم تحديث {total_updated} زبون بنجاح")
-                if skipped_decreases > 0:
-                    msg_parts.append(f"⏭️ تم تخطي {skipped_decreases} تخفيض (غير مصرح به)")
-                if failed_updates:
-                    msg_parts.append(f"❌ فشل تحديث {len(failed_updates)} زبون")
-                    if len(failed_updates) <= 5:
-                        msg_parts.append("الأخطاء:\n" + "\n".join(failed_updates))
-                    else:
-                        msg_parts.append(f"أول 5 أخطاء:\n" + "\n".join(failed_updates[:5]))
-                
-                messagebox.showinfo("نتيجة الحفظ", "\n\n".join(msg_parts))
-                
-                self.save_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
-                self.save_bottom_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
-                self.save_status_label.config(
-                    text=f"✅ تم حفظ {total_updated} تعديل" + 
-                        (f" (تخطي {skipped_decreases} تخفيض)" if skipped_decreases else ""),
-                    foreground='green'
-                )
-                
-                # إعادة تحميل البيانات بعد ثانيتين
-                self.window.after(2000, self.load_customers)
-            else:
-                if failed_updates:
-                    messagebox.showerror("خطأ", "فشل تحديث جميع الزبائن:\n" + "\n".join(failed_updates[:10]))
+
+                # عرض النتيجة
+                if total_updated > 0 or skipped_decreases > 0:
+                    msg_parts = []
+                    if total_updated > 0:
+                        msg_parts.append(f"✅ تم تحديث {total_updated} زبون بنجاح")
+                    if skipped_decreases > 0:
+                        msg_parts.append(f"⏭️ تم تخطي {skipped_decreases} تخفيض (غير مصرح به)")
+                    if failed_updates:
+                        msg_parts.append(f"❌ فشل تحديث {len(failed_updates)} زبون")
+                        if len(failed_updates) <= 5:
+                            msg_parts.append("الأخطاء:\n" + "\n".join(failed_updates))
+                        else:
+                            msg_parts.append(f"أول 5 أخطاء:\n" + "\n".join(failed_updates[:5]))
+
+                    messagebox.showinfo("نتيجة الحفظ", "\n\n".join(msg_parts))
+
+                    self.save_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
+                    self.save_bottom_btn.config(text="✅ تم الحفظ!", bg='#2E7D32')
+                    self.save_status_label.config(
+                        text=f"✅ تم حفظ {total_updated} تعديل" + 
+                            (f" (تخطي {skipped_decreases} تخفيض)" if skipped_decreases else ""),
+                        foreground='green'
+                    )
+
+                    self.window.after(2000, self.load_customers)
                 else:
-                    messagebox.showinfo("لا توجد تغييرات", "لم يتم تحديث أي زبون")
-                self.update_save_button_status()
-        
+                    if failed_updates:
+                        messagebox.showerror("خطأ", "فشل تحديث جميع الزبائن:\n" + "\n".join(failed_updates[:10]))
+                    else:
+                        messagebox.showinfo("لا توجد تغييرات", "لم يتم تحديث أي زبون")
+                    self.update_save_button_status()
+
         except Exception as e:
             logger.error(f"خطأ في حفظ التعديلات: {e}")
             messagebox.showerror("خطأ", f"فشل حفظ التعديلات: {e}")
             self.save_btn.config(text="❌ فشل الحفظ", bg='#f44336')
-            self.save_bottom_btn.config(text="❌ فشل الحفظ', bg='#f44336'")
+            self.save_bottom_btn.config(text="❌ فشل الحفظ", bg='#f44336')
             self.save_status_label.config(text="❌ حدث خطأ أثناء الحفظ", foreground='red')
-        
+
         self.window.after(3000, self.update_save_button_status)
 
 
