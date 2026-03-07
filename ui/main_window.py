@@ -163,6 +163,7 @@ class MainWindow:
             ("⚙️ الإعدادات", "settings"),
             ("🔄 النسخ الاحتياطي", "backup"),
             ("📱 المحاسبة الجوالة", "mobile_accounting"),
+            ("📈 متابعة الجباية", "collection_monitor"),
             ("❌ خروج", "logout")
         ]
         
@@ -246,6 +247,17 @@ class MainWindow:
                 self.show_mobile_accounting()
             else:
                 messagebox.showerror("صلاحيات", "ليس لديك صلاحية الدخول للمحاسبة الجوالة")
+        elif command == "collection_monitor":
+            if has_permission('reports.view'):
+                self.show_collection_monitor()
+            else:
+                messagebox.showerror("صلاحيات", "ليس لديك صلاحية عرض التقرير")
+
+    def show_collection_monitor(self):
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        from ui.collection_monitor_ui import CollectionMonitorUI
+        CollectionMonitorUI(self.content_frame, self.user_data).pack(fill='both', expand=True)                                
 
 
     def show_mobile_accounting(self):
