@@ -13,22 +13,25 @@ class InvoiceManager:
     def __init__(self):
         self.table_name = "invoices"
 
-    from modules.accounting import AccountingEngine
-
     def create_invoice(self, invoice_data: Dict) -> Dict:
         """إنشاء فاتورة جديدة (محاسبة + حفظ) مع تسجيل في customer_history"""
         try:
+            # التحقق من وجود user_id
+            user_id = invoice_data.get('user_id')
+            if user_id is None:
+                return {'success': False, 'error': 'يجب تحديد معرف المستخدم (user_id) لإنشاء الفاتورة'}
+
             engine = AccountingEngine(
                 kilowatt_price=invoice_data.get('price_per_kilo', 0)
             )
 
-            # 1️⃣ تنفيذ المحاسبة
+            # 1️⃣ تنفيذ المحاسبة باستخدام new_reading (كما كانت تعمل سابقًا)
             result = engine.process_invoice(
                 customer_id=invoice_data['customer_id'],
-                new_reading=invoice_data['new_reading'],
+                new_reading=invoice_data.get('new_reading', 0),  # استخدم new_reading
                 visa_amount=invoice_data.get('visa_application', 0),
                 discount=invoice_data.get('discount', 0),
-                accountant_id=invoice_data.get('user_id')
+                accountant_id=user_id
             )
 
             if not result.get('success'):
@@ -59,10 +62,10 @@ class InvoiceManager:
                     invoice_number,
                     invoice_data['customer_id'],
                     invoice_data.get('sector_id'),
-                    invoice_data.get('user_id'),
+                    user_id,
                     datetime.now().date(),
                     datetime.now().time(),
-                    result['consumption'],
+                    result['consumption'],          # ✅ kilowatt_amount = consumption
                     invoice_data.get('free_kilowatt', 0),
                     result['kilowatt_price'],
                     result['discount'],
@@ -79,14 +82,22 @@ class InvoiceManager:
 
                 invoice = cursor.fetchone()
 
-                # ✅ تسجيل الحدث في customer_history
+                # جلب اللقطة الحالية للزبون
+                cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (invoice_data['customer_id'],))
+                snapshot = cursor.fetchone()
+                snapshot_withdrawal = snapshot['withdrawal_amount'] if snapshot else 0
+                snapshot_visa = snapshot['visa_balance'] if snapshot else 0
+                snapshot_reading = snapshot['last_counter_reading'] if snapshot else 0
+
+                # ✅ تسجيل الحدث في customer_history مع اللقطة
                 cursor.execute("""
                     INSERT INTO customer_history 
                     (customer_id, action_type, transaction_type, 
                     old_value, new_value, amount,
                     current_balance_before, current_balance_after,
-                    notes, created_by, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    notes, created_by, created_at,
+                    snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                 """, (
                     invoice_data['customer_id'],
                     'invoice_created',                    # action_type
@@ -97,7 +108,10 @@ class InvoiceManager:
                     result.get('previous_balance', 0),      # current_balance_before
                     result['new_balance'],                   # current_balance_after
                     f"إنشاء فاتورة {invoice['invoice_number']} بمبلغ {result['total_amount']}",
-                    invoice_data.get('user_id')              # created_by
+                    user_id,                                 # created_by
+                    snapshot_withdrawal,
+                    snapshot_visa,
+                    snapshot_reading
                 ))
 
             return {
@@ -111,59 +125,58 @@ class InvoiceManager:
             logger.error(f"خطأ في إنشاء الفاتورة: {e}")
             return {'success': False, 'error': str(e)}
 
-            
     def generate_invoice_number(self) -> str:
-            """توليد رقم فاتورة تلقائي"""
-            try:
-                with db.get_cursor() as cursor:
-                    cursor.execute("""
-                        SELECT COUNT(*) as count 
-                        FROM invoices 
-                        WHERE DATE(created_at) = CURRENT_DATE
-                    """)
-                    result = cursor.fetchone()
-                    count_today = result['count'] + 1
-                    date_str = datetime.now().strftime("%Y%m%d")
-                    return f"INV-{date_str}-{count_today:04d}"
-            except Exception as e:
-                logger.error(f"خطأ في توليد رقم الفاتورة: {e}")
-                return f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        """توليد رقم فاتورة تلقائي"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*) as count 
+                    FROM invoices 
+                    WHERE DATE(created_at) = CURRENT_DATE
+                """)
+                result = cursor.fetchone()
+                count_today = result['count'] + 1
+                date_str = datetime.now().strftime("%Y%m%d")
+                return f"INV-{date_str}-{count_today:04d}"
+        except Exception as e:
+            logger.error(f"خطأ في توليد رقم الفاتورة: {e}")
+            return f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     def update_customer_balance(self, customer_id: int, new_balance: float, new_reading: float):
-            """تحديث رصيد وقراءة العداد للزبون"""
-            try:
-                with db.get_cursor() as cursor:
-                    cursor.execute("""
-                        UPDATE customers 
-                        SET current_balance = %s, 
-                            last_counter_reading = %s,
-                            updated_at = CURRENT_TIMESTAMP 
-                        WHERE id = %s
-                    """, (new_balance, new_reading, customer_id))
-            except Exception as e:
-                logger.error(f"خطأ في تحديث رصيد الزبون: {e}")
+        """تحديث رصيد وقراءة العداد للزبون"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    UPDATE customers 
+                    SET current_balance = %s, 
+                        last_counter_reading = %s,
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = %s
+                """, (new_balance, new_reading, customer_id))
+        except Exception as e:
+            logger.error(f"خطأ في تحديث رصيد الزبون: {e}")
 
     def get_invoice(self, invoice_id: int) -> Optional[Dict]:
-            """الحصول على بيانات فاتورة"""
-            try:
-                with db.get_cursor() as cursor:
-                    cursor.execute("""
-                        SELECT i.*, 
-                            c.name as customer_name,
-                            c.box_number, c.serial_number,
-                            s.name as sector_name,
-                            u.full_name as accountant_name
-                        FROM invoices i
-                        LEFT JOIN customers c ON i.customer_id = c.id
-                        LEFT JOIN sectors s ON i.sector_id = s.id
-                        LEFT JOIN users u ON i.user_id = u.id
-                        WHERE i.id = %s
-                    """, (invoice_id,))
-                    invoice = cursor.fetchone()
-                    return dict(invoice) if invoice else None
-            except Exception as e:
-                logger.error(f"خطأ في جلب بيانات الفاتورة: {e}")
-                return None
+        """الحصول على بيانات فاتورة"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT i.*, 
+                        c.name as customer_name,
+                        c.box_number, c.serial_number,
+                        s.name as sector_name,
+                        u.full_name as accountant_name
+                    FROM invoices i
+                    LEFT JOIN customers c ON i.customer_id = c.id
+                    LEFT JOIN sectors s ON i.sector_id = s.id
+                    LEFT JOIN users u ON i.user_id = u.id
+                    WHERE i.id = %s
+                """, (invoice_id,))
+                invoice = cursor.fetchone()
+                return dict(invoice) if invoice else None
+        except Exception as e:
+            logger.error(f"خطأ في جلب بيانات الفاتورة: {e}")
+            return None
 
     def search_invoices(self, start_date: str = None, end_date: str = None,
                         customer_id: int = None, sector_id: int = None,
@@ -214,8 +227,21 @@ class InvoiceManager:
             logger.error(f"خطأ في بحث الفواتير: {e}")
             return []
 
-    def update_invoice(self, invoice_id: int, update_data: Dict) -> Dict:
-        """تحديث بيانات الفاتورة مع تسجيل التغيير في customer_history"""
+    def update_invoice(self, invoice_id: int, update_data: Dict, user_id: int) -> Dict:
+        """تحديث بيانات الفاتورة مع تسجيل التغيير في customer_history
+        
+        Args:
+            invoice_id: معرف الفاتورة
+            update_data: قاموس يحتوي على الحقول المراد تحديثها وقيمها الجديدة
+            user_id: معرف المستخدم الذي يقوم بالتحديث (إلزامي)
+        
+        Returns:
+            قاموس يحتوي على حالة العملية ورسالة النجاح أو الخطأ
+        """
+        # التحقق من وجود user_id
+        if user_id is None:
+            return {'success': False, 'error': 'يجب تحديد معرف المستخدم (user_id) لتحديث الفاتورة'}
+
         try:
             # 1. جلب الفاتورة القديمة
             old_invoice = self.get_invoice(invoice_id)
@@ -258,7 +284,7 @@ class InvoiceManager:
                 if not updated:
                     return {'success': False, 'error': 'الفاتورة غير موجودة'}
 
-                # 3. التحقق مما إذا كان الرصيد أو القراءة قد تغيرا
+                # 2. التحقق مما إذا كان الرصيد أو القراءة قد تغيرا
                 new_balance = updated['current_balance']
                 new_reading = updated['new_reading']
                 changed = False
@@ -271,13 +297,22 @@ class InvoiceManager:
 
                 # تسجيل الحدث في customer_history إذا كان هناك تغيير
                 if changed:
+                    # جلب اللقطة الحالية للزبون
+                    cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (customer_id,))
+                    snapshot = cursor.fetchone()
+                    snapshot_withdrawal = snapshot['withdrawal_amount'] if snapshot else 0
+                    snapshot_visa = snapshot['visa_balance'] if snapshot else 0
+                    snapshot_reading = snapshot['last_counter_reading'] if snapshot else 0
+
+                    # استخدام user_id المُمرر مباشرة (بدون fallback)
                     cursor.execute("""
                         INSERT INTO customer_history 
                         (customer_id, action_type, transaction_type, 
                         old_value, new_value, amount,
                         current_balance_before, current_balance_after,
-                        notes, created_by, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        notes, created_by, created_at,
+                        snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                     """, (
                         customer_id,
                         'invoice_updated',                               # action_type
@@ -288,7 +323,10 @@ class InvoiceManager:
                         old_balance,                                     # current_balance_before
                         new_balance,                                     # current_balance_after
                         f"تعديل الفاتورة {updated['invoice_number']} - تغير الرصيد من {old_balance} إلى {new_balance}",
-                        update_data.get('user_id')                       # created_by
+                        user_id,                                          # created_by
+                        snapshot_withdrawal,
+                        snapshot_visa,
+                        snapshot_reading
                     ))
 
                 logger.info(f"تم تحديث الفاتورة: {updated['invoice_number']}")
@@ -301,13 +339,12 @@ class InvoiceManager:
             logger.error(f"خطأ في تحديث الفاتورة: {e}")
             return {'success': False, 'error': f'فشل تحديث الفاتورة: {str(e)}'}
 
-            
+    def cancel_invoice(self, invoice_id: int, user_id: int) -> Dict:
+        """إلغاء الفاتورة مع استعادة التأثير على الزبون"""
+        # التحقق من وجود user_id
+        if user_id is None:
+            return {'success': False, 'error': 'يجب تحديد معرف المستخدم (user_id) لإلغاء الفاتورة'}
 
-    def cancel_invoice(self, invoice_id: int, user_id: int = None) -> Dict:
-        """
-        إلغاء الفاتورة مع عكس التأثير على الزبون (استعادة الرصيد وقراءة العداد)
-        وتسجيل الحدث في سجل الزبون (customer_history)
-        """
         try:
             with db.get_cursor() as cursor:
                 # 1. التحقق من وجود الفاتورة وأنها نشطة
@@ -332,20 +369,18 @@ class InvoiceManager:
                 if not customer:
                     return {'success': False, 'error': 'الزبون غير موجود'}
 
-                # 3. حساب الكمية الإجمالية المستهلكة في الفاتورة (تحويل إلى float)
+                # 3. حساب الكمية الإجمالية
                 kilowatt_amount = float(invoice['kilowatt_amount'])
                 free_kilowatt = float(invoice['free_kilowatt'])
                 total_kilowatt = kilowatt_amount + free_kilowatt
 
-                # 4. حساب الرصيد الجديد والقراءة الجديدة بعد الإلغاء (طرح الكمية)
-                #    تحويل قيم الزبون إلى float
                 current_balance = float(customer['current_balance'])
                 last_reading = float(customer['last_counter_reading'])
-                
+
                 restored_balance = current_balance - total_kilowatt
                 restored_reading = last_reading - total_kilowatt
 
-                # 5. تحديث رصيد الزبون وقراءة العداد
+                # 4. تحديث الزبون (استعادة الرصيد)
                 cursor.execute("""
                     UPDATE customers 
                     SET current_balance = %s, 
@@ -354,7 +389,7 @@ class InvoiceManager:
                     WHERE id = %s
                 """, (restored_balance, restored_reading, invoice['customer_id']))
 
-                # 6. تحديث حالة الفاتورة إلى ملغاة
+                # 5. تحديث حالة الفاتورة إلى ملغاة
                 cursor.execute("""
                     UPDATE invoices 
                     SET status = 'cancelled', 
@@ -362,10 +397,14 @@ class InvoiceManager:
                     WHERE id = %s
                 """, (invoice_id,))
 
-                # 7. تسجيل الحدث في customer_history
-                created_by = user_id if user_id is not None else 1
+                # جلب اللقطة بعد التحديث
+                cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (invoice['customer_id'],))
+                snapshot = cursor.fetchone()
+                snapshot_withdrawal = snapshot['withdrawal_amount'] if snapshot else 0
+                snapshot_visa = snapshot['visa_balance'] if snapshot else 0
+                snapshot_reading = snapshot['last_counter_reading'] if snapshot else 0
 
-                # تحويل invoice['current_balance'] إلى float
+                # 6. تسجيل الحدث في customer_history مع اللقطة
                 invoice_balance = float(invoice['current_balance'])
 
                 cursor.execute("""
@@ -373,8 +412,9 @@ class InvoiceManager:
                     (customer_id, action_type, transaction_type, 
                     old_value, new_value, amount,
                     current_balance_before, current_balance_after,
-                    notes, created_by, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    notes, created_by, created_at,
+                    snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                 """, (
                     invoice['customer_id'],
                     'invoice_cancelled',
@@ -385,10 +425,13 @@ class InvoiceManager:
                     invoice_balance,
                     restored_balance,
                     f"إلغاء الفاتورة {invoice['invoice_number']} واسترداد {total_kilowatt} كيلو واط",
-                    created_by
+                    user_id,
+                    snapshot_withdrawal,
+                    snapshot_visa,
+                    snapshot_reading
                 ))
 
-                logger.info(f"تم إلغاء الفاتورة {invoice['invoice_number']} واستعادة رصيد الزبون")
+                logger.info(f"تم إلغاء الفاتورة {invoice['invoice_number']} بواسطة المستخدم {user_id}")
                 return {
                     'success': True,
                     'message': f"تم إلغاء الفاتورة {invoice['invoice_number']} واستعادة رصيد الزبون"
@@ -398,14 +441,15 @@ class InvoiceManager:
             logger.error(f"خطأ في إلغاء الفاتورة: {e}")
             return {'success': False, 'error': str(e)}
 
-    def delete_invoice(self, invoice_id: int, user_id: int = None) -> Dict:
-        """
-        حذف الفاتورة فعلياً بعد استعادة تأثيرها على الزبون (إذا كانت نشطة).
-        إذا كانت الفاتورة ملغاة، يتم الحذف فقط دون تعديل الرصيد.
-        """
+    def delete_invoice(self, invoice_id: int, user_id: int) -> Dict:
+        """حذف الفاتورة فعلياً مع استعادة تأثيرها على الزبون (إذا كانت نشطة)"""
+        # التحقق من وجود user_id
+        if user_id is None:
+            return {'success': False, 'error': 'يجب تحديد معرف المستخدم (user_id) لحذف الفاتورة'}
+
         try:
             with db.get_cursor() as cursor:
-                # 1. جلب بيانات الفاتورة قبل الحذف
+                # 1. جلب بيانات الفاتورة
                 cursor.execute("""
                     SELECT customer_id, kilowatt_amount, free_kilowatt, 
                         previous_reading, new_reading, current_balance,
@@ -417,19 +461,16 @@ class InvoiceManager:
                 if not invoice:
                     return {'success': False, 'error': 'الفاتورة غير موجودة'}
 
-                # إذا كانت الفاتورة ملغاة، لا نعدل رصيد الزبون
+                # إذا كانت ملغاة، نحذف فقط
                 if invoice['status'] == 'cancelled':
-                    # حذف الفاتورة مباشرة
                     cursor.execute("DELETE FROM invoices WHERE id = %s RETURNING invoice_number", (invoice_id,))
                     result = cursor.fetchone()
-                    logger.info(f"تم حذف الفاتورة الملغاة: {result['invoice_number']}")
                     return {
                         'success': True,
                         'message': f"تم حذف الفاتورة الملغاة {result['invoice_number']}"
                     }
 
-                # باقي الكود (إذا كانت الفاتورة نشطة) كما هو...
-                # 2. جلب بيانات الزبون الحالية
+                # 2. جلب بيانات الزبون
                 cursor.execute("""
                     SELECT current_balance, last_counter_reading 
                     FROM customers 
@@ -444,13 +485,12 @@ class InvoiceManager:
                 free_kilowatt = float(invoice['free_kilowatt'])
                 total_kilowatt = kilowatt_amount + free_kilowatt
 
-                # 4. حساب الرصيد والقراءة بعد الحذف (نطرح الكمية)
                 current_balance = float(customer['current_balance'])
                 last_reading = float(customer['last_counter_reading'])
                 new_balance = current_balance - total_kilowatt
                 new_reading = last_reading - total_kilowatt
 
-                # 5. تحديث الزبون
+                # 4. تحديث الزبون
                 cursor.execute("""
                     UPDATE customers 
                     SET current_balance = %s, 
@@ -459,8 +499,14 @@ class InvoiceManager:
                     WHERE id = %s
                 """, (new_balance, new_reading, invoice['customer_id']))
 
-                # 6. تسجيل الحدث في customer_history
-                created_by = user_id if user_id is not None else 1
+                # جلب اللقطة بعد التحديث
+                cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (invoice['customer_id'],))
+                snapshot = cursor.fetchone()
+                snapshot_withdrawal = snapshot['withdrawal_amount'] if snapshot else 0
+                snapshot_visa = snapshot['visa_balance'] if snapshot else 0
+                snapshot_reading = snapshot['last_counter_reading'] if snapshot else 0
+
+                # 5. تسجيل الحدث
                 invoice_balance = float(invoice['current_balance'])
 
                 cursor.execute("""
@@ -468,8 +514,9 @@ class InvoiceManager:
                     (customer_id, action_type, transaction_type, 
                     old_value, new_value, amount,
                     current_balance_before, current_balance_after,
-                    notes, created_by, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    notes, created_by, created_at,
+                    snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                 """, (
                     invoice['customer_id'],
                     'invoice_deleted',
@@ -480,14 +527,16 @@ class InvoiceManager:
                     invoice_balance,
                     new_balance,
                     f"حذف الفاتورة {invoice['invoice_number']} واسترداد {total_kilowatt} كيلو واط",
-                    created_by
+                    user_id,
+                    snapshot_withdrawal,
+                    snapshot_visa,
+                    snapshot_reading
                 ))
 
-                # 7. حذف الفاتورة
+                # 6. حذف الفاتورة
                 cursor.execute("DELETE FROM invoices WHERE id = %s RETURNING invoice_number", (invoice_id,))
                 result = cursor.fetchone()
 
-                logger.info(f"تم حذف الفاتورة: {result['invoice_number']} واستعادة رصيد الزبون")
                 return {
                     'success': True,
                     'message': f"تم حذف الفاتورة {result['invoice_number']} واستعادة رصيد الزبون"
@@ -497,36 +546,33 @@ class InvoiceManager:
             logger.error(f"خطأ في حذف الفاتورة: {e}")
             return {'success': False, 'error': str(e)}
 
-
-
-
     def get_daily_summary(self, date: str = None) -> Dict:
-            """الحصول على ملخص المبيعات اليومية"""
-            try:
-                if not date:
-                    date = datetime.now().strftime("%Y-%m-%d")
+        """الحصول على ملخص المبيعات اليومية"""
+        try:
+            if not date:
+                date = datetime.now().strftime("%Y-%m-%d")
 
-                with db.get_cursor() as cursor:
-                    cursor.execute("""
-                        SELECT 
-                            COUNT(*) as total_invoices,
-                            SUM(total_amount) as total_amount,
-                            SUM(kilowatt_amount) as total_kilowatts,
-                            SUM(free_kilowatt) as total_free_kilowatts,
-                            SUM(discount) as total_discount
-                        FROM invoices 
-                        WHERE payment_date = %s AND status = 'active'
-                    """, (date,))
-                    result = cursor.fetchone()
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_invoices,
+                        SUM(total_amount) as total_amount,
+                        SUM(kilowatt_amount) as total_kilowatts,
+                        SUM(free_kilowatt) as total_free_kilowatts,
+                        SUM(discount) as total_discount
+                    FROM invoices 
+                    WHERE payment_date = %s AND status = 'active'
+                """, (date,))
+                result = cursor.fetchone()
 
-                    return {
-                        'date': date,
-                        'total_invoices': result['total_invoices'] or 0,
-                        'total_amount': float(result['total_amount'] or 0),
-                        'total_kilowatts': float(result['total_kilowatts'] or 0),
-                        'total_free_kilowatts': float(result['total_free_kilowatts'] or 0),
-                        'total_discount': float(result['total_discount'] or 0)
-                    }
-            except Exception as e:
-                logger.error(f"خطأ في جلب الملخص اليومي: {e}")
-                return {}
+                return {
+                    'date': date,
+                    'total_invoices': result['total_invoices'] or 0,
+                    'total_amount': float(result['total_amount'] or 0),
+                    'total_kilowatts': float(result['total_kilowatts'] or 0),
+                    'total_free_kilowatts': float(result['total_free_kilowatts'] or 0),
+                    'total_discount': float(result['total_discount'] or 0)
+                }
+        except Exception as e:
+            logger.error(f"خطأ في جلب الملخص اليومي: {e}")
+            return {}

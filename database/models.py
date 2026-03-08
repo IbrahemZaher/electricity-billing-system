@@ -68,7 +68,11 @@ class Models:
                     ('invoice_number', 'VARCHAR(50)'),
                     ('receipt_number', 'VARCHAR(50)'),
                     ('notes', 'TEXT'),
-                    ('created_at', 'TIMESTAMP') 
+                    ('created_at', 'TIMESTAMP'),
+                    # 👇 أضف هذه الأسطر الثلاثة الجديدة
+                    ('snapshot_withdrawal_amount', 'DECIMAL(15, 2)'),
+                    ('snapshot_visa_balance', 'DECIMAL(15, 2)'),
+                    ('snapshot_last_counter_reading', 'DECIMAL(15, 2)'),
                 ]
                 
                 for column_name, column_type in columns_to_add:
@@ -427,7 +431,12 @@ class Models:
                 -- معلومات النظام
                 created_by INTEGER REFERENCES users(id),
                 performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                -- الأعمدة الجديدة للقطة
+                snapshot_withdrawal_amount DECIMAL(15, 2),
+                snapshot_visa_balance DECIMAL(15, 2),
+                snapshot_last_counter_reading DECIMAL(15, 2)
             )
             """,
             # جدول كتالوج الصلاحيات

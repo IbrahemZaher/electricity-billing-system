@@ -1736,14 +1736,22 @@ class VisaEditor:
                             WHERE id = %s
                         """, (new_visa, new_balance, new_withdrawal, old_withdrawal, customer_id))
 
-                        # إدراج سجل تاريخي مع created_at بشكل صريح
+                        # جلب اللقطة بعد التحديث
+                        cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (customer_id,))
+                        snapshot = cursor.fetchone()
+                        snapshot_withdrawal = snapshot['withdrawal_amount'] if snapshot else 0
+                        snapshot_visa = snapshot['visa_balance'] if snapshot else 0
+                        snapshot_reading = snapshot['last_counter_reading'] if snapshot else 0
+
+                        # إدراج سجل تاريخي مع اللقطة
                         cursor.execute("""
                             INSERT INTO customer_history 
                             (customer_id, action_type, transaction_type, amount, 
                             balance_before, balance_after,
                             current_balance_before, current_balance_after,
-                            old_value, new_value, notes, created_by, created_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                            old_value, new_value, notes, created_by, created_at,
+                            snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                         """, (
                             customer_id,
                             'visa_update',
@@ -1756,7 +1764,10 @@ class VisaEditor:
                             old_visa,
                             new_visa,
                             f'تعديل مباشر - تأشيرة من {self.format_number(old_visa)} إلى {self.format_number(new_visa)}',
-                            self.user_id
+                            self.user_id,
+                            snapshot_withdrawal,
+                            snapshot_visa,
+                            snapshot_reading
                         ))
 
                         total_updated += 1

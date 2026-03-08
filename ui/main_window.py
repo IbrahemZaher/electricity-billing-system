@@ -414,7 +414,8 @@ class MainWindow:
         """عرض واجهة الأرشيف"""
         for widget in self.content_frame.winfo_children():
             widget.destroy()
-        archive_ui = ArchiveUI(self.content_frame)
+        archive_ui = ArchiveUI(self.content_frame, self.user_data)  # تمرير بيانات المستخدم إن لزم
+        archive_ui.pack(fill='both', expand=True)                   # <--- هذا السطر المهم
         logger.info("تم تحميل واجهة الأرشيف بنجاح")
 
     def show_users_ui(self):

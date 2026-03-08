@@ -196,24 +196,33 @@ class CustomerManager:
                 
                 # تسجيل العملية في السجل التاريخي
                 if result:
+                    # إعداد قيم اللقطة
+                    snapshot_withdrawal = customer_data.get('withdrawal_amount', 0)
+                    snapshot_visa = customer_data.get('visa_balance', 0)
+                    snapshot_reading = customer_data.get('last_counter_reading', 0)
+
                     cursor.execute("""
                         INSERT INTO customer_history 
                         (customer_id, action_type, transaction_type, 
                         old_value, new_value, amount,
                         current_balance_before, current_balance_after,
-                        notes, created_by, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        notes, created_by, created_at,
+                        snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                     """, (
                         result['id'],
                         'add_customer',
                         'new_customer',
-                        0,
-                        customer_data.get('current_balance', 0),
-                        customer_data.get('current_balance', 0),
-                        0,
-                        customer_data.get('current_balance', 0),
+                        0,  # old_value (لا يوجد قبل)
+                        0,  # new_value (غير مستخدم هنا)
+                        0,  # amount (غير مستخدم)
+                        0,  # current_balance_before
+                        customer_data.get('current_balance', 0),  # current_balance_after
                         f"إضافة زبون جديد: {result['name']} (نوع: {customer_data.get('meter_type', 'زبون')}, علبة أم: {parent_meter_id if parent_meter_id else 'لا يوجد'})",
-                        customer_data.get('user_id', 1)
+                        customer_data.get('user_id', 1),
+                        snapshot_withdrawal,
+                        snapshot_visa,
+                        snapshot_reading
                     ))
                 
                 logger.info(f"تم إضافة زبون جديد: {result['name']} - نوع: {result.get('meter_type', 'زبون')}")
@@ -424,19 +433,18 @@ class CustomerManager:
             
 
     def update_customer(self, customer_id: int, update_data: Dict) -> Dict:
-        """تحديث بيانات زبون مع التحقق من العلاقات الهرمية"""
+        """تحديث بيانات زبون مع التحقق من العلاقات الهرمية وتسجيل اللقطة بعد التحديث"""
         try:
             # التحقق من parent_meter_id إذا كان موجودًا
             parent_meter_id = update_data.get('parent_meter_id')
             if parent_meter_id and parent_meter_id != 'None' and str(parent_meter_id).strip():
                 with db.get_cursor() as cursor:
-                    # التحقق من وجود العلبة الأم وأنها في نفس القطاع
+                    # التحقق من وجود العلبة الأم
                     cursor.execute("""
                         SELECT sector_id, meter_type FROM customers 
                         WHERE id = %s AND is_active = TRUE
                     """, (parent_meter_id,))
                     parent = cursor.fetchone()
-                    
                     if not parent:
                         raise ValueError("العلبة الأم غير موجودة")
                     
@@ -446,9 +454,6 @@ class CustomerManager:
                     """, (customer_id,))
                     current = cursor.fetchone()
                     
-                    #if parent['sector_id'] != (update_data.get('sector_id') or (current['sector_id'] if current else None)):
-                    #    raise ValueError("العلبة الأم يجب أن تكون في نفس القطاع")
-                    
                     # التحقق من توافق أنواع العدادات
                     meter_type = update_data.get('meter_type') or (current['meter_type'] if current else 'زبون')
                     parent_meter_type = parent['meter_type']
@@ -456,7 +461,6 @@ class CustomerManager:
                     if not self._validate_meter_hierarchy(parent_meter_type, meter_type):
                         raise ValueError(f"نوع العداد '{meter_type}' غير متوافق مع العلبة الأم من نوع '{parent_meter_type}'")
             else:
-                # إذا كان parent_meter_id فارغًا أو "None" أو ""، نضبطه على None
                 parent_meter_id = None
             
             with db.get_cursor() as cursor:
@@ -481,11 +485,12 @@ class CustomerManager:
                 if not old_data:
                     return {'success': False, 'error': 'الزبون غير موجود'}
                 
-                # 2. تحديث بيانات الزبون
+                # === حساب الرصيد قبل التحديث ===
+                current_balance_before = float(old_data['current_balance'] or 0)
+                
+                # 2. تحديد الحقول المراد تحديثها
                 set_clauses = []
                 params = []
-                
-                # التحقق من الحقول وتحديثها
                 fields_to_update = {
                     'name': update_data.get('name'),
                     'sector_id': update_data.get('sector_id'),
@@ -500,48 +505,83 @@ class CustomerManager:
                     'notes': update_data.get('notes'),
                     'is_active': update_data.get('is_active'),
                     'meter_type': update_data.get('meter_type'),
-                    'parent_meter_id': parent_meter_id
                 }
                 
                 for field, value in fields_to_update.items():
                     if value is not None:
-                        # إذا كان الرصيد يتغير، نسجل التغير
-                        if field in ['current_balance', 'visa_balance', 'withdrawal_amount']:
-                            old_value = float(old_data.get(field, 0))
-                            new_value = float(value)
-                            if old_value != new_value:
-                                # تسجيل التغير في السجل التاريخي
-                                self._log_balance_change(
-                                    customer_id, field, old_value, new_value, 
-                                    update_data.get('user_id', 1), 
-                                    update_data.get('notes', '')
-                                )
-                        
                         set_clauses.append(f"{field} = %s")
                         params.append(value)
+                
+                # إضافة parent_meter_id إذا تغير
+                if parent_meter_id is not None:
+                    set_clauses.append("parent_meter_id = %s")
+                    params.append(parent_meter_id)
                 
                 if not set_clauses:
                     return {'success': True, 'message': 'لم يتم تغيير أي بيانات'}
                 
-                # إضافة معرف الزبون وتاريخ التحديث
-                params.append(customer_id)
+                # إضافة تاريخ التحديث
                 set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(customer_id)
                 
-                # تنفيذ التحديث
+                # 3. تنفيذ التحديث
                 query = f"""
                     UPDATE customers 
                     SET {', '.join(set_clauses)}
                     WHERE id = %s
                     RETURNING id, name, meter_type, parent_meter_id
                 """
-                
                 cursor.execute(query, params)
                 updated_customer = cursor.fetchone()
                 
                 if not updated_customer:
                     return {'success': False, 'error': 'فشل تحديث الزبون'}
                 
-                # 3. الحصول على بيانات العلبة الأم لعرضها (الإضافة المطلوبة)
+                # === جلب الرصيد بعد التحديث ===
+                cursor.execute("SELECT current_balance FROM customers WHERE id = %s", (customer_id,))
+                current_balance_after = float(cursor.fetchone()['current_balance'] or 0)
+                
+                # 4. جلب اللقطة بعد التحديث (السحب، التأشيرة، آخر قراءة)
+                cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (customer_id,))
+                snapshot = cursor.fetchone()
+                snapshot_withdrawal = snapshot['withdrawal_amount'] if snapshot else 0
+                snapshot_visa = snapshot['visa_balance'] if snapshot else 0
+                snapshot_reading = snapshot['last_counter_reading'] if snapshot else 0
+                
+                # 5. تسجيل التغييرات في السجل التاريخي
+                # 5.1 تغييرات الرصيد (نمرر current_balance_before و current_balance_after)
+                for field in ['current_balance', 'visa_balance', 'withdrawal_amount']:
+                    old_val = float(old_data.get(field, 0))
+                    new_val = float(update_data.get(field, old_val))
+                    if old_val != new_val:
+                        self._log_balance_change(
+                            customer_id, field, old_val, new_val,
+                            current_balance_before, current_balance_after,
+                            update_data.get('user_id', 1),
+                            update_data.get('notes', ''),
+                            snapshot_withdrawal,
+                            snapshot_visa,
+                            snapshot_reading
+                        )
+                
+                # 5.2 تغييرات البيانات الأخرى (غير الرصيدية)
+                self._log_customer_update(
+                    customer_id, old_data, update_data,
+                    snapshot_withdrawal,
+                    snapshot_visa,
+                    snapshot_reading
+                )
+                
+                # 6. تسجيل النشاط في activity_logs
+                cursor.execute("""
+                    INSERT INTO activity_logs (user_id, action_type, description)
+                    VALUES (%s, 'update_customer', %s)
+                """, (
+                    update_data.get('user_id', 1),
+                    f"تم تحديث بيانات الزبون {old_data['name']} (ID: {customer_id})"
+                ))
+                
+                # 7. بناء parent_display للعرض
                 parent_display = ""
                 if updated_customer['parent_meter_id']:
                     cursor.execute("""
@@ -550,13 +590,11 @@ class CustomerManager:
                         WHERE id = %s
                     """, (updated_customer['parent_meter_id'],))
                     parent_data = cursor.fetchone()
-                    
                     if parent_data:
                         parent_meter = parent_data.get('name', '')
                         parent_box = parent_data.get('box_number', '')
                         parent_type = parent_data.get('meter_type', '')
                         
-                        # طرق عرض متعددة للعلبة الأم (الإضافة المطلوبة)
                         if parent_box and parent_type and parent_meter:
                             parent_display = f"{parent_box} ({parent_type}) - {parent_meter}"
                         elif parent_box and parent_meter:
@@ -569,20 +607,6 @@ class CustomerManager:
                             parent_display = f"{parent_box} ({parent_type})"
                         elif parent_box:
                             parent_display = parent_box
-                        else:
-                            parent_display = ''
-                
-                # 4. تسجيل العملية في سجل النشاطات
-                cursor.execute("""
-                    INSERT INTO activity_logs (user_id, action_type, description)
-                    VALUES (%s, 'update_customer', %s)
-                """, (
-                    update_data.get('user_id', 1),
-                    f"تم تحديث بيانات الزبون {old_data['name']} (ID: {customer_id})"
-                ))
-                
-                # 5. تسجيل التعديل في السجل التاريخي
-                self._log_customer_update(customer_id, old_data, update_data)
                 
                 logger.info(f"تم تحديث الزبون: {updated_customer['name']} - نوع: {updated_customer.get('meter_type')}")
                 return {
@@ -590,7 +614,7 @@ class CustomerManager:
                     'message': f"تم تحديث بيانات الزبون {updated_customer['name']} بنجاح",
                     'customer_id': updated_customer['id'],
                     'parent_meter_id': updated_customer['parent_meter_id'],
-                    'parent_display': parent_display  # الإضافة المطلوبة
+                    'parent_display': parent_display
                 }
                 
         except Exception as e:
@@ -684,31 +708,25 @@ class CustomerManager:
             return []
             
 
-    def _log_balance_change(self, customer_id, field, old_value, new_value, user_id, notes):
-        """تسجيل تغيير الرصيد في السجل التاريخي"""
+    def _log_balance_change(self, customer_id, field, old_value, new_value,
+                            current_balance_before, current_balance_after,
+                            user_id, notes, snapshot_withdrawal, snapshot_visa, snapshot_reading):
+        """تسجيل تغيير الرصيد مع استقبال قيم الرصيد قبل وبعد التحديث"""
         try:
             field_names = {
                 'current_balance': 'الرصيد الحالي',
                 'visa_balance': 'رصيد التأشيرة',
                 'withdrawal_amount': 'مبلغ السحب'
             }
-            
             with db.get_cursor() as cursor:
-                # الحصول على الرصيد الحالي قبل التغيير
                 cursor.execute("""
-                    SELECT current_balance FROM customers WHERE id = %s
-                """, (customer_id,))
-                current_balance_result = cursor.fetchone()
-                current_balance_before = float(current_balance_result['current_balance']) if current_balance_result else 0
-                
-                # تسجيل التغيير
-                cursor.execute("""
-                    INSERT INTO customer_history 
-                    (customer_id, action_type, transaction_type, 
+                    INSERT INTO customer_history
+                    (customer_id, action_type, transaction_type,
                     old_value, new_value, amount,
                     current_balance_before, current_balance_after,
-                    notes, created_by, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    notes, created_by, created_at,
+                    snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                 """, (
                     customer_id,
                     'balance_adjustment',
@@ -717,20 +735,21 @@ class CustomerManager:
                     float(new_value),
                     float(new_value - old_value),
                     current_balance_before,
-                    float(new_value) if field == 'current_balance' else current_balance_before + (new_value - old_value),
+                    current_balance_after,
                     f"{field_names.get(field, field)}: {old_value:,.0f} → {new_value:,.0f}. {notes}",
-                    user_id
+                    user_id,
+                    snapshot_withdrawal,
+                    snapshot_visa,
+                    snapshot_reading
                 ))
-                
         except Exception as e:
             logger.error(f"خطأ في تسجيل تغيير الرصيد: {e}")
 
-    def _log_customer_update(self, customer_id, old_data, new_data):
-        """تسجيل تحديث بيانات الزبون في السجل التاريخي"""
+    def _log_customer_update(self, customer_id, old_data, new_data,
+                            snapshot_withdrawal, snapshot_visa, snapshot_reading):
+        """تسجيل تحديث بيانات الزبون مع اللقطة"""
         try:
             changes = []
-            
-            # مقارنة الحقول وتحديد التغيرات
             field_names = {
                 'name': 'الاسم',
                 'phone_number': 'رقم الهاتف',
@@ -744,17 +763,14 @@ class CustomerManager:
             for field in ['name', 'phone_number', 'notes', 'box_number', 'serial_number', 'meter_type']:
                 old_val = old_data.get(field, '')
                 new_val = new_data.get(field, '')
-                
                 if str(old_val).strip() != str(new_val).strip():
                     old_display = old_val if old_val else '(فارغ)'
                     new_display = new_val if new_val else '(فارغ)'
-                    
                     changes.append(f"{field_names.get(field, field)}: {old_display} → {new_display}")
             
             # تسجيل تغيير parent_meter_id بشكل خاص
             old_parent = old_data.get('parent_meter_id')
             new_parent = new_data.get('parent_meter_id')
-            
             if str(old_parent) != str(new_parent):
                 old_parent_display = old_parent if old_parent else '(فارغ)'
                 new_parent_display = new_parent if new_parent else '(فارغ)'
@@ -763,19 +779,22 @@ class CustomerManager:
             if changes:
                 with db.get_cursor() as cursor:
                     cursor.execute("""
-                        INSERT INTO customer_history 
-                        (customer_id, action_type, transaction_type, 
-                        details, notes, created_by, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        INSERT INTO customer_history
+                        (customer_id, action_type, transaction_type,
+                        details, notes, created_by, created_at,
+                        snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                     """, (
                         customer_id,
                         'customer_update',
                         'info_update',
                         ' | '.join(changes),
                         f"تحديث بيانات الزبون: {new_data.get('name', old_data.get('name', ''))}",
-                        new_data.get('user_id', 1)
+                        new_data.get('user_id', 1),
+                        snapshot_withdrawal,
+                        snapshot_visa,
+                        snapshot_reading
                     ))
-                    
         except Exception as e:
             logger.error(f"خطأ في تسجيل تحديث الزبون: {e}")
 
@@ -783,8 +802,8 @@ class CustomerManager:
         """حذف الزبون مع التحقق من العلاقات الهرمية"""
         try:
             with db.get_cursor() as cursor:
-                # جلب بيانات الزبون قبل الحذف
-                cursor.execute("SELECT name, meter_type, parent_meter_id FROM customers WHERE id = %s", (customer_id,))
+                # جلب بيانات الزبون قبل الحذف (للقطة)
+                cursor.execute("SELECT name, meter_type, parent_meter_id, withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (customer_id,))
                 customer = cursor.fetchone()
                 
                 if not customer:
@@ -793,6 +812,9 @@ class CustomerManager:
                 customer_name = customer['name']
                 meter_type = customer['meter_type']
                 parent_meter_id = customer['parent_meter_id']
+                snapshot_withdrawal = customer['withdrawal_amount'] or 0
+                snapshot_visa = customer['visa_balance'] or 0
+                snapshot_reading = customer['last_counter_reading'] or 0
                 
                 # التحقق من وجود أبناء قبل الحذف
                 if meter_type in ['مولدة', 'علبة توزيع', 'رئيسية']:
@@ -828,18 +850,22 @@ class CustomerManager:
                 result = cursor.fetchone()
                 
                 if result:
-                    # تسجيل الحذف في السجل التاريخي
+                    # تسجيل الحذف في السجل التاريخي مع اللقطة
                     cursor.execute("""
                         INSERT INTO customer_history 
                         (customer_id, action_type, transaction_type, 
-                        notes, created_by, created_at)
-                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        notes, created_by, created_at,
+                        snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                     """, (
                         customer_id,
                         'delete_customer',
                         'soft_delete' if soft_delete else 'hard_delete',
                         f"حذف الزبون: {customer_name} ({'ناعم' if soft_delete else 'فعلي'}) - نوع: {meter_type}",
-                        1  # user_id افتراضي
+                        1,  # user_id افتراضي
+                        snapshot_withdrawal,
+                        snapshot_visa,
+                        snapshot_reading
                     ))
                     
                     logger.info(f"تم حذف الزبون: {customer_name} - نوع: {meter_type}")
@@ -1011,35 +1037,27 @@ class CustomerManager:
         """حذف جميع الزبائن"""
         try:
             with db.get_cursor() as cursor:
-                # الحصول على عدد الزبائن قبل الحذف
-                cursor.execute("SELECT COUNT(*) as count FROM customers")
-                count_before = cursor.fetchone()['count']
-                
-                if count_before == 0:
-                    return {
-                        'success': True,
-                        'message': 'لا توجد زبائن لحذفها',
-                        'deleted_count': 0
-                    }
-                
-                # تسجيل جميع الزبائن المحذوفة في السجل التاريخي
-                cursor.execute("""
-                    SELECT id, name, meter_type FROM customers
-                """)
+                # الحصول على جميع الزبائن قبل الحذف (لأخذ اللقطة)
+                cursor.execute("SELECT id, name, meter_type, withdrawal_amount, visa_balance, last_counter_reading FROM customers")
                 all_customers = cursor.fetchall()
                 
+                # تسجيل لكل زبون
                 for customer in all_customers:
                     cursor.execute("""
                         INSERT INTO customer_history 
                         (customer_id, action_type, transaction_type, 
-                        notes, created_by, created_at)
-                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        notes, created_by, created_at,
+                        snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                     """, (
                         customer['id'],
                         'delete_customer',
                         'bulk_delete',
                         f"حذف جماعي - الزبون: {customer['name']} (نوع: {customer['meter_type']})",
-                        1  # user_id افتراضي
+                        1,  # user_id افتراضي
+                        customer['withdrawal_amount'] or 0,
+                        customer['visa_balance'] or 0,
+                        customer['last_counter_reading'] or 0
                     ))
                 
                 # حذف جميع الزبائن
@@ -1048,7 +1066,6 @@ class CustomerManager:
                 
                 logger.info(f"تم حذف {len(deleted_customers)} زبون")
                 
-                # إرجاع النتيجة مع تفاصيل الحذف
                 return {
                     'success': True,
                     'deleted_count': len(deleted_customers),
@@ -1074,9 +1091,10 @@ class CustomerManager:
                 if not sector:
                     return {'success': False, 'error': 'القطاع غير موجود'}
                 
-                # الحصول على زبائن القطاع قبل الحذف
+                # الحصول على زبائن القطاع قبل الحذف (لأخذ اللقطة)
                 cursor.execute("""
-                    SELECT id, name, meter_type FROM customers WHERE sector_id = %s
+                    SELECT id, name, meter_type, withdrawal_amount, visa_balance, last_counter_reading 
+                    FROM customers WHERE sector_id = %s
                 """, (sector_id,))
                 sector_customers = cursor.fetchall()
                 
@@ -1095,19 +1113,23 @@ class CustomerManager:
                             'error': f"لا يمكن حذف قطاع {sector['name']} لأن الزبون {customer['name']} له {child_result['child_count']} عداد تابع في قطاعات أخرى."
                         }
                 
-                # تسجيل الحذف في السجل التاريخي لكل زبون
+                # تسجيل الحذف في السجل التاريخي لكل زبون مع اللقطة
                 for customer in sector_customers:
                     cursor.execute("""
                         INSERT INTO customer_history 
                         (customer_id, action_type, transaction_type, 
-                        notes, created_by, created_at)
-                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        notes, created_by, created_at,
+                        snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                     """, (
                         customer['id'],
                         'delete_customer',
                         'sector_delete',
                         f"حذف قطاعي - القطاع: {sector['name']} - الزبون: {customer['name']} (نوع: {customer['meter_type']})",
-                        1  # user_id افتراضي
+                        1,  # user_id افتراضي
+                        customer['withdrawal_amount'] or 0,
+                        customer['visa_balance'] or 0,
+                        customer['last_counter_reading'] or 0
                     ))
                 
                 # حذف زبائن القطاع

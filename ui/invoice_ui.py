@@ -1019,14 +1019,18 @@ class EditInvoiceDialog(CreateInvoiceDialog):
                 
                 update_data[field_name] = value
             
-            # تحديث الفاتورة
-            result = self.invoice_manager.update_invoice(self.invoice_id, update_data)
+            # تحديث الفاتورة مع تمرير user_id
+            result = self.invoice_manager.update_invoice(
+                self.invoice_id, 
+                update_data, 
+                self.user_data.get('id')  # تمرير user_id من بيانات المستخدم
+            )
             
-            if result['success']:
+            if result.get('success'):
                 self.result = True
                 self.destroy()   
             else:
-                messagebox.showerror("خطأ", result['error'])
+                messagebox.showerror("خطأ", result.get('error', 'فشل تحديث الفاتورة'))
                 
         except Exception as e:
             logger.error(f"خطأ في تحديث الفاتورة: {e}")

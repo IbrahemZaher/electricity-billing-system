@@ -1,5 +1,4 @@
-# modules/history_manager.py - تصحيح الأخطاء
-
+# modules/history_manager.py
 import logging
 from datetime import datetime
 from database.connection import db
@@ -9,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class HistoryManager:
     """مدير سجل العمليات التاريخية للزبائن"""
-    
+
     TRANSACTION_TYPES = {
         'weekly_visa': 'إضافة تأشيرة أسبوعية',
         'cash_withdrawal': 'سحب نقدي',
@@ -23,14 +22,12 @@ class HistoryManager:
         'new_customer': 'زبون جديد',
         'delete_customer': 'حذف الزبون',
         'info_update': 'تحديث معلومات',
-        'balance_adjustment': 'تعديل رصيد',
-        'visa_adjustment': 'تعديل تأشيرة',
         'soft_delete': 'حذف ناعم',
         'hard_delete': 'حذف فعلي',
         'bulk_delete': 'حذف جماعي',
         'sector_delete': 'حذف قطاعي'
     }
-    
+
     def _safe_format_number(self, value, default=0.0):
         """تنسيق الأرقام بشكل آمن"""
         if value is None:
@@ -39,25 +36,40 @@ class HistoryManager:
             return float(value)
         except (ValueError, TypeError):
             return default
-    
-    def log_transaction(self, 
-                       customer_id: int,
-                       transaction_type: str,
-                       old_value: float = 0,
-                       new_value: float = 0,
-                       amount: float = 0,
-                       current_balance_after: float = 0,
-                       notes: str = '',
-                       created_by: int = None) -> Dict:
-        """تسجيل عملية في السجل التاريخي"""
-        
+
+    def log_transaction(self,
+                        customer_id: int,
+                        transaction_type: str,
+                        old_value: float = 0,
+                        new_value: float = 0,
+                        amount: float = 0,
+                        current_balance_after: float = 0,
+                        notes: str = '',
+                        created_by: int = None,
+                        # المعاملات الجديدة
+                        snapshot_withdrawal_amount: float = None,
+                        snapshot_visa_balance: float = None,
+                        snapshot_last_counter_reading: float = None) -> Dict:
+        """تسجيل عملية في السجل التاريخي مع لقطة كاملة للزبون"""
         try:
             with db.get_cursor() as cursor:
+                # إذا لم تُمرر قيم اللقطة، نجلبها من الزبون الحالي (احتياطاً)
+                if snapshot_withdrawal_amount is None or snapshot_visa_balance is None or snapshot_last_counter_reading is None:
+                    cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (customer_id,))
+                    cust = cursor.fetchone()
+                    if cust:
+                        snapshot_withdrawal_amount = cust['withdrawal_amount'] or 0
+                        snapshot_visa_balance = cust['visa_balance'] or 0
+                        snapshot_last_counter_reading = cust['last_counter_reading'] or 0
+                    else:
+                        snapshot_withdrawal_amount = snapshot_visa_balance = snapshot_last_counter_reading = 0
+
                 cursor.execute('''
-                    INSERT INTO customer_history 
+                    INSERT INTO customer_history
                     (customer_id, transaction_type, old_value, new_value,
-                     amount, current_balance_after, notes, created_by)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     amount, current_balance_after, notes, created_by,
+                     snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, created_at
                 ''', (
                     customer_id,
@@ -67,65 +79,70 @@ class HistoryManager:
                     amount,
                     current_balance_after,
                     notes,
-                    created_by
+                    created_by,
+                    snapshot_withdrawal_amount,
+                    snapshot_visa_balance,
+                    snapshot_last_counter_reading
                 ))
-                
+
                 result = cursor.fetchone()
-                
-                logger.info(
-                    f"تم تسجيل عملية تاريخية: {transaction_type} "
-                    f"للزبون {customer_id}"
-                )
-                
+
+                logger.info(f"تم تسجيل عملية تاريخية: {transaction_type} للزبون {customer_id} مع اللقطة")
+
                 return {
                     'success': True,
                     'transaction_id': result['id'],
                     'created_at': result['created_at']
                 }
-                
+
         except Exception as e:
             logger.error(f"خطأ في تسجيل العملية التاريخية: {e}")
             return {'success': False, 'error': str(e)}
-    
-    def add_weekly_visa(self, 
-                       customer_id: int,
-                       visa_amount: float,
-                       notes: str = '',
-                       user_id: int = None) -> Dict:
-        """إضافة تأشيرة أسبوعية للزبون"""
-        
+
+    def add_weekly_visa(self,
+                        customer_id: int,
+                        visa_amount: float,
+                        notes: str = '',
+                        user_id: int = None) -> Dict:
+        """إضافة تأشيرة أسبوعية للزبون مع لقطة كاملة"""
         try:
             with db.get_cursor() as cursor:
-                # 1. جلب بيانات الزبون الحالية
+                # 1. جلب بيانات الزبون الحالية (للتحديث وللقطة)
                 cursor.execute('''
-                    SELECT visa_balance, current_balance
-                    FROM customers 
+                    SELECT visa_balance, current_balance, withdrawal_amount, last_counter_reading
+                    FROM customers
                     WHERE id = %s
                     FOR UPDATE
                 ''', (customer_id,))
-                
                 customer = cursor.fetchone()
                 if not customer:
                     return {'success': False, 'error': 'الزبون غير موجود'}
-                
+
                 old_visa = float(customer['visa_balance'] or 0)
                 old_balance = float(customer['current_balance'] or 0)
-                
+                old_withdrawal = float(customer['withdrawal_amount'] or 0)
+                old_reading = float(customer['last_counter_reading'] or 0)
+
                 # 2. حساب القيم الجديدة
                 new_visa = old_visa + visa_amount
                 new_balance = old_balance + visa_amount
-                
+
                 # 3. تحديث بيانات الزبون
                 cursor.execute('''
-                    UPDATE customers 
+                    UPDATE customers
                     SET visa_balance = %s,
                         current_balance = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
-                    RETURNING id
+                    RETURNING withdrawal_amount, visa_balance, last_counter_reading
                 ''', (new_visa, new_balance, customer_id))
-                
-                # 4. تسجيل العملية في السجل التاريخي
+
+                updated = cursor.fetchone()
+                snapshot_withdrawal = updated['withdrawal_amount'] if updated else old_withdrawal
+                snapshot_visa = updated['visa_balance'] if updated else new_visa
+                snapshot_reading = updated['last_counter_reading'] if updated else old_reading
+
+                # 4. تسجيل العملية في السجل التاريخي مع اللقطة
                 history_result = self.log_transaction(
                     customer_id=customer_id,
                     transaction_type='weekly_visa',
@@ -134,13 +151,16 @@ class HistoryManager:
                     amount=visa_amount,
                     current_balance_after=new_balance,
                     notes=f"{notes} - إضافة تأشيرة أسبوعية: {visa_amount:,.0f}",
-                    created_by=user_id
+                    created_by=user_id,
+                    snapshot_withdrawal_amount=snapshot_withdrawal,
+                    snapshot_visa_balance=snapshot_visa,
+                    snapshot_last_counter_reading=snapshot_reading
                 )
-                
+
                 if not history_result['success']:
                     cursor.execute("ROLLBACK")
                     return history_result
-                
+
                 return {
                     'success': True,
                     'customer_id': customer_id,
@@ -152,50 +172,51 @@ class HistoryManager:
                     'transaction_id': history_result.get('transaction_id'),
                     'message': f'تم إضافة تأشيرة أسبوعية: {visa_amount:,.0f}'
                 }
-                
+
         except Exception as e:
             logger.error(f"خطأ في إضافة التأشيرة الأسبوعية: {e}")
             return {'success': False, 'error': str(e)}
-    
+
     def add_cash_withdrawal(self,
-                          customer_id: int,
-                          withdrawal_amount: float,
-                          notes: str = '',
-                          user_id: int = None) -> Dict:
-        """إضافة سحب نقدي للزبون"""
-        
+                            customer_id: int,
+                            withdrawal_amount: float,
+                            notes: str = '',
+                            user_id: int = None) -> Dict:
+        """إضافة سحب نقدي للزبون مع لقطة كاملة"""
         try:
             with db.get_cursor() as cursor:
-                # 1. جلب بيانات الزبون الحالية
                 cursor.execute('''
-                    SELECT withdrawal_amount, current_balance
-                    FROM customers 
+                    SELECT withdrawal_amount, current_balance, visa_balance, last_counter_reading
+                    FROM customers
                     WHERE id = %s
                     FOR UPDATE
                 ''', (customer_id,))
-                
                 customer = cursor.fetchone()
                 if not customer:
                     return {'success': False, 'error': 'الزبون غير موجود'}
-                
+
                 old_withdrawal = float(customer['withdrawal_amount'] or 0)
                 old_balance = float(customer['current_balance'] or 0)
-                
-                # 2. حساب القيم الجديدة
+                old_visa = float(customer['visa_balance'] or 0)
+                old_reading = float(customer['last_counter_reading'] or 0)
+
                 new_withdrawal = old_withdrawal + withdrawal_amount
-                new_balance = old_balance - withdrawal_amount  # السحب يقلل الرصيد
-                
-                # 3. تحديث بيانات الزبون
+                new_balance = old_balance - withdrawal_amount
+
                 cursor.execute('''
-                    UPDATE customers 
+                    UPDATE customers
                     SET withdrawal_amount = %s,
                         current_balance = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
-                    RETURNING id
+                    RETURNING withdrawal_amount, visa_balance, last_counter_reading
                 ''', (new_withdrawal, new_balance, customer_id))
-                
-                # 4. تسجيل العملية في السجل التاريخي
+
+                updated = cursor.fetchone()
+                snapshot_withdrawal = updated['withdrawal_amount'] if updated else new_withdrawal
+                snapshot_visa = updated['visa_balance'] if updated else old_visa
+                snapshot_reading = updated['last_counter_reading'] if updated else old_reading
+
                 history_result = self.log_transaction(
                     customer_id=customer_id,
                     transaction_type='cash_withdrawal',
@@ -204,13 +225,16 @@ class HistoryManager:
                     amount=withdrawal_amount,
                     current_balance_after=new_balance,
                     notes=f"{notes} - سحب نقدي: {withdrawal_amount:,.0f}",
-                    created_by=user_id
+                    created_by=user_id,
+                    snapshot_withdrawal_amount=snapshot_withdrawal,
+                    snapshot_visa_balance=snapshot_visa,
+                    snapshot_last_counter_reading=snapshot_reading
                 )
-                
+
                 if not history_result['success']:
                     cursor.execute("ROLLBACK")
                     return history_result
-                
+
                 return {
                     'success': True,
                     'customer_id': customer_id,
@@ -222,105 +246,166 @@ class HistoryManager:
                     'transaction_id': history_result.get('transaction_id'),
                     'message': f'تم إضافة سحب نقدي: {withdrawal_amount:,.0f}'
                 }
-                
+
         except Exception as e:
             logger.error(f"خطأ في إضافة السحب النقدي: {e}")
             return {'success': False, 'error': str(e)}
-    
+
     def update_counter_reading(self,
-                             customer_id: int,
-                             new_reading: float,
-                             notes: str = '',
-                             user_id: int = None) -> Dict:
-        """تحديث قراءة العداد"""
-        
+                                customer_id: int,
+                                new_reading: float,
+                                notes: str = '',
+                                user_id: int = None) -> Dict:
+        """تحديث قراءة العداد مع لقطة كاملة"""
         try:
             with db.get_cursor() as cursor:
-                # 1. جلب بيانات الزبون الحالية
                 cursor.execute('''
-                    SELECT last_counter_reading, current_balance
-                    FROM customers 
+                    SELECT last_counter_reading, current_balance, withdrawal_amount, visa_balance
+                    FROM customers
                     WHERE id = %s
                     FOR UPDATE
                 ''', (customer_id,))
-                
                 customer = cursor.fetchone()
                 if not customer:
                     return {'success': False, 'error': 'الزبون غير موجود'}
-                
+
                 old_reading = float(customer['last_counter_reading'] or 0)
-                current_balance = float(customer['current_balance'] or 0)
-                
+                old_balance = float(customer['current_balance'] or 0)
+                old_withdrawal = float(customer['withdrawal_amount'] or 0)
+                old_visa = float(customer['visa_balance'] or 0)
+
                 if new_reading < old_reading:
-                    return {
-                        'success': False,
-                        'error': 'القراءة الجديدة أقل من القراءة السابقة'
-                    }
-                
-                # 2. تحديث بيانات الزبون
+                    return {'success': False, 'error': 'القراءة الجديدة أقل من القراءة السابقة'}
+
                 cursor.execute('''
-                    UPDATE customers 
+                    UPDATE customers
                     SET last_counter_reading = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
-                    RETURNING id, current_balance
+                    RETURNING withdrawal_amount, visa_balance, last_counter_reading
                 ''', (new_reading, customer_id))
-                
-                updated_customer = cursor.fetchone()
-                if updated_customer:
-                    current_balance = float(updated_customer['current_balance'] or 0)
-                
-                # 3. تسجيل العملية في السجل التاريخي
+
+                updated = cursor.fetchone()
+                snapshot_withdrawal = updated['withdrawal_amount'] if updated else old_withdrawal
+                snapshot_visa = updated['visa_balance'] if updated else old_visa
+                snapshot_reading = updated['last_counter_reading'] if updated else new_reading
+
                 history_result = self.log_transaction(
                     customer_id=customer_id,
                     transaction_type='counter_reading',
                     old_value=old_reading,
                     new_value=new_reading,
-                    amount=new_reading - old_reading,  # كمية الاستهلاك
-                    current_balance_after=current_balance,
+                    amount=new_reading - old_reading,
+                    current_balance_after=old_balance,
                     notes=f"{notes} - تحديث قراءة العداد: {old_reading:,.0f} → {new_reading:,.0f}",
-                    created_by=user_id
+                    created_by=user_id,
+                    snapshot_withdrawal_amount=snapshot_withdrawal,
+                    snapshot_visa_balance=snapshot_visa,
+                    snapshot_last_counter_reading=snapshot_reading
                 )
-                
+
                 if not history_result['success']:
                     cursor.execute("ROLLBACK")
                     return history_result
-                
+
                 return {
                     'success': True,
                     'customer_id': customer_id,
                     'old_reading': old_reading,
                     'new_reading': new_reading,
                     'consumption': new_reading - old_reading,
-                    'current_balance': current_balance,
+                    'current_balance': old_balance,
                     'transaction_id': history_result.get('transaction_id'),
                     'message': f'تم تحديث قراءة العداد: {old_reading:,.0f} → {new_reading:,.0f}'
                 }
-                
+
         except Exception as e:
             logger.error(f"خطأ في تحديث قراءة العداد: {e}")
             return {'success': False, 'error': str(e)}
-    
-    def get_customer_history(self, 
-                           customer_id: int,
-                           limit: int = 100,
-                           offset: int = 0) -> Dict:
-        """جلب السجل التاريخي للزبون"""
-        
+
+    def process_visa_import(self, customer_id: int, visa_amount: float,
+                            notes: str = '', user_id: int = None) -> Dict:
+        """معالجة تأشيرة مستوردة من ملف Excel مع لقطة كاملة"""
         try:
             with db.get_cursor() as cursor:
-                # 1. جلب إجمالي عدد السجلات
                 cursor.execute('''
-                    SELECT COUNT(*) as total_count
-                    FROM customer_history
-                    WHERE customer_id = %s
+                    SELECT current_balance, visa_balance, withdrawal_amount, last_counter_reading
+                    FROM customers
+                    WHERE id = %s
+                    FOR UPDATE
                 ''', (customer_id,))
-                
-                total = cursor.fetchone()['total_count']
-                
-                # 2. جلب السجلات
+                customer = cursor.fetchone()
+                if not customer:
+                    return {'success': False, 'error': 'الزبون غير موجود'}
+
+                old_balance = float(customer['current_balance'] or 0)
+                old_visa = float(customer['visa_balance'] or 0)
+                old_withdrawal = float(customer['withdrawal_amount'] or 0)
+                old_reading = float(customer['last_counter_reading'] or 0)
+
+                new_balance = old_balance + visa_amount
+                new_visa = old_visa + visa_amount
+
                 cursor.execute('''
-                    SELECT 
+                    UPDATE customers
+                    SET current_balance = %s,
+                        visa_balance = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING withdrawal_amount, visa_balance, last_counter_reading
+                ''', (new_balance, new_visa, customer_id))
+
+                updated = cursor.fetchone()
+                snapshot_withdrawal = updated['withdrawal_amount'] if updated else old_withdrawal
+                snapshot_visa = updated['visa_balance'] if updated else new_visa
+                snapshot_reading = updated['last_counter_reading'] if updated else old_reading
+
+                history_result = self.log_transaction(
+                    customer_id=customer_id,
+                    transaction_type='weekly_visa',
+                    old_value=old_visa,
+                    new_value=new_visa,
+                    amount=visa_amount,
+                    current_balance_after=new_balance,
+                    notes=f"استيراد تأشيرة من ملف Excel: {visa_amount:,.0f} | {notes}",
+                    created_by=user_id,
+                    snapshot_withdrawal_amount=snapshot_withdrawal,
+                    snapshot_visa_balance=snapshot_visa,
+                    snapshot_last_counter_reading=snapshot_reading
+                )
+
+                if not history_result['success']:
+                    cursor.execute("ROLLBACK")
+                    return history_result
+
+                return {
+                    'success': True,
+                    'customer_id': customer_id,
+                    'old_balance': old_balance,
+                    'new_balance': new_balance,
+                    'old_visa': old_visa,
+                    'new_visa': new_visa,
+                    'amount': visa_amount,
+                    'transaction_id': history_result.get('transaction_id'),
+                    'message': f'تم استيراد تأشيرة: {visa_amount:,.0f}'
+                }
+
+        except Exception as e:
+            logger.error(f"خطأ في معالجة تأشيرة مستوردة: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def get_customer_history(self,
+                              customer_id: int,
+                              limit: int = 100,
+                              offset: int = 0) -> Dict:
+        """جلب السجل التاريخي للزبون"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute('SELECT COUNT(*) as total_count FROM customer_history WHERE customer_id = %s', (customer_id,))
+                total = cursor.fetchone()['total_count']
+
+                cursor.execute('''
+                    SELECT
                         h.id,
                         h.transaction_type,
                         h.old_value,
@@ -329,6 +414,9 @@ class HistoryManager:
                         h.current_balance_after,
                         h.notes,
                         h.created_at,
+                        h.snapshot_withdrawal_amount,
+                        h.snapshot_visa_balance,
+                        h.snapshot_last_counter_reading,
                         u.full_name as created_by_name
                     FROM customer_history h
                     LEFT JOIN users u ON h.created_by = u.id
@@ -336,34 +424,29 @@ class HistoryManager:
                     ORDER BY h.created_at DESC
                     LIMIT %s OFFSET %s
                 ''', (customer_id, limit, offset))
-                
+
                 history = cursor.fetchall()
-                
-                # 3. تحويل الأرقام وتنسيق البيانات
                 formatted_history = []
                 for record in history:
                     formatted_record = dict(record)
-                    
-                    # تحويل القيم الرقمية بشكل آمن
                     formatted_record['old_value'] = self._safe_format_number(formatted_record['old_value'])
                     formatted_record['new_value'] = self._safe_format_number(formatted_record['new_value'])
                     formatted_record['amount'] = self._safe_format_number(formatted_record['amount'])
                     formatted_record['current_balance_after'] = self._safe_format_number(formatted_record['current_balance_after'])
-                    
-                    # تنسيق نوع العملية
+                    formatted_record['snapshot_withdrawal_amount'] = self._safe_format_number(formatted_record.get('snapshot_withdrawal_amount'))
+                    formatted_record['snapshot_visa_balance'] = self._safe_format_number(formatted_record.get('snapshot_visa_balance'))
+                    formatted_record['snapshot_last_counter_reading'] = self._safe_format_number(formatted_record.get('snapshot_last_counter_reading'))
+
                     transaction_type = formatted_record['transaction_type']
-                    formatted_record['transaction_type_arabic'] = \
-                        self.TRANSACTION_TYPES.get(transaction_type, transaction_type)
-                    
-                    # تنسيق التواريخ
+                    formatted_record['transaction_type_arabic'] = self.TRANSACTION_TYPES.get(transaction_type, transaction_type)
+
                     if formatted_record['created_at']:
-                        formatted_record['created_at_formatted'] = \
-                            formatted_record['created_at'].strftime('%Y-%m-%d %H:%M')
+                        formatted_record['created_at_formatted'] = formatted_record['created_at'].strftime('%Y-%m-%d %H:%M')
                     else:
                         formatted_record['created_at_formatted'] = ''
-                    
+
                     formatted_history.append(formatted_record)
-                
+
                 return {
                     'success': True,
                     'customer_id': customer_id,
@@ -372,18 +455,17 @@ class HistoryManager:
                     'limit': limit,
                     'offset': offset
                 }
-                
+
         except Exception as e:
             logger.error(f"خطأ في جلب السجل التاريخي: {e}")
             return {'success': False, 'error': str(e)}
-        
+
     def get_history_summary(self, customer_id: int) -> Dict:
         """جلب ملخص السجل التاريخي للزبون"""
-        
         try:
             with db.get_cursor() as cursor:
                 cursor.execute('''
-                    SELECT 
+                    SELECT
                         COUNT(*) as total_transactions,
                         COALESCE(SUM(CASE WHEN transaction_type = 'weekly_visa' THEN amount ELSE 0 END), 0) as total_visa,
                         COALESCE(SUM(CASE WHEN transaction_type = 'cash_withdrawal' THEN amount ELSE 0 END), 0) as total_withdrawal,
@@ -392,27 +474,23 @@ class HistoryManager:
                     FROM customer_history
                     WHERE customer_id = %s
                 ''', (customer_id,))
-                
+
                 result = cursor.fetchone()
-                
                 if result:
                     summary = dict(result)
-                    
-                    # استخدام _safe_format_number للقيم الرقمية
                     summary['total_visa'] = self._safe_format_number(summary.get('total_visa', 0))
                     summary['total_withdrawal'] = self._safe_format_number(summary.get('total_withdrawal', 0))
-                    
-                    # تنسيق التواريخ إذا كانت موجودة
+
                     if summary.get('first_transaction'):
                         summary['first_transaction'] = summary['first_transaction'].strftime('%Y-%m-%d %H:%M')
                     else:
                         summary['first_transaction'] = 'غير متوفر'
-                        
+
                     if summary.get('last_transaction'):
                         summary['last_transaction'] = summary['last_transaction'].strftime('%Y-%m-%d %H:%M')
                     else:
                         summary['last_transaction'] = 'غير متوفر'
-                    
+
                     return {
                         'success': True,
                         'customer_id': customer_id,
@@ -430,73 +508,7 @@ class HistoryManager:
                             'last_transaction': 'غير متوفر'
                         }
                     }
-                    
+
         except Exception as e:
             logger.error(f"خطأ في جلب ملخص السجل: {e}")
-            return {'success': False, 'error': str(e)}
-
-    def process_visa_import(self, customer_id: int, visa_amount: float, 
-                           notes: str = '', user_id: int = None) -> Dict:
-        """معالجة تأشيرة مستوردة من ملف Excel"""
-        
-        try:
-            with db.get_cursor() as cursor:
-                # 1. جلب بيانات الزبون الحالية
-                cursor.execute('''
-                    SELECT current_balance, visa_balance
-                    FROM customers 
-                    WHERE id = %s
-                    FOR UPDATE
-                ''', (customer_id,))
-                
-                customer = cursor.fetchone()
-                if not customer:
-                    return {'success': False, 'error': 'الزبون غير موجود'}
-                
-                old_balance = float(customer['current_balance'] or 0)
-                old_visa = float(customer['visa_balance'] or 0)
-                
-                # 2. حساب القيم الجديدة
-                new_balance = old_balance + visa_amount
-                new_visa = old_visa + visa_amount
-                
-                # 3. تحديث بيانات الزبون
-                cursor.execute('''
-                    UPDATE customers 
-                    SET current_balance = %s,
-                        visa_balance = %s,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                ''', (new_balance, new_visa, customer_id))
-                
-                # 4. تسجيل العملية في السجل التاريخي
-                history_result = self.log_transaction(
-                    customer_id=customer_id,
-                    transaction_type='weekly_visa',
-                    old_value=old_visa,
-                    new_value=new_visa,
-                    amount=visa_amount,
-                    current_balance_after=new_balance,
-                    notes=f"استيراد تأشيرة من ملف Excel: {visa_amount:,.0f} | {notes}",
-                    created_by=user_id
-                )
-                
-                if not history_result['success']:
-                    cursor.execute("ROLLBACK")
-                    return history_result
-                
-                return {
-                    'success': True,
-                    'customer_id': customer_id,
-                    'old_balance': old_balance,
-                    'new_balance': new_balance,
-                    'old_visa': old_visa,
-                    'new_visa': new_visa,
-                    'amount': visa_amount,
-                    'transaction_id': history_result.get('transaction_id'),
-                    'message': f'تم استيراد تأشيرة: {visa_amount:,.0f}'
-                }
-                
-        except Exception as e:
-            logger.error(f"خطأ في معالجة تأشيرة مستوردة: {e}")
             return {'success': False, 'error': str(e)}

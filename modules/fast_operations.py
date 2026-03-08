@@ -174,14 +174,22 @@ class FastOperations:
 
                 invoice_id = cursor.fetchone()['id']
 
-                # ✅ تسجيل الحدث في customer_history
+                # جلب اللقطة الحالية للزبون (بعد التحديث)
+                cursor.execute("SELECT withdrawal_amount, visa_balance, last_counter_reading FROM customers WHERE id = %s", (customer_id,))
+                snapshot = cursor.fetchone()
+                snapshot_withdrawal = snapshot['withdrawal_amount'] if snapshot else 0
+                snapshot_visa = snapshot['visa_balance'] if snapshot else 0
+                snapshot_reading = snapshot['last_counter_reading'] if snapshot else 0
+
+                # ✅ تسجيل الحدث في customer_history مع اللقطة
                 cursor.execute("""
                     INSERT INTO customer_history 
                     (customer_id, action_type, transaction_type, 
                     old_value, new_value, amount,
                     current_balance_before, current_balance_after,
-                    notes, created_by, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    notes, created_by, created_at,
+                    snapshot_withdrawal_amount, snapshot_visa_balance, snapshot_last_counter_reading)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
                 """, (
                     customer_id,
                     'invoice_created',            # action_type
@@ -192,7 +200,10 @@ class FastOperations:
                     current_balance,                  # current_balance_before
                     new_balance,                       # current_balance_after
                     f"فاتورة سريعة #{invoice_number} للزبون {customer['name']}",
-                    user_id                            # created_by
+                    user_id,                            # created_by
+                    snapshot_withdrawal,
+                    snapshot_visa,
+                    snapshot_reading
                 ))
 
                 # تسجيل النشاط
@@ -201,7 +212,6 @@ class FastOperations:
                     VALUES (%s, 'fast_invoice', %s)
                 """, (user_id, f"فاتورة سريعة #{invoice_number} للزبون {customer['name']}"))
 
-                # في نهاية الدالة fast_process_invoice
                 return {
                     "success": True,
                     "invoice_id": invoice_id,
@@ -214,9 +224,9 @@ class FastOperations:
                     "total_amount": total_amount,
                     "new_balance": new_balance,
                     "withdrawal_amount": kwargs.get('customer_withdrawal', 0),
-                    "price_per_kilo": price_per_kilo,          # <-- إضافة
-                    "discount": discount,                      # <-- إضافة
-                    "visa_application": customer['visa_balance'],   # <-- إضافة
+                    "price_per_kilo": price_per_kilo,
+                    "discount": discount,
+                    "visa_application": customer['visa_balance'],
                     "processed_at": datetime.now().strftime("%Y-%m-%d %H:%M")
                 }
         except Exception as e:
