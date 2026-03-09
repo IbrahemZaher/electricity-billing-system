@@ -174,7 +174,7 @@ class MainWindow:
             ("🗃️ الأرشيف", "archive"),
             ("⚡ تحليل الهدر", "waste_analysis"),
             ("👤 المستخدمين", "users"),
-            ("📝 سجل النشاط", "activity_log"),
+            ("📸 كاميرا البرنامج", "activity_log"),
             ("⚙️ الإعدادات", "settings"),
             ("🔄 النسخ الاحتياطي", "backup"),
             ("📱 المحاسبة الجوالة", "mobile_accounting"),
@@ -480,13 +480,30 @@ class MainWindow:
         back_btn.pack(pady=20)
 
     def show_activity_log_ui(self):
-        """عرض واجهة سجل النشاط"""
+        """عرض واجهة سجل النشاط بعد التحقق من كلمة المرور للمدراء"""
+        # التحقق من الصلاحية أولاً
+        if not has_permission('system.view_activity_log'):
+            messagebox.showerror("صلاحيات", "ليس لديك صلاحية عرض سجل النشاط")
+            return
+
+        # طلب كلمة المرور الإضافية
+        password = tk.simpledialog.askstring(
+            "تأكيد الدخول",
+            "هذه الواجهة لمدراء البرنامج حصراً\nالرجاء إدخال كلمة المرور للمتابعة:",
+            show='*'
+        )
+        if password != "eyadkasemadmin123":
+            if password is not None:  # إذا لم يضغط المستخدم على "إلغاء"
+                messagebox.showerror("خطأ", "كلمة المرور غير صحيحة")
+            return
+
+        # متابعة فتح الواجهة
         for widget in self.content_frame.winfo_children():
             widget.destroy()
-        
         try:
             from ui.activity_log_ui import ActivityLogUI
-            activity_ui = ActivityLogUI(self.content_frame)
+            activity_ui = ActivityLogUI(self.content_frame, self.user_data)
+            activity_ui.pack(fill='both', expand=True)
             logger.info("تم تحميل واجهة سجل النشاط بنجاح")
         except ImportError as e:
             logger.error(f"خطأ في تحميل سجل النشاط: {e}")
