@@ -10,6 +10,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+import threading
+import time
 
 from config.settings import BACKUP_CONFIG, DATABASE_CONFIG
 from modules.backup_engine import PostgresBackupEngine
@@ -17,8 +19,12 @@ from modules.backup_engine import PostgresBackupEngine
 
 logger = logging.getLogger(__name__)
 
+
 class ArchiveManager:
     """مدير عمليات الأرشيف والنسخ الاحتياطي (نسخة متقدمة)"""
+
+    # متغير للتحقق من عدم تشغيل نسختين معاً
+    _backup_running = False
 
     def __init__(self):
         self.backup_engine = PostgresBackupEngine()
@@ -30,6 +36,12 @@ class ArchiveManager:
         تنفيذ نسخ احتياطي.
         backup_type: 'full' أو 'wal' (WAL archive)
         """
+        # تجنب التشغيل المتزامن
+        if ArchiveManager._backup_running:
+            logger.warning("يوجد نسخ احتياطي قيد التشغيل بالفعل، تخطي هذه المرة")
+            return {'success': False, 'error': 'جاري نسخ احتياطي آخر'}
+
+        ArchiveManager._backup_running = True
         try:
             if backup_type == 'full':
                 result = self.backup_engine.perform_full_backup()
@@ -70,6 +82,32 @@ class ArchiveManager:
                 success=False
             )
             return {'success': False, 'error': str(e)}
+        finally:
+            ArchiveManager._backup_running = False
+
+    def schedule_auto_backup(self, interval_hours=24):
+        """
+        بدء جدولة النسخ الاحتياطي التلقائي كل interval_hours ساعة.
+        يتم التشغيل في خيط منفصل (daemon) حتى لا يمنع إغلاق التطبيق.
+        """
+        def backup_worker():
+            while True:
+                try:
+                    logger.info(f"بدء النسخ الاحتياطي التلقائي (كل {interval_hours} ساعة)")
+                    result = self.perform_backup(backup_type='full')
+                    if result.get('success'):
+                        logger.info("✅ تم النسخ الاحتياطي التلقائي بنجاح")
+                    else:
+                        logger.error(f"❌ فشل النسخ الاحتياطي التلقائي: {result.get('error')}")
+                except Exception as e:
+                    logger.exception(f"❌ خطأ أثناء النسخ الاحتياطي التلقائي: {e}")
+                # الانتظار للمدة المحددة (بالثواني)
+                time.sleep(interval_hours * 3600)
+
+        # بدء الخيط (daemon=True يعني أنه سيتوقف تلقائياً عند إغلاق البرنامج)
+        thread = threading.Thread(target=backup_worker, daemon=True)
+        thread.start()
+        logger.info(f"🕒 تم بدء جدولة النسخ الاحتياطي التلقائي كل {interval_hours} ساعة")
 
     def _close_db_connections(self):
         """إغلاق جميع اتصالات قاعدة البيانات الحالية."""
@@ -166,7 +204,6 @@ class ArchiveManager:
             logger.error(f"استثناء عام في restore_backup: {e}")
             return {'success': False, 'error': str(e)}
 
-
     def _decrypt_file(self, encrypted_path: Path) -> Optional[Path]:
         """فك تشفير ملف GPG (يتطلب المفتاح الخاص)."""
         try:
@@ -216,4 +253,3 @@ class ArchiveManager:
                     shutil.copy2(file_path, backup_folder)
                 except Exception as e:
                     logger.error(f"خطأ في نسخ ملف {file_path}: {e}")
-    

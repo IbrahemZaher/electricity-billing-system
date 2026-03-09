@@ -33,6 +33,21 @@ class MainWindow:
         
         # تحميل لوحة التحكم كواجهة افتراضية
         self.show_dashboard()
+        
+        # بدء النسخ الاحتياطي التلقائي
+        self.start_auto_backup()
+
+    def start_auto_backup(self):
+        """بدء النسخ الاحتياطي التلقائي في الخلفية."""
+        from modules.archive import ArchiveManager
+        try:
+            archive_mgr = ArchiveManager()
+            # يمكنك تغيير المدة من الإعدادات إذا أردت
+            interval = 24  # ساعة
+            archive_mgr.schedule_auto_backup(interval_hours=interval)
+            logger.info(f"تم بدء النسخ الاحتياطي التلقائي كل {interval} ساعة")
+        except Exception as e:
+            logger.error(f"فشل بدء الجدولة التلقائية: {e}")        
     
     def setup_styles(self):
         """إعداد الأنماط"""
