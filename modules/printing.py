@@ -87,6 +87,7 @@ class FastPrinter:
         طباعة فاتورة بتصميم متطور باستخدام البيانات المحسوبة مسبقاً
         - تم إضافة صندوق منفصل للرصيد الحالي
         - تم استبدال الرصيد في الجدول 2×2 بقيمة السحب (إن وجدت)
+        - تم إضافة رقم الزبون أسفل التذييل (كلمة مرور البوت)
         """
         try:
             if not self.printer and not self.connect():
@@ -113,6 +114,7 @@ class FastPrinter:
                 'withdrawal_amount': invoice_data.get('withdrawal_amount', 0),  # القيمة المضافة (السحب)
                 'accountant_name': invoice_data.get('accountant_name', 'محاسب'),
                 'landline': invoice_data.get('landline', '5310344'),
+                'customer_id': invoice_data.get('customer_id', 0),  # معرف الزبون (يُستخدم ككلمة مرور في البوت)
             }
             
             now = datetime.now()
@@ -345,22 +347,30 @@ class FastPrinter:
             w_phone = draw.textlength(phone_txt, font=font_small)
             draw.text(((PAPER_WIDTH - w_phone) / 2, y), phone_txt,
                     font=font_small, fill="black")
-            y += 30  # نزود مسافة بسيطة بعد رقم الهاتف
+            y += 30
 
-            # إضافة الرقم الأرضي (بدون أي إضافات نصية زائدة)
+            # الرقم الأرضي
             landline = data.get('landline', '5310344')
             landline_txt = ar(f"[أرضي: {landline}]")
             w_landline = draw.textlength(landline_txt, font=font_small)
             draw.text(((PAPER_WIDTH - w_landline) / 2, y), landline_txt,
                     font=font_small, fill="black")
+            y += 30
 
-            y += 40  # زيادة المسافة بعد الرقم الأرضي لاستيعاب السطرين (يمكن تعديلها)            
-            
+            # إضافة رقم الزبون (كلمة مرور البوت) - إذا كان موجوداً
+            customer_id = data.get('customer_id', 0)
+            if customer_id:
+                id_txt = ar(f"[كود التيليغرام: {customer_id}]")
+                w_id = draw.textlength(id_txt, font=font_small)
+                draw.text(((PAPER_WIDTH - w_id) / 2, y), id_txt,
+                        font=font_small, fill="black")
+                y += 30
+
             # قص الصورة وإرسالها
             final_img = img.crop((0, 0, PAPER_WIDTH, y))
             self.printer.image(final_img.convert("1"))
             self.printer.cut()
-            self.printer.close()          # <-- إغلاق الاتصال
+            self.printer.close()
             return True
 
         except Exception as e:

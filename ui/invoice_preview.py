@@ -321,7 +321,8 @@ class InvoicePreview:
                 'invoice_number': str(self.invoice_data.get('invoice_number', '')),
                 'visa_application': visa_value,
                 'withdrawal_amount': withdrawal_value,
-                'accountant_name': str(self.invoice_data.get('accountant_name', self.invoice_data.get('user_name', 'محاسب')))
+                'accountant_name': str(self.invoice_data.get('accountant_name', self.invoice_data.get('user_name', 'محاسب'))),
+                'customer_id': invoice.get('customer_id', 0),   # <-- إضافة هذا السطر
             }
 
             # طباعة معلومات التشخيص لمعرفة القيم المستخرجة

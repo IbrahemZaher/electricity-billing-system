@@ -1069,7 +1069,8 @@ class AccountingUI(tk.Frame):
                 'invoice_number': self.last_invoice_result.get('invoice_number', ''),
                 'discount': self.last_invoice_result.get('discount', 0),
                 'withdrawal_amount': self.selected_customer.get('withdrawal_amount', 0),
-                'visa_application': self.selected_customer.get('visa_balance', 0)
+                'visa_application': self.selected_customer.get('visa_balance', 0),
+                'customer_id': self.selected_customer.get('id', 0),   # <-- إضافة هذا السطر
             }
             
             if self.printer.print_fast_invoice(invoice_data):

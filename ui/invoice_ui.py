@@ -553,7 +553,8 @@ class InvoiceUI(tk.Frame):
                 'invoice_number': str(invoice.get('invoice_number', '')),
                 'visa_application': visa_value,
                 'withdrawal_amount': withdrawal_value,
-                'accountant_name': str(invoice.get('accountant_name', self.user_data.get('name', 'محاسب')))
+                'accountant_name': str(invoice.get('accountant_name', self.user_data.get('name', 'محاسب'))),
+                'customer_id': invoice.get('customer_id', 0),   # <-- إضافة هذا السطر
             }
 
             printer = FastPrinter()
