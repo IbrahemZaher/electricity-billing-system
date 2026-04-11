@@ -8,7 +8,7 @@ from database.connection import db
 logger = logging.getLogger(__name__)
 
 class FuelManagement:
-    """إدارة عدادات المولدة والقطاعات والخزانات والقراءات اليومية والجرد الأسبوعي"""
+    """إدارة عدادات المولدة والقطاعات والخزانات والطاقة والقراءات اليومية والجرد الأسبوعي"""
 
     # ==================== عدادات المولدة ====================
     @staticmethod
@@ -148,6 +148,156 @@ class FuelManagement:
             logger.error(f"خطأ في حذف خزان: {e}")
             return {'success': False, 'error': str(e)}
 
+    # ==================== عدادات الطاقة ====================
+    @staticmethod
+    def get_energy_meters(active_only=True) -> List[Dict]:
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM energy_meters WHERE is_active = %s ORDER BY name",
+                (active_only,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def add_energy_meter(data: Dict) -> Dict:
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO energy_meters (name, code, notes) VALUES (%s, %s, %s) RETURNING id",
+                    (data['name'], data.get('code'), data.get('notes'))
+                )
+                return {'success': True, 'id': cursor.fetchone()['id']}
+        except Exception as e:
+            logger.error(f"خطأ في إضافة عداد طاقة: {e}")
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def update_energy_meter(meter_id: int, data: Dict) -> Dict:
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute(
+                    "UPDATE energy_meters SET name=%s, code=%s, notes=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+                    (data['name'], data.get('code'), data.get('notes'), meter_id)
+                )
+                return {'success': True}
+        except Exception as e:
+            logger.error(f"خطأ في تحديث عداد طاقة: {e}")
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def delete_energy_meter(meter_id: int) -> Dict:
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("DELETE FROM energy_meters WHERE id = %s", (meter_id,))
+                return {'success': True}
+        except Exception as e:
+            logger.error(f"خطأ في حذف عداد طاقة: {e}")
+            return {'success': False, 'error': str(e)}
+
+    # ==================== قراءات الطاقة اليومية ====================
+    @staticmethod
+    def save_energy_reading(reading_date: date, meter_id: int, reading_value: float, notes: str = "") -> Dict:
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO energy_daily_readings (reading_date, meter_id, reading_value, notes)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (reading_date, meter_id) DO UPDATE SET
+                        reading_value = EXCLUDED.reading_value,
+                        notes = EXCLUDED.notes,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (reading_date, meter_id, reading_value, notes))
+                return {'success': True}
+        except Exception as e:
+            logger.error(f"خطأ في حفظ قراءة الطاقة: {e}")
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def delete_energy_reading(reading_date: date, meter_id: int) -> Dict:
+        """حذف قراءة طاقة ليوم محدد وعداد محدد"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM energy_daily_readings WHERE reading_date = %s AND meter_id = %s",
+                    (reading_date, meter_id)
+                )
+                return {'success': True}
+        except Exception as e:
+            logger.error(f"خطأ في حذف قراءة الطاقة: {e}")
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def get_energy_readings_for_date(reading_date: date) -> Dict[int, float]:
+        """جلب قراءات الطاقة ليوم محدد (مفتاح = meter_id, قيمة = reading_value)"""
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                "SELECT meter_id, reading_value FROM energy_daily_readings WHERE reading_date = %s",
+                (reading_date,)
+            )
+            return {row['meter_id']: float(row['reading_value']) for row in cursor.fetchall()}
+
+    @staticmethod
+    def get_energy_readings_range(start_date: date, end_date: date) -> List[Dict]:
+        """جلب جميع قراءات الطاقة في فترة زمنية"""
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT er.reading_date, er.meter_id, er.reading_value, em.name as meter_name
+                FROM energy_daily_readings er
+                JOIN energy_meters em ON er.meter_id = em.id
+                WHERE er.reading_date BETWEEN %s AND %s
+                ORDER BY er.reading_date, em.name
+            """, (start_date, end_date))
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def get_last_energy_readings(limit=10) -> List[Dict]:
+        """جلب آخر عدد محدد من قراءات الطاقة مرتبة تنازلياً حسب التاريخ"""
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT er.reading_date, er.meter_id, er.reading_value, em.name as meter_name
+                FROM energy_daily_readings er
+                JOIN energy_meters em ON er.meter_id = em.id
+                ORDER BY er.reading_date DESC, em.name
+                LIMIT %s
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    @staticmethod
+    def calculate_energy_output(start_date: date, end_date: date) -> float:
+        """
+        حساب إجمالي إنتاج الطاقة خلال الفترة = مجموع (قراءة نهاية - قراءة بداية) لكل عداد.
+        يتم أخذ آخر قراءة قبل أو تساوي start_date و end_date.
+        """
+        meters = FuelManagement.get_energy_meters()
+        if not meters:
+            return 0.0
+        total_output = 0.0
+        for meter in meters:
+            mid = meter['id']
+            # قراءة البداية (أقصى تاريخ <= start_date)
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT reading_value FROM energy_daily_readings
+                    WHERE meter_id = %s AND reading_date <= %s
+                    ORDER BY reading_date DESC LIMIT 1
+                """, (mid, start_date))
+                start_row = cursor.fetchone()
+                start_val = float(start_row['reading_value']) if start_row else 0.0
+
+            # قراءة النهاية (أقصى تاريخ <= end_date)
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT reading_value FROM energy_daily_readings
+                    WHERE meter_id = %s AND reading_date <= %s
+                    ORDER BY reading_date DESC LIMIT 1
+                """, (mid, end_date))
+                end_row = cursor.fetchone()
+                end_val = float(end_row['reading_value']) if end_row else 0.0
+
+            output = max(end_val - start_val, 0.0)
+            total_output += output
+        return total_output
+
     # ==================== عمليات شراء وتنزيل المازوت ====================
     @staticmethod
     def add_purchase(data: Dict) -> Dict:
@@ -177,7 +327,6 @@ class FuelManagement:
 
     @staticmethod
     def get_warehouse_stock() -> float:
-        """حساب رصيد المستودع الحالي = مجموع المشتريات - مجموع التنزيلات للخزانات"""
         with db.get_cursor() as cursor:
             cursor.execute("SELECT COALESCE(SUM(quantity_liters),0) FROM fuel_purchases")
             total_purchased = cursor.fetchone()['coalesce']
@@ -187,7 +336,6 @@ class FuelManagement:
 
     @staticmethod
     def get_warehouse_stock_at_date(target_date: date) -> float:
-        """حساب رصيد المستودع في تاريخ محدد"""
         with db.get_cursor() as cursor:
             cursor.execute("SELECT COALESCE(SUM(quantity_liters),0) FROM fuel_purchases WHERE purchase_date <= %s", (target_date,))
             purchased = cursor.fetchone()['coalesce']
@@ -195,10 +343,9 @@ class FuelManagement:
             transferred = cursor.fetchone()['coalesce']
             return float(purchased) - float(transferred)
 
-    # ==================== القراءات اليومية والحسابات ====================
+    # ==================== القراءات اليومية للمازوت والحسابات ====================
     @staticmethod
     def get_daily_reading_by_date(reading_date: date) -> Optional[Dict]:
-        """جلب قراءة يومية محددة"""
         with db.get_cursor() as cursor:
             cursor.execute(
                 "SELECT * FROM daily_readings WHERE reading_date = %s",
@@ -335,10 +482,10 @@ class FuelManagement:
                 result.append(d)
             return result
 
-    # ==================== الجرد الأسبوعي (ديناميكي) ====================
+    # ==================== الجرد الأسبوعي (ديناميكي مع إنتاج الطاقة) ====================
     @staticmethod
     def get_weekly_inventories() -> List[Dict]:
-        """إعادة حساب الجرد الأسبوعي من القراءات اليومية مباشرة"""
+        """إعادة حساب الجرد الأسبوعي من القراءات اليومية للمازوت والطاقة"""
         try:
             with db.get_cursor() as cursor:
                 cursor.execute("""
@@ -352,6 +499,8 @@ class FuelManagement:
                     cycle_name = cycle['cycle_name']
                     start = cycle['start_date']
                     end = cycle['end_date']
+                    
+                    # حسابات المازوت
                     readings = FuelManagement.get_daily_readings(start, end)
                     if not readings:
                         continue
@@ -360,6 +509,13 @@ class FuelManagement:
                     total_fuel = sum(r['total_fuel_burned'] for r in readings)
                     avg_gen_eff = total_gen / total_fuel if total_fuel > 0 else 0
                     avg_sector_eff = total_sector / total_fuel if total_fuel > 0 else 0
+                    
+                    # حساب إنتاج الطاقة خلال الفترة (محسّن)
+                    energy_output = FuelManagement.calculate_energy_output(start, end)
+                    
+                    # الإنتاج الكلي = إنتاج المولدات + إنتاج الطاقة
+                    total_production = total_gen + energy_output
+                    
                     warehouse = FuelManagement.get_warehouse_stock_at_date(end)
                     result.append({
                         'id': cycle['id'],
@@ -371,6 +527,8 @@ class FuelManagement:
                         'total_fuel_burned': total_fuel,
                         'avg_generator_efficiency': avg_gen_eff,
                         'avg_sector_efficiency': avg_sector_eff,
+                        'energy_output': energy_output,
+                        'total_production': total_production,
                         'warehouse_remaining_liters': warehouse,
                         'notes': cycle['notes'] or ''
                     })
@@ -384,13 +542,18 @@ class FuelManagement:
         try:
             readings = FuelManagement.get_daily_readings(start_date, end_date)
             if not readings:
-                return {'success': False, 'error': 'لا توجد قراءات في هذه الفترة'}
+                return {'success': False, 'error': 'لا توجد قراءات مازوت في هذه الفترة'}
             total_gen = sum(r['generator_output'] for r in readings)
             total_sector = sum(r['sector_output'] for r in readings)
             total_fuel = sum(r['total_fuel_burned'] for r in readings)
             avg_gen_eff = total_gen / total_fuel if total_fuel > 0 else 0
             avg_sector_eff = total_sector / total_fuel if total_fuel > 0 else 0
 
+            # إنتاج الطاقة
+            energy_output = FuelManagement.calculate_energy_output(start_date, end_date)
+            total_production = total_gen + energy_output
+
+            # أرصدة الخزانات في آخر يوم
             last_day = readings[-1]
             tank_readings = last_day['tank_readings']
             tanks_info = {t['id']: float(t['liters_per_cm']) for t in FuelManagement.get_tanks()}
@@ -419,6 +582,7 @@ class FuelManagement:
                 inv_id = cursor.fetchone()['id']
             return {'success': True, 'id': inv_id, 'total_generator_output': total_gen,
                     'total_sector_output': total_sector, 'total_fuel_burned': total_fuel,
+                    'energy_output': energy_output, 'total_production': total_production,
                     'warehouse_remaining': warehouse_remaining}
         except Exception as e:
             logger.error(f"خطأ في توليد الجرد الأسبوعي: {e}")
@@ -435,7 +599,6 @@ class FuelManagement:
 
     @staticmethod
     def delete_weekly_inventory(inv_id: int) -> Dict:
-        """حذف جرد أسبوعي من قاعدة البيانات"""
         try:
             with db.get_cursor() as cursor:
                 cursor.execute("DELETE FROM weekly_inventory WHERE id = %s", (inv_id,))

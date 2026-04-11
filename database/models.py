@@ -208,7 +208,12 @@ class Models:
 
                 "CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);",
                 "CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at);",
-                "CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);"
+                "CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);",
+
+                # فهارس جداول الطاقة
+                "CREATE INDEX IF NOT EXISTS idx_energy_meters_name ON energy_meters(name);",
+                "CREATE INDEX IF NOT EXISTS idx_energy_daily_readings_date ON energy_daily_readings(reading_date);",
+                "CREATE INDEX IF NOT EXISTS idx_energy_daily_readings_meter ON energy_daily_readings(meter_id);",
             ]
 
             for index_sql in indexes:
@@ -603,7 +608,31 @@ class Models:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """,            
+            """,
+            # جداول عدادات الطاقة
+            """
+            CREATE TABLE IF NOT EXISTS energy_meters (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                code VARCHAR(50),
+                notes TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS energy_daily_readings (
+                id SERIAL PRIMARY KEY,
+                reading_date DATE NOT NULL,
+                meter_id INTEGER NOT NULL REFERENCES energy_meters(id) ON DELETE CASCADE,
+                reading_value NUMERIC(12,2) NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(reading_date, meter_id)
+            )
+            """,
         ]
         
         try:
