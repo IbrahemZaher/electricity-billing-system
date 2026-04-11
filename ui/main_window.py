@@ -179,6 +179,7 @@ class MainWindow:
             ("🔄 النسخ الاحتياطي", "backup"),
             ("📱 المحاسبة الجوالة", "mobile_accounting"),
             ("📈 متابعة الجباية", "collection_monitor"),
+            ("📈 نسب التحويل", "fuel_management"),
             ("❌ خروج", "logout")
         ]
         
@@ -267,6 +268,16 @@ class MainWindow:
                 self.show_collection_monitor()
             else:
                 messagebox.showerror("صلاحيات", "ليس لديك صلاحية عرض التقرير")
+        elif command == "fuel_management":
+            self.show_fuel_management()
+
+    def show_fuel_management(self):
+        try:
+            from ui.fuel_management_ui import FuelManagementUI
+            FuelManagementUI(self.root, self.user_data)
+        except Exception as e:
+            logger.error(f"خطأ في فتح نافذة نسب التحويل: {e}")
+            messagebox.showerror("خطأ", f"تعذر فتح الواجهة: {e}")                            
 
     def show_collection_monitor(self):
         for widget in self.content_frame.winfo_children():

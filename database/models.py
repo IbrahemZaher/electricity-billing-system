@@ -510,6 +510,100 @@ class Models:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """,
+            # ... داخل دالة create_tables، بعد جدول collector_targets ...
+
+            # جداول إدارة المازوت ونسب التحويل
+            """
+            CREATE TABLE IF NOT EXISTS generator_meters (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                code VARCHAR(50) UNIQUE,
+                notes TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS sector_meters (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                code VARCHAR(50) UNIQUE,
+                sector_id INTEGER REFERENCES sectors(id) ON DELETE SET NULL,
+                notes TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS fuel_tanks (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                liters_per_cm DECIMAL(10,2) NOT NULL DEFAULT 10.75,
+                notes TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS fuel_purchases (
+                id SERIAL PRIMARY KEY,
+                purchase_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                quantity_liters DECIMAL(15,2) NOT NULL,
+                price_per_liter DECIMAL(15,2) NOT NULL,
+                total_cost DECIMAL(15,2) GENERATED ALWAYS AS (quantity_liters * price_per_liter) STORED,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS fuel_transfers (
+                id SERIAL PRIMARY KEY,
+                transfer_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                tank_id INTEGER NOT NULL REFERENCES fuel_tanks(id),
+                quantity_liters DECIMAL(15,2) NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS daily_readings (
+                id SERIAL PRIMARY KEY,
+                reading_date DATE NOT NULL UNIQUE,
+                generator_readings JSONB NOT NULL,     -- {meter_id: reading}
+                sector_readings JSONB NOT NULL,        -- {meter_id: reading}
+                tank_readings JSONB NOT NULL,          -- {tank_id: reading_cm}
+                energy_readings JSONB,                 -- {meter_id: reading} (اختياري، أسبوعي)
+                generator_output DECIMAL(15,2),
+                sector_output DECIMAL(15,2),
+                total_fuel_burned DECIMAL(15,2),
+                generator_efficiency DECIMAL(10,4),    -- نسبة تحويل المولدات
+                sector_efficiency DECIMAL(10,4),       -- نسبة تحويل القطاعات
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS weekly_inventory (
+                id SERIAL PRIMARY KEY,
+                cycle_name VARCHAR(100) NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                total_generator_output DECIMAL(15,2),
+                total_sector_output DECIMAL(15,2),
+                total_fuel_burned DECIMAL(15,2),
+                avg_generator_efficiency DECIMAL(10,4),
+                avg_sector_efficiency DECIMAL(10,4),
+                tank_final_readings JSONB,              -- {tank_id: final_cm, final_liters}
+                warehouse_remaining_liters DECIMAL(15,2),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,            
         ]
         
         try:
@@ -1231,6 +1325,12 @@ class Models:
         except Exception as e:
             logger.error(f"خطأ في تحديث الإعداد: {e}")
             return False
+
+    def ensure_fuel_tables(self):
+        """إنشاء جداول إدارة المازوت إذا لم تكن موجودة (للتحديث اليدوي)"""
+        with db.get_cursor() as cursor:
+            # يمكنك استدعاء نفس SQL أعلاه هنا، لكن الأسهل تشغيلها من create_tables
+            pass            
 
 
     def update_customers_table(self):
