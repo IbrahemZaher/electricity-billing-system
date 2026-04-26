@@ -7,6 +7,7 @@ import json
 import traceback
 from modules.fuel_management import FuelManagement
 from database.connection import db
+from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,10 @@ class FuelManagementUI(tk.Toplevel):
         self.notebook.add(self.history_tab, text="📋 سجل العمليات")
         self.create_history_tab()
 
+        self.energy_account_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.energy_account_tab, text="💰 حسابات الطاقة")
+        self.create_energy_account_tab()
+
     # -------------------- تبويب ضبط العدادات --------------------
     def create_setup_tab(self):
         main_canvas = tk.Canvas(self.setup_tab, highlightthickness=0, bg=self.colors['bg'])
@@ -211,6 +216,203 @@ class FuelManagementUI(tk.Toplevel):
                 messagebox.showerror("خطأ", res['error'])
         btn = self._add_styled_button(main_frame, "حفظ", save, self.colors['success'])
         btn.grid(row=3, columnspan=2, pady=15)
+
+    
+
+    
+
+   
+
+   
+
+    # -------------------- عدادات الطاقة --------------------
+    def create_energy_meters_ui(self, parent):
+        btn_frame = tk.Frame(parent, bg=self.colors['bg'])
+        btn_frame.pack(fill='x', pady=5)
+        self._add_styled_button(btn_frame, "➕ إضافة", self.add_energy_meter, self.colors['success']).pack(side='left', padx=5)
+        self._add_styled_button(btn_frame, "✏️ تعديل", self.edit_energy_meter, self.colors['warning']).pack(side='left', padx=5)
+        self._add_styled_button(btn_frame, "🗑️ حذف", self.delete_energy_meter, self.colors['danger']).pack(side='left', padx=5)
+        
+        tree_frame = tk.Frame(parent, bg=self.colors['bg'])
+        tree_frame.pack(fill='both', expand=True, pady=5)
+        
+        tree_canvas = tk.Canvas(tree_frame, highlightthickness=0, bg=self.colors['bg'])
+        v_scroll = ttk.Scrollbar(tree_frame, orient='vertical', command=tree_canvas.yview)
+        h_scroll = ttk.Scrollbar(tree_frame, orient='horizontal', command=tree_canvas.xview)
+        tree_canvas.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+        v_scroll.pack(side='right', fill='y')
+        h_scroll.pack(side='bottom', fill='x')
+        tree_canvas.pack(side='left', fill='both', expand=True)
+        
+        scrollable_frame = tk.Frame(tree_canvas, bg=self.colors['bg'])
+        tree_canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+        scrollable_frame.bind('<Configure>', lambda e: tree_canvas.configure(scrollregion=tree_canvas.bbox('all')))
+        
+        columns = ('id', 'name', 'code', 'notes')
+        self.energy_tree = ttk.Treeview(scrollable_frame, columns=columns, show='headings', height=12)
+        self.energy_tree.heading('id', text='ID')
+        self.energy_tree.heading('name', text='الاسم')
+        self.energy_tree.heading('code', text='الكود')
+        self.energy_tree.heading('notes', text='ملاحظات')
+        self.energy_tree.column('id', width=50, anchor='center')
+        self.energy_tree.column('name', width=180)
+        self.energy_tree.column('code', width=120)
+        self.energy_tree.column('notes', width=200)
+        self.energy_tree.pack(fill='both', expand=True)
+        self._add_zebra_striping(self.energy_tree)
+
+    def add_energy_meter(self):
+        main_frame = self._create_dialog("إضافة عداد طاقة")
+        tk.Label(main_frame, text="الاسم:*", font=('Segoe UI', 10), bg='white', fg='black').grid(row=0, column=0, padx=10, pady=10, sticky='e')
+        name_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
+        name_entry.grid(row=0, column=1, padx=10, pady=10)
+        tk.Label(main_frame, text="الكود:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=1, column=0, padx=10, pady=10, sticky='e')
+        code_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
+        code_entry.grid(row=1, column=1, padx=10, pady=10)
+        tk.Label(main_frame, text="ملاحظات:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=2, column=0, padx=10, pady=10, sticky='e')
+        notes_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
+        notes_entry.grid(row=2, column=1, padx=10, pady=10)
+        # ✅ حقل سعر التحويل الجديد
+        tk.Label(main_frame, text="سعر الكيلو واط (ل.س):", font=('Segoe UI', 10), bg='white', fg='black').grid(row=3, column=0, padx=10, pady=10, sticky='e')
+        rate_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
+        rate_entry.insert(0, "0")
+        rate_entry.grid(row=3, column=1, padx=10, pady=10)
+
+        def save():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("خطأ", "الاسم مطلوب")
+                return
+            try:
+                rate = float(rate_entry.get())
+            except ValueError:
+                messagebox.showerror("خطأ", "سعر التحويل غير صحيح")
+                return
+            data = {
+                'name': name,
+                'code': code_entry.get().strip(),
+                'notes': notes_entry.get().strip(),
+                'conversion_rate': rate
+            }
+            res = FuelManagement.add_energy_meter(data)
+            if res['success']:
+                messagebox.showinfo("نجاح", "تمت الإضافة")
+                main_frame.master.destroy()
+                self.load_energy_meters()
+            else:
+                messagebox.showerror("خطأ", res['error'])
+        btn = self._add_styled_button(main_frame, "حفظ", save, self.colors['success'])
+        btn.grid(row=4, columnspan=2, pady=15)
+
+    def edit_energy_meter(self):
+        selected = self.energy_tree.selection()
+        if not selected:
+            messagebox.showwarning("تحذير", "اختر عداداً أولاً")
+            return
+        values = self.energy_tree.item(selected[0])['values']
+        mid = values[0]
+        # ✅ جلب سعر التحويل الحالي من قاعدة البيانات
+        with db.get_cursor() as cursor:
+            cursor.execute("SELECT conversion_rate FROM energy_meters WHERE id=%s", (mid,))
+            row = cursor.fetchone()
+            old_rate = row['conversion_rate'] if row else 0.0
+
+        main_frame = self._create_dialog("تعديل عداد طاقة")
+        tk.Label(main_frame, text="الاسم:*", font=('Segoe UI', 10), bg='white', fg='black').grid(row=0, column=0, padx=10, pady=10, sticky='e')
+        name_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10))
+        name_entry.insert(0, values[1])
+        name_entry.grid(row=0, column=1, padx=10, pady=10)
+        tk.Label(main_frame, text="الكود:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=1, column=0, padx=10, pady=10, sticky='e')
+        code_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10))
+        code_entry.insert(0, values[2])
+        code_entry.grid(row=1, column=1, padx=10, pady=10)
+        tk.Label(main_frame, text="ملاحظات:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=2, column=0, padx=10, pady=10, sticky='e')
+        notes_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10))
+        notes_entry.insert(0, values[3])
+        notes_entry.grid(row=2, column=1, padx=10, pady=10)
+        # ✅ حقل تعديل السعر
+        tk.Label(main_frame, text="سعر الكيلو واط (ل.س):", font=('Segoe UI', 10), bg='white', fg='black').grid(row=3, column=0, padx=10, pady=10, sticky='e')
+        rate_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10))
+        rate_entry.insert(0, str(old_rate))
+        rate_entry.grid(row=3, column=1, padx=10, pady=10)
+
+        def save():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("خطأ", "الاسم مطلوب")
+                return
+            try:
+                rate = float(rate_entry.get())
+            except ValueError:
+                messagebox.showerror("خطأ", "سعر التحويل غير صحيح")
+                return
+            data = {
+                'name': name,
+                'code': code_entry.get().strip(),
+                'notes': notes_entry.get().strip(),
+                'conversion_rate': rate,
+                'current_balance': None  # لا نغير الرصيد
+            }
+            res = FuelManagement.update_energy_meter(mid, data)
+            if res['success']:
+                messagebox.showinfo("نجاح", "تم التحديث")
+                main_frame.master.destroy()
+                self.load_energy_meters()
+            else:
+                messagebox.showerror("خطأ", res['error'])
+        btn = self._add_styled_button(main_frame, "حفظ", save, self.colors['warning'])
+        btn.grid(row=4, columnspan=2, pady=15)
+
+    def delete_energy_meter(self):
+        selected = self.energy_tree.selection()
+        if not selected:
+            messagebox.showwarning("تحذير", "اختر عداداً أولاً")
+            return
+        mid = self.energy_tree.item(selected[0])['values'][0]
+        if messagebox.askyesno("تأكيد", "هل تريد حذف هذا العداد؟"):
+            res = FuelManagement.delete_energy_meter(mid)
+            if res['success']:
+                messagebox.showinfo("نجاح", "تم الحذف")
+                self.load_energy_meters()
+            else:
+                messagebox.showerror("خطأ", res['error'])
+
+
+
+    def add_purchase(self):
+        try:
+            data = {
+                'purchase_date': self.purchase_date.get(),
+                'quantity_liters': float(self.purchase_qty.get()),
+                'price_per_liter': float(self.purchase_price.get()),
+                'notes': self.purchase_notes.get()
+            }
+            # ✅ تمرير معرف المستخدم لتسجيل العملية
+            res = FuelManagement.add_purchase(data, self.user_data.get('id'))
+            if res['success']:
+                messagebox.showinfo("نجاح", "تم تسجيل الشراء (وأضيف للمصاريف)")
+                self.update_warehouse_stock()
+                self.load_purchases()
+                self.purchase_qty.delete(0, tk.END)
+                self.purchase_price.delete(0, tk.END)
+                # ✅ تحديث واجهة دفتر اليومية إن كانت مفتوحة
+                self._refresh_daily_cash_ui()
+            else:
+                messagebox.showerror("خطأ", res['error'])
+        except ValueError:
+            messagebox.showerror("خطأ", "الكمية والسعر يجب أن يكونا أرقاماً")
+
+    def _refresh_daily_cash_ui(self):
+        """تحديث واجهة دفتر اليومية إن كانت مفتوحة"""
+        for widget in self.parent.winfo_children():
+            if widget.__class__.__name__ == 'DailyCashUI':
+                widget.load_current()
+                break
+
+
+
+
+
 
     def edit_generator_meter(self):
         selected = self.gen_tree.selection()
@@ -421,120 +623,14 @@ class FuelManagementUI(tk.Toplevel):
             else:
                 messagebox.showerror("خطأ", res['error'])
 
-    # -------------------- عدادات الطاقة --------------------
-    def create_energy_meters_ui(self, parent):
-        btn_frame = tk.Frame(parent, bg=self.colors['bg'])
-        btn_frame.pack(fill='x', pady=5)
-        self._add_styled_button(btn_frame, "➕ إضافة", self.add_energy_meter, self.colors['success']).pack(side='left', padx=5)
-        self._add_styled_button(btn_frame, "✏️ تعديل", self.edit_energy_meter, self.colors['warning']).pack(side='left', padx=5)
-        self._add_styled_button(btn_frame, "🗑️ حذف", self.delete_energy_meter, self.colors['danger']).pack(side='left', padx=5)
-        
-        tree_frame = tk.Frame(parent, bg=self.colors['bg'])
-        tree_frame.pack(fill='both', expand=True, pady=5)
-        
-        tree_canvas = tk.Canvas(tree_frame, highlightthickness=0, bg=self.colors['bg'])
-        v_scroll = ttk.Scrollbar(tree_frame, orient='vertical', command=tree_canvas.yview)
-        h_scroll = ttk.Scrollbar(tree_frame, orient='horizontal', command=tree_canvas.xview)
-        tree_canvas.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
-        v_scroll.pack(side='right', fill='y')
-        h_scroll.pack(side='bottom', fill='x')
-        tree_canvas.pack(side='left', fill='both', expand=True)
-        
-        scrollable_frame = tk.Frame(tree_canvas, bg=self.colors['bg'])
-        tree_canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
-        scrollable_frame.bind('<Configure>', lambda e: tree_canvas.configure(scrollregion=tree_canvas.bbox('all')))
-        
-        columns = ('id', 'name', 'code', 'notes')
-        self.energy_tree = ttk.Treeview(scrollable_frame, columns=columns, show='headings', height=12)
-        self.energy_tree.heading('id', text='ID')
-        self.energy_tree.heading('name', text='الاسم')
-        self.energy_tree.heading('code', text='الكود')
-        self.energy_tree.heading('notes', text='ملاحظات')
-        self.energy_tree.column('id', width=50, anchor='center')
-        self.energy_tree.column('name', width=180)
-        self.energy_tree.column('code', width=120)
-        self.energy_tree.column('notes', width=200)
-        self.energy_tree.pack(fill='both', expand=True)
-        self._add_zebra_striping(self.energy_tree)
 
-    def add_energy_meter(self):
-        main_frame = self._create_dialog("إضافة عداد طاقة")
-        tk.Label(main_frame, text="الاسم:*", font=('Segoe UI', 10), bg='white', fg='black').grid(row=0, column=0, padx=10, pady=10, sticky='e')
-        name_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
-        name_entry.grid(row=0, column=1, padx=10, pady=10)
-        tk.Label(main_frame, text="الكود:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=1, column=0, padx=10, pady=10, sticky='e')
-        code_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
-        code_entry.grid(row=1, column=1, padx=10, pady=10)
-        tk.Label(main_frame, text="ملاحظات:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=2, column=0, padx=10, pady=10, sticky='e')
-        notes_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
-        notes_entry.grid(row=2, column=1, padx=10, pady=10)
-        
-        def save():
-            name = name_entry.get().strip()
-            if not name:
-                messagebox.showerror("خطأ", "الاسم مطلوب")
-                return
-            data = {'name': name, 'code': code_entry.get().strip(), 'notes': notes_entry.get().strip()}
-            res = FuelManagement.add_energy_meter(data)
-            if res['success']:
-                messagebox.showinfo("نجاح", "تمت الإضافة")
-                main_frame.master.destroy()
-                self.load_energy_meters()
-            else:
-                messagebox.showerror("خطأ", res['error'])
-        btn = self._add_styled_button(main_frame, "حفظ", save, self.colors['success'])
-        btn.grid(row=3, columnspan=2, pady=15)
 
-    def edit_energy_meter(self):
-        selected = self.energy_tree.selection()
-        if not selected:
-            messagebox.showwarning("تحذير", "اختر عداداً أولاً")
-            return
-        values = self.energy_tree.item(selected[0])['values']
-        mid = values[0]
-        main_frame = self._create_dialog("تعديل عداد طاقة")
-        tk.Label(main_frame, text="الاسم:*", font=('Segoe UI', 10), bg='white', fg='black').grid(row=0, column=0, padx=10, pady=10, sticky='e')
-        name_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
-        name_entry.insert(0, values[1])
-        name_entry.grid(row=0, column=1, padx=10, pady=10)
-        tk.Label(main_frame, text="الكود:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=1, column=0, padx=10, pady=10, sticky='e')
-        code_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
-        code_entry.insert(0, values[2])
-        code_entry.grid(row=1, column=1, padx=10, pady=10)
-        tk.Label(main_frame, text="ملاحظات:", font=('Segoe UI', 10), bg='white', fg='black').grid(row=2, column=0, padx=10, pady=10, sticky='e')
-        notes_entry = tk.Entry(main_frame, width=35, font=('Segoe UI', 10), relief='solid', borderwidth=1, bg='white', fg='black')
-        notes_entry.insert(0, values[3])
-        notes_entry.grid(row=2, column=1, padx=10, pady=10)
-        
-        def save():
-            name = name_entry.get().strip()
-            if not name:
-                messagebox.showerror("خطأ", "الاسم مطلوب")
-                return
-            data = {'name': name, 'code': code_entry.get().strip(), 'notes': notes_entry.get().strip()}
-            res = FuelManagement.update_energy_meter(mid, data)
-            if res['success']:
-                messagebox.showinfo("نجاح", "تم التحديث")
-                main_frame.master.destroy()
-                self.load_energy_meters()
-            else:
-                messagebox.showerror("خطأ", res['error'])
-        btn = self._add_styled_button(main_frame, "حفظ", save, self.colors['warning'])
-        btn.grid(row=3, columnspan=2, pady=15)
 
-    def delete_energy_meter(self):
-        selected = self.energy_tree.selection()
-        if not selected:
-            messagebox.showwarning("تحذير", "اختر عداداً أولاً")
-            return
-        mid = self.energy_tree.item(selected[0])['values'][0]
-        if messagebox.askyesno("تأكيد", "هل تريد حذف هذا العداد؟"):
-            res = FuelManagement.delete_energy_meter(mid)
-            if res['success']:
-                messagebox.showinfo("نجاح", "تم الحذف")
-                self.load_energy_meters()
-            else:
-                messagebox.showerror("خطأ", res['error'])
+
+
+
+
+
 
     # -------------------- خزانات المازوت --------------------
     def create_tanks_ui(self, parent):
@@ -727,27 +823,7 @@ class FuelManagementUI(tk.Toplevel):
         
         self._add_styled_button(row, "تنزيل مازوت", self.add_transfer, self.colors['warning'], padx=10).pack(side='left', padx=10)
 
-    def add_purchase(self):
-        try:
-            data = {
-                'purchase_date': self.purchase_date.get(),
-                'quantity_liters': float(self.purchase_qty.get()),
-                'price_per_liter': float(self.purchase_price.get()),
-                'notes': self.purchase_notes.get()
-            }
-            res = FuelManagement.add_purchase(data)
-            if res['success']:
-                messagebox.showinfo("نجاح", "تم تسجيل الشراء")
-                self.update_warehouse_stock()
-                self.load_purchases()
-                self.purchase_qty.delete(0, tk.END)
-                self.purchase_price.delete(0, tk.END)
-            else:
-                messagebox.showerror("خطأ", res['error'])
-        except ValueError:
-            messagebox.showerror("خطأ", "الكمية والسعر يجب أن يكونا أرقاماً")
-        except Exception as e:
-            messagebox.showerror("خطأ", f"حدث خطأ: {str(e)}")
+
 
     def add_transfer(self):
         try:
@@ -1839,3 +1915,102 @@ class FuelManagementUI(tk.Toplevel):
             return float(cleaned)
         except ValueError:
             return 0.0
+
+    def create_energy_account_tab(self):
+        frame = tk.Frame(self.energy_account_tab, bg=self.colors['bg'])
+        frame.pack(fill='both', expand=True, padx=15, pady=15)
+
+        top = tk.Frame(frame, bg=self.colors['bg'])
+        top.pack(fill='x', pady=5)
+        tk.Label(top, text="اختر عداد:", font=('Segoe UI', 11), bg=self.colors['bg']).pack(side='left', padx=5)
+        self.acc_meter_var = tk.StringVar()
+        self.acc_meter_combo = ttk.Combobox(top, textvariable=self.acc_meter_var, state='readonly', width=25, font=('Segoe UI', 10))
+        self.acc_meter_combo.pack(side='left', padx=5)
+        self._add_styled_button(top, "عرض الكشف", self.show_energy_account, self.colors['primary']).pack(side='left', padx=10)
+
+        # معلومات الحساب
+        info_frame = tk.LabelFrame(frame, text="معلومات الحساب", font=('Segoe UI', 11, 'bold'), bg=self.colors['bg'], fg=self.colors['dark'])
+        info_frame.pack(fill='x', pady=10)
+        self.acc_info_label = tk.Label(info_frame, text="", font=('Segoe UI', 10), bg=self.colors['bg'], justify='right')
+        self.acc_info_label.pack(anchor='e', padx=10, pady=5)
+
+        # جدول الحركات
+        tbl_frame = tk.LabelFrame(frame, text="سجل الحركات", font=('Segoe UI', 11, 'bold'), bg=self.colors['bg'], fg=self.colors['dark'])
+        tbl_frame.pack(fill='both', expand=True, pady=10)
+
+        cols = ('id', 'date', 'type', 'amount', 'balance_before', 'balance_after', 'notes')
+        self.acc_tree = ttk.Treeview(tbl_frame, columns=cols, show='headings', height=12)
+        self.acc_tree.heading('id', text='ID')
+        self.acc_tree.heading('date', text='التاريخ')
+        self.acc_tree.heading('type', text='النوع')
+        self.acc_tree.heading('amount', text='المبلغ')
+        self.acc_tree.heading('balance_before', text='قبل')
+        self.acc_tree.heading('balance_after', text='بعد')
+        self.acc_tree.heading('notes', text='ملاحظات')
+        self.acc_tree.column('id', width=50, anchor='center')
+        self.acc_tree.column('date', width=130, anchor='center')
+        self.acc_tree.column('type', width=80, anchor='center')
+        self.acc_tree.column('amount', width=100, anchor='center')
+        self.acc_tree.column('balance_before', width=100, anchor='center')
+        self.acc_tree.column('balance_after', width=100, anchor='center')
+        self.acc_tree.column('notes', width=200)
+        self.acc_tree.pack(side='left', fill='both', expand=True)
+        scroll = ttk.Scrollbar(tbl_frame, orient='vertical', command=self.acc_tree.yview)
+        self.acc_tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side='right', fill='y')
+        self._add_zebra_striping(self.acc_tree)
+
+        # تحميل قائمة العدادات
+        self.refresh_account_meter_combo()
+
+    def refresh_account_meter_combo(self):
+        meters = FuelManagement.get_energy_meters(active_only=False)
+        self.acc_meter_combo['values'] = [f"{m['id']} - {m['name']}" for m in meters]
+        if meters:
+            self.acc_meter_var.set(f"{meters[0]['id']} - {meters[0]['name']}")
+
+    def show_energy_account(self):
+        sel = self.acc_meter_var.get()
+        if not sel:
+            print("⚠️ لم يتم اختيار عداد")
+            return
+        meter_id = int(sel.split(' - ')[0])
+        print(f"✅ تم اختيار عداد ID: {meter_id}")
+        
+        with db.get_cursor() as cursor:
+            cursor.execute("SELECT * FROM energy_meters WHERE id = %s", (meter_id,))
+            meter = cursor.fetchone()
+            if not meter:
+                print("❌ العداد غير موجود في قاعدة البيانات")
+                messagebox.showerror("خطأ", "العداد غير موجود")
+                return
+            self.acc_info_label.config(
+                text=f"العداد: {meter['name']} | سعر الكيلو: {meter['conversion_rate']} ل.س | الرصيد الحالي: {meter['current_balance']:,.0f} ل.س"
+            )
+
+        # جلب الحركات
+        trans = FuelManagement.get_energy_account_statement(meter_id)
+        print(f"📊 عدد الحركات المسترجعة: {len(trans)}")
+        if trans:
+            print("أول حركة:", trans[0])
+        else:
+            print("لا توجد حركات مالية لهذا العداد")
+
+        # تنظيف الجدول
+        for row in self.acc_tree.get_children():
+            self.acc_tree.delete(row)
+        
+        # إدراج الحركات
+        for t in trans:
+            ttype = {'production': 'إنتاج', 'payment': 'سحب', 'adjustment': 'تسوية'}.get(t['transaction_type'], t['transaction_type'])
+            self.acc_tree.insert('', 'end', values=(
+                t['id'],
+                t['transaction_date'].strftime('%Y-%m-%d %H:%M') if t['transaction_date'] else '',
+                ttype,
+                f"{t['amount']:,.0f}",
+                f"{t['balance_before']:,.0f}",
+                f"{t['balance_after']:,.0f}",
+                t['notes'] or ''
+            ))
+        if not trans:
+            messagebox.showinfo("تنبيه", "لا توجد حركات مالية مسجلة لهذا العداد بعد.\nقم بإضافة قراءات طاقة أولاً.")

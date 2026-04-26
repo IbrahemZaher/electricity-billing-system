@@ -10,7 +10,16 @@ logger = logging.getLogger(__name__)
 class Models:
     def __init__(self):
         self.create_tables()
-        self.update_customers_table()  # أضف هذه السطر
+        self.update_profit_distribution_table()
+        self.update_energy_tables()
+        self.update_customers_table()
+        self.update_daily_expenses_table()   # <--- أضف هذا السطر هنا
+        self.update_daily_cash_add_energy_profits()   # <--- أضف هذا السطر
+        self.update_energy_meters_for_accounts()
+        self.create_energy_account_tables()
+        self.update_daily_cash_add_fuel_column()
+        self.update_energy_meters_for_accounts()
+        self.create_energy_account_tables()                    
 
     def update_invoices_table(self):
         """تحديث جدول الفواتير بإضافة الأعمدة المفقودة"""
@@ -633,6 +642,165 @@ class Models:
                 UNIQUE(reading_date, meter_id)
             )
             """,
+
+            # ✅ جدول مالكي الشركة (لأرباح المدراء) - جديد مع قيد UNIQUE
+            """
+            CREATE TABLE IF NOT EXISTS company_owners (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+
+            # ... بعد الجداول الموجودة وقبل `# إنشاء الفهارس`
+
+            # جداول دفتر اليومية المتكامل - معدلة (profit_distribution تستخدم owner_id)
+            """
+            CREATE TABLE IF NOT EXISTS expense_categories (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(50) UNIQUE NOT NULL,
+                arabic_name VARCHAR(100) NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS daily_expenses (
+                id SERIAL PRIMARY KEY,
+                daily_cash_id INTEGER NOT NULL,
+                category_id INTEGER REFERENCES expense_categories(id),
+                amount DECIMAL(15,2) NOT NULL,
+                note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS profit_distribution (
+                id SERIAL PRIMARY KEY,
+                daily_cash_id INTEGER NOT NULL,
+                owner_id INTEGER NOT NULL REFERENCES company_owners(id) ON DELETE RESTRICT,
+                amount DECIMAL(15,2) NOT NULL,
+                profit_type VARCHAR(20) DEFAULT 'manager',
+                note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS daily_cash (
+                id SERIAL PRIMARY KEY,
+                cash_date DATE NOT NULL UNIQUE,
+                opening_balance DECIMAL(15,2) NOT NULL,
+                total_collections DECIMAL(15,2) DEFAULT 0,
+                total_expenses DECIMAL(15,2) DEFAULT 0,
+                total_profits DECIMAL(15,2) DEFAULT 0,
+                closing_balance DECIMAL(15,2) NOT NULL,
+                status VARCHAR(20) DEFAULT 'draft',
+                created_by INTEGER REFERENCES users(id),
+                updated_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS daily_collections_detail (
+                id SERIAL PRIMARY KEY,
+                daily_cash_id INTEGER NOT NULL,
+                collector_id INTEGER REFERENCES users(id),
+                collector_name VARCHAR(100),
+                total_collected DECIMAL(15,2) NOT NULL,
+                invoice_count INTEGER DEFAULT 0
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS daily_cash_audit (
+                id SERIAL PRIMARY KEY,
+                daily_cash_id INTEGER NOT NULL,
+                action_type VARCHAR(20),
+                old_data JSONB,
+                new_data JSONB,
+                changed_by INTEGER REFERENCES users(id),
+                changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+
+            CREATE TABLE IF NOT EXISTS weekly_cash_inventory (
+                id SERIAL PRIMARY KEY,
+                week_start DATE NOT NULL,
+                week_end DATE NOT NULL,
+                total_opening DECIMAL(15,2),
+                total_collections DECIMAL(15,2),
+                total_expenses DECIMAL(15,2),
+                total_repair_expansion DECIMAL(15,2) DEFAULT 0,
+                total_energy_profits DECIMAL(15,2) DEFAULT 0,
+                total_fuel DECIMAL(15,2) DEFAULT 0,
+                total_profits DECIMAL(15,2),
+                total_closing DECIMAL(15,2),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            # جدول الموظفين
+            """
+            CREATE TABLE IF NOT EXISTS employees (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                base_salary DECIMAL(15,2) NOT NULL DEFAULT 0,
+                hire_date DATE,
+                notes TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+                        # جدول الرواتب الأساسية للموظفين
+            """
+            CREATE TABLE IF NOT EXISTS employee_salaries (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                base_salary DECIMAL(15,2) NOT NULL,
+                effective_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, effective_date)
+            )
+            """,
+
+            # جدول السلف
+            """
+            CREATE TABLE IF NOT EXISTS employee_advances (
+                id SERIAL PRIMARY KEY,
+                employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                amount DECIMAL(15,2) NOT NULL,
+                advance_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                reason TEXT,
+                repaid BOOLEAN DEFAULT FALSE,
+                repaid_date DATE,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+
+            # جدول دفعات الرواتب (لربطها مع دفتر اليومية)
+            """
+            CREATE TABLE IF NOT EXISTS salary_payments (
+                id SERIAL PRIMARY KEY,
+                employee_id INTEGER NOT NULL REFERENCES employees(id),
+                payment_date DATE NOT NULL,
+                base_salary DECIMAL(15,2) NOT NULL,
+                total_advances DECIMAL(15,2) DEFAULT 0,
+                net_salary DECIMAL(15,2) NOT NULL,
+                daily_cash_id INTEGER REFERENCES daily_cash(id),
+                notes TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+
+            # ... تابع إنشاء الفهارس            
         ]
         
         try:
@@ -660,6 +828,12 @@ class Models:
             self.update_users_table()
             # تحديث جدول الزبائن
             self.update_customers_table()
+            self.update_daily_expenses_table()   # <--- أضف هنا أيضاً
+            self.update_daily_cash_add_energy_profits()   # <--- أضف هنا
+            self.update_profit_distribution_add_user_id()          # <-- أضف
+            self.update_energy_profit_distribution_add_user_id()   # <-- أضف
+            self.update_weekly_cash_inventory_table()   # <-- أضف هنا
+
             # إنشاء فهارس إضافية لجدول التاريخ بعد التحديث
             self.create_history_indexes()
             # تصحيح القيم النصية في الأعمدة الرقمية
@@ -724,6 +898,24 @@ class Models:
             'admin',
             '{"all": true}'
         ))
+        # داخل seed_initial_data
+        # إضافة تصنيفات المصروفات
+        expense_cats = [
+            ('food', 'شراب وطعام'),
+            ('salaries', 'رواتب'),
+            ('advances', 'سلف'),
+            ('office', 'مصاريف مكتب وإدارية'),
+            ('repair', 'إصلاح'),
+            ('expansion', 'توسعة'),
+            ('energy', 'طاقة'),
+            ('fuel', 'مازوت')
+        ]
+        for code, name in expense_cats:
+            cursor.execute("""
+                INSERT INTO expense_categories (name, arabic_name)
+                VALUES (%s, %s)
+                ON CONFLICT (name) DO NOTHING
+            """, (code, name))        
         
         # إضافة الصلاحيات إلى الكتالوج
         permissions_data = [
@@ -840,7 +1032,7 @@ class Models:
                         updated_at = CURRENT_TIMESTAMP
                 """, (role, permission_key, True))
         
-        # إضافة الإعدادات الافتراضية
+        # ✅ إضافة الإعدادات الافتراضية (بما فيها initial_cash_balance)
         settings = [
             ('printer_ip', '10.10.0.4', 'عنوان IP للطابعة'),
             ('printer_port', '9100', 'منفذ الطابعة'),
@@ -851,7 +1043,8 @@ class Models:
             ('receipt_header', 'شركة الريان للطاقة الكهربائية', 'عنوان الفاتورة الرئيسي'),
             ('receipt_subheader', 'مدينة عريمة - شارع البريد', 'عنوان الفاتورة الفرعي'),
             ('vat_percentage', '0', 'نسبة الضريبة المضافة'),
-            ('vat_number', '', 'الرقم الضريبي')
+            ('vat_number', '', 'الرقم الضريبي'),
+            ('initial_cash_balance', '0', 'الرصيد الافتتاحي لأول يوم في النظام'),  # ✅ جديد
         ]
         
         for key, value, description in settings:
@@ -860,6 +1053,18 @@ class Models:
                 VALUES (%s, %s, %s)
                 ON CONFLICT (key) DO NOTHING
             """, (key, value, description))
+
+        # ✅ إضافة المدراء الافتراضيين - مع منع التكرار (لن يتم إدراجهم إذا تم حذفهم لاحقاً)
+        # باستخدام ON CONFLICT DO NOTHING، لكن إذا حذف المدير يدوياً، لن يعود تلقائياً.
+        # إذا أردت منع عودتهم نهائياً بعد الحذف، يمكن إضافة شرط EXISTS.
+        # لكن الأبسط: نضيفهم فقط إذا لم يكونوا موجودين من قبل.
+        #owners = ['أحمد كساب', 'محمد كساب', 'ياسر كساب']
+        #  for owner in owners:
+        #   #    cursor.execute("""
+        #        INSERT INTO company_owners (name)
+        #   #        SELECT %s
+        #   #        WHERE NOT EXISTS (SELECT 1 FROM company_owners WHERE name = %s)
+        #    """, (owner, owner))
 
     def update_users_table(self):
         """تحديث جدول المستخدمين بإضافة الأعمدة المفقودة وتحديث قيم الدور"""
@@ -1361,7 +1566,6 @@ class Models:
             # يمكنك استدعاء نفس SQL أعلاه هنا، لكن الأسهل تشغيلها من create_tables
             pass            
 
-
     def update_customers_table(self):
         """تحديث جدول customers بإضافة الحقول الجديدة"""
         try:
@@ -1410,6 +1614,527 @@ class Models:
                 
         except Exception as e:
             logger.error(f"خطأ في تحديث جدول customers: {e}")
+
+    def update_profit_distribution_table(self):
+        """تحديث جدول profit_distribution إلى الهيكل الصحيح (باستخدام owner_id وإضافة profit_type)"""
+        try:
+            with db.get_cursor() as cursor:
+                # 1. التحقق من وجود الجدول أصلاً
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'profit_distribution'
+                    )
+                """)
+                if not cursor.fetchone()['exists']:
+                    logger.info("جدول profit_distribution غير موجود، سيتم إنشاؤه لاحقاً")
+                    return
+                
+                # 2. التحقق من وجود عمود owner_id
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'profit_distribution' 
+                    AND column_name = 'owner_id'
+                """)
+                has_owner_id = cursor.fetchone() is not None
+                
+                # 3. التحقق من وجود عمود manager_name (القديم)
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'profit_distribution' 
+                    AND column_name = 'manager_name'
+                """)
+                has_manager_name = cursor.fetchone() is not None
+                
+                # 4. إضافة عمود profit_type إذا لم يكن موجوداً
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'profit_distribution' 
+                    AND column_name = 'profit_type'
+                """)
+                has_profit_type = cursor.fetchone() is not None
+                
+                if not has_owner_id:
+                    # إضافة عمود owner_id
+                    cursor.execute("ALTER TABLE profit_distribution ADD COLUMN owner_id INTEGER")
+                    logger.info("تم إضافة العمود owner_id إلى profit_distribution")
+                    
+                    # إذا كان هناك عمود manager_name، نحاول تحويل البيانات
+                    if has_manager_name:
+                        # تعيين owner_id من company_owners بناءً على manager_name
+                        cursor.execute("""
+                            UPDATE profit_distribution p
+                            SET owner_id = co.id
+                            FROM company_owners co
+                            WHERE p.manager_name = co.name
+                        """)
+                        logger.info("تم تحويل manager_name إلى owner_id")
+                        
+                        # حذف عمود manager_name بعد التحويل
+                        cursor.execute("ALTER TABLE profit_distribution DROP COLUMN manager_name")
+                        logger.info("تم حذف العمود manager_name")
+                    else:
+                        # إذا لم يكن هناك manager_name، قد تكون البيانات غير صالحة
+                        # نحذف جميع السجلات التي ليس لها owner_id
+                        cursor.execute("DELETE FROM profit_distribution WHERE owner_id IS NULL")
+                        logger.warning("تم حذف سجلات profit_distribution بدون owner_id")
+                else:
+                    # إذا كان owner_id موجوداً، نتأكد من عدم وجود manager_name
+                    if has_manager_name:
+                        cursor.execute("ALTER TABLE profit_distribution DROP COLUMN manager_name")
+                        logger.info("تم حذف العمود manager_name الزائد")
+                
+                # إضافة عمود profit_type إذا لم يكن موجوداً
+                if not has_profit_type:
+                    cursor.execute("ALTER TABLE profit_distribution ADD COLUMN profit_type VARCHAR(20) DEFAULT 'manager'")
+                    logger.info("تم إضافة العمود profit_type إلى profit_distribution")
+                
+                # 5. إضافة قيد المفتاح الخارجي إذا لم يكن موجوداً
+                cursor.execute("""
+                    SELECT 1 FROM information_schema.table_constraints 
+                    WHERE constraint_name = 'fk_profit_distribution_owner'
+                    AND table_name = 'profit_distribution'
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("""
+                        ALTER TABLE profit_distribution
+                        ADD CONSTRAINT fk_profit_distribution_owner
+                        FOREIGN KEY (owner_id) REFERENCES company_owners(id) ON DELETE RESTRICT
+                    """)
+                    logger.info("تم إضافة قيد المفتاح الخارجي لـ profit_distribution")
+                
+                # 6. تنظيف أي سجلات قديمة لا تشير إلى owner_id موجود
+                cursor.execute("""
+                    DELETE FROM profit_distribution
+                    WHERE owner_id IS NOT NULL 
+                    AND NOT EXISTS (SELECT 1 FROM company_owners WHERE id = owner_id)
+                """)
+                if cursor.rowcount > 0:
+                    logger.info(f"تم حذف {cursor.rowcount} سجل(ات) profit_distribution بمرجع غير صالح")
+                    
+        except Exception as e:
+            logger.error(f"خطأ في تحديث جدول profit_distribution: {e}")
+
+
+    def update_energy_tables(self):
+        """إنشاء جدول توزيع أرباح الطاقة المرتبط بـ energy_meters، مع تنظيف البنية القديمة"""
+        try:
+            with db.get_cursor() as cursor:
+                # 1. التحقق من وجود الجدول القديم ووجود عمود meter_id
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'energy_profit_distribution'
+                    )
+                """)
+                table_exists = cursor.fetchone()['exists']
+                
+                if table_exists:
+                    # التحقق من وجود عمود meter_id
+                    cursor.execute("""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'energy_profit_distribution' 
+                        AND column_name = 'meter_id'
+                    """)
+                    has_meter_id = cursor.fetchone() is not None
+                    
+                    if not has_meter_id:
+                        # الجدول موجود بهيكل قديم (يحتوي على owner_id مثلاً)
+                        logger.warning("جدول energy_profit_distribution قديم (بدون meter_id). سيتم حذفه وإعادة إنشائه.")
+                        cursor.execute("DROP TABLE IF EXISTS energy_profit_distribution CASCADE")
+                        table_exists = False
+                
+                # 2. إنشاء الجدول إذا لم يكن موجوداً (أو بعد حذفه)
+                if not table_exists:
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS energy_profit_distribution (
+                            id SERIAL PRIMARY KEY,
+                            daily_cash_id INTEGER NOT NULL,
+                            meter_id INTEGER NOT NULL REFERENCES energy_meters(id) ON DELETE RESTRICT,
+                            amount DECIMAL(15,2) NOT NULL,
+                            note TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    logger.info("تم إنشاء جدول energy_profit_distribution (مرتبط بـ energy_meters)")
+                
+                # 3. حذف جدول energy_owners إذا كان موجوداً (تنظيف)
+                cursor.execute("DROP TABLE IF EXISTS energy_owners CASCADE")
+                logger.info("تم حذف جدول energy_owners (إن وجد)")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحديث جداول الطاقة: {e}")
+
+
+    #def cleanup_old_energy_tables(self):
+     #   """تنظيف الجداول القديمة المتعلقة بالطاقة"""
+      #  try:
+       #     with db.get_cursor() as cursor:
+        #        cursor.execute("DROP TABLE IF EXISTS energy_owners CASCADE")
+         #       cursor.execute("DROP TABLE IF EXISTS energy_profit_distribution_old CASCADE")
+          #      logger.info("تم تنظيف الجداول القديمة للطاقة")
+        #except Exception as e:
+         #   logger.error(f"خطأ في تنظيف الجداول: {e}")
+
+
+    # ========== دوال الصندوق اليومي والجرد الأسبوعي الجديدة ==========
+
+    def recalculate_daily_cash(self, target_date):
+        """إعادة حساب الصندوق اليومي بشكل صحيح (تجنب الأخطاء إن لم توجد جداول)"""
+        from datetime import timedelta
+        try:
+            with db.get_cursor() as cursor:
+                # 1. حساب إجمالي الإيرادات
+                total_income = 0.0
+                try:
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(total_collected), 0) as total_collections
+                        FROM daily_collections_detail
+                        WHERE daily_cash_id = (SELECT id FROM daily_cash WHERE cash_date = %s)
+                    """, (target_date,))
+                    row = cursor.fetchone()
+                    if row:
+                        total_income = row['total_collections']
+                except Exception as e:
+                    logger.warning(f"تعذر حساب الإيرادات: {e}")
+                
+                # 2. حساب إجمالي المصروفات
+                total_expenses = 0.0
+                try:
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(amount), 0) as total_expenses
+                        FROM daily_expenses
+                        WHERE daily_cash_id = (SELECT id FROM daily_cash WHERE cash_date = %s)
+                    """, (target_date,))
+                    row = cursor.fetchone()
+                    if row:
+                        total_expenses = row['total_expenses']
+                except Exception as e:
+                    logger.warning(f"تعذر حساب المصروفات: {e}")
+                
+                # 3. حساب إجمالي أرباح المدراء
+                total_profits = 0.0
+                try:
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(amount), 0) as total_profits
+                        FROM profit_distribution
+                        WHERE daily_cash_id = (SELECT id FROM daily_cash WHERE cash_date = %s)
+                    """, (target_date,))
+                    row = cursor.fetchone()
+                    if row:
+                        total_profits = row['total_profits']
+                except Exception as e:
+                    logger.warning(f"تعذر حساب الأرباح: {e}")
+
+                # 4. حساب إجمالي أرباح الطاقة
+                total_energy_profits = 0.0
+                try:
+                    cursor.execute("""
+                        SELECT COALESCE(SUM(amount), 0) as total_energy_profits
+                        FROM energy_profit_distribution
+                        WHERE daily_cash_id = (SELECT id FROM daily_cash WHERE cash_date = %s)
+                    """, (target_date,))
+                    row = cursor.fetchone()
+                    if row:
+                        total_energy_profits = row['total_energy_profits']
+                except Exception as e:
+                    logger.warning(f"تعذر حساب أرباح الطاقة: {e}")
+                
+                # 5. جلب الرصيد الافتتاحي
+                previous_date = target_date - timedelta(days=1)
+                cursor.execute("SELECT closing_balance FROM daily_cash WHERE cash_date = %s", (previous_date,))
+                prev = cursor.fetchone()
+                opening_balance = prev['closing_balance'] if prev else 0.0
+                
+                # 6. حساب الرصيد الختامي
+                closing_balance = opening_balance + total_income - total_expenses - total_profits - total_energy_profits
+                
+                # 7. تحديث أو إدراج سجل اليوم
+                cursor.execute("""
+                    INSERT INTO daily_cash (cash_date, opening_balance, total_collections, total_expenses, total_profits, total_energy_profits, closing_balance, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'final')
+                    ON CONFLICT (cash_date) DO UPDATE SET
+                        opening_balance = EXCLUDED.opening_balance,
+                        total_collections = EXCLUDED.total_collections,
+                        total_expenses = EXCLUDED.total_expenses,
+                        total_profits = EXCLUDED.total_profits,
+                        total_energy_profits = EXCLUDED.total_energy_profits,
+                        closing_balance = EXCLUDED.closing_balance,
+                        updated_at = CURRENT_TIMESTAMP,
+                        status = 'final'
+                """, (target_date, opening_balance, total_income, total_expenses, total_profits, total_energy_profits, closing_balance))
+                
+                logger.info(f"تم إعادة حساب الصندوق لليوم {target_date}: ختامي={closing_balance}")
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في إعادة حساب الصندوق اليومي: {e}")
+            return False
+
+    def recalculate_week_cash_inventory(self, week_start_date):
+        """إعادة حساب الجرد الأسبوعي للصندوق بقيم صحيحة (أول يوم رصيد افتتاحي، آخر يوم رصيد ختامي)"""
+        from datetime import timedelta
+        try:
+            week_end_date = week_start_date + timedelta(days=6)
+            with db.get_cursor() as cursor:
+                # الحصول على الرصيد الافتتاحي لأول يوم في الأسبوع
+                cursor.execute("""
+                    SELECT opening_balance 
+                    FROM daily_cash 
+                    WHERE cash_date = %s
+                """, (week_start_date,))
+                first_day = cursor.fetchone()
+                total_opening = float(first_day['opening_balance']) if first_day else 0.0
+
+                # الحصول على الرصيد الختامي لآخر يوم في الأسبوع
+                cursor.execute("""
+                    SELECT closing_balance 
+                    FROM daily_cash 
+                    WHERE cash_date = %s
+                """, (week_end_date,))
+                last_day = cursor.fetchone()
+                total_closing = float(last_day['closing_balance']) if last_day else 0.0
+
+                # الحصول على مجاميع الأسبوع
+                cursor.execute("""
+                    SELECT 
+                        COALESCE(SUM(total_collections), 0) as total_collections,
+                        COALESCE(SUM(total_expenses), 0) as total_expenses,
+                        COALESCE(SUM(total_profits), 0) as total_profits
+                    FROM daily_cash
+                    WHERE cash_date BETWEEN %s AND %s
+                """, (week_start_date, week_end_date))
+                totals = cursor.fetchone()
+
+                # تحديث أو إدراج الجرد الأسبوعي
+                cursor.execute("""
+                    INSERT INTO weekly_cash_inventory (
+                        week_start, week_end, total_opening, total_collections, 
+                        total_expenses, total_profits, total_closing
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (week_start) DO UPDATE SET
+                        week_end = EXCLUDED.week_end,
+                        total_opening = EXCLUDED.total_opening,
+                        total_collections = EXCLUDED.total_collections,
+                        total_expenses = EXCLUDED.total_expenses,
+                        total_profits = EXCLUDED.total_profits,
+                        total_closing = EXCLUDED.total_closing,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (
+                    week_start_date, week_end_date,
+                    total_opening,
+                    totals['total_collections'], totals['total_expenses'], totals['total_profits'],
+                    total_closing
+                ))
+                logger.info(f"تم إعادة حساب الجرد الأسبوعي للأسبوع {week_start_date} إلى {week_end_date} بقيم صحيحة")
+                return True
+        except Exception as e:
+            logger.error(f"خطأ في إعادة حساب الجرد الأسبوعي: {e}")
+            return False
+
+
+    def update_daily_expenses_table(self):
+        """تحديث جدول daily_expenses بإضافة عمود user_id وربطه بالمستخدمين"""
+        try:
+            with db.get_cursor() as cursor:
+                # التحقق من وجود العمود
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'daily_expenses'
+                    AND column_name = 'user_id'
+                """)
+                if not cursor.fetchone():
+                    # إضافة العمود مع ربطه بجدول users
+                    cursor.execute("""
+                        ALTER TABLE daily_expenses 
+                        ADD COLUMN user_id INTEGER REFERENCES users(id)
+                    """)
+                    logger.info("✅ تم إضافة العمود user_id إلى جدول daily_expenses")
+                else:
+                    logger.info("ℹ️ العمود user_id موجود بالفعل في daily_expenses")
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث جدول daily_expenses: {e}")    
+
+    def update_daily_cash_add_energy_profits(self):
+        """إضافة عمود total_energy_profits إلى جدول daily_cash"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'daily_cash'
+                    AND column_name = 'total_energy_profits'
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("""
+                        ALTER TABLE daily_cash 
+                        ADD COLUMN total_energy_profits DECIMAL(15,2) DEFAULT 0
+                    """)
+                    logger.info("✅ تم إضافة العمود total_energy_profits إلى جدول daily_cash")
+                else:
+                    logger.info("ℹ️ العمود total_energy_profits موجود بالفعل")
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث جدول daily_cash: {e}")                    
+
+
+    def update_profit_distribution_add_user_id(self):
+        """إضافة عمود user_id إلى profit_distribution"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'profit_distribution' AND column_name = 'user_id'
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE profit_distribution ADD COLUMN user_id INTEGER REFERENCES users(id)")
+                    logger.info("✅ تم إضافة العمود user_id إلى profit_distribution")
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث profit_distribution: {e}")
+
+    def update_energy_profit_distribution_add_user_id(self):
+        """إضافة عمود user_id إلى energy_profit_distribution"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'energy_profit_distribution' AND column_name = 'user_id'
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE energy_profit_distribution ADD COLUMN user_id INTEGER REFERENCES users(id)")
+                    logger.info("✅ تم إضافة العمود user_id إلى energy_profit_distribution")
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث energy_profit_distribution: {e}")
+
+
+    def update_weekly_cash_inventory_table(self):
+        """إضافة أعمدة total_repair_expansion و total_fuel و total_energy_profits إلى weekly_cash_inventory"""
+        try:
+            with db.get_cursor() as cursor:
+                columns_to_add = [
+                    ('total_repair_expansion', 'DECIMAL(15,2) DEFAULT 0'),
+                    ('total_energy_profits', 'DECIMAL(15,2) DEFAULT 0'),
+                    ('total_fuel', 'DECIMAL(15,2) DEFAULT 0'),
+                    ('updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                ]
+                for col_name, col_type in columns_to_add:
+                    cursor.execute("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_name = 'weekly_cash_inventory' AND column_name = %s
+                    """, (col_name,))
+                    if not cursor.fetchone():
+                        cursor.execute(f"ALTER TABLE weekly_cash_inventory ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"✅ تم إضافة العمود {col_name} إلى weekly_cash_inventory")
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث جدول weekly_cash_inventory: {e}")
+
+
+    # ========== تحديث جداول الطاقة لتلائم الحسابات المباشرة ==========
+    def update_energy_meters_for_accounts(self):
+        """إضافة conversion_rate و current_balance إلى energy_meters (إذا لم تكن موجودة)"""
+        try:
+            with db.get_cursor() as cursor:
+                for col_name, col_type in [
+                    ('conversion_rate', 'DECIMAL(12,4) DEFAULT 0'),
+                    ('current_balance', 'DECIMAL(15,2) DEFAULT 0')
+                ]:
+                    cursor.execute(f"""
+                        SELECT column_name FROM information_schema.columns 
+                        WHERE table_name='energy_meters' AND column_name=%s
+                    """, (col_name,))
+                    if not cursor.fetchone():
+                        cursor.execute(f"ALTER TABLE energy_meters ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"✅ تم إضافة العمود {col_name} إلى energy_meters")
+        except Exception as e:
+            logger.error(f"❌ خطأ في تحديث energy_meters: {e}")
+
+    def create_energy_account_tables(self):
+        """إنشاء جدول حركات حساب الطاقة"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS energy_account_transactions (
+                        id SERIAL PRIMARY KEY,
+                        meter_id INTEGER NOT NULL REFERENCES energy_meters(id) ON DELETE CASCADE,
+                        transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('production', 'payment', 'adjustment')),
+                        amount DECIMAL(15,2) NOT NULL,
+                        balance_before DECIMAL(15,2),
+                        balance_after DECIMAL(15,2),
+                        reading_id INTEGER REFERENCES energy_daily_readings(id) ON DELETE SET NULL,
+                        profit_id INTEGER REFERENCES energy_profit_distribution(id) ON DELETE SET NULL,
+                        notes TEXT,
+                        created_by INTEGER REFERENCES users(id),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_energy_trans_meter ON energy_account_transactions(meter_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_energy_trans_date ON energy_account_transactions(transaction_date)")
+                # تنظيف أي جداول قديمة (energy_owners) قد تكون استُخدمت سابقاً
+                cursor.execute("DROP TABLE IF EXISTS energy_owners CASCADE")
+                logger.info("✅ تم إنشاء جداول حركات الطاقة")
+        except Exception as e:
+            logger.error(f"❌ خطأ في إنشاء جداول الطاقة: {e}")
+
+    # داخل __init__ أضف الاستدعاءات:
+
+
+    def update_energy_meters_for_accounts(self):
+        """إضافة conversion_rate و current_balance إلى energy_meters"""
+        try:
+            with db.get_cursor() as cursor:
+                for col_name, col_type in [
+                    ('conversion_rate', 'DECIMAL(12,4) DEFAULT 0'),
+                    ('current_balance', 'DECIMAL(15,2) DEFAULT 0')
+                ]:
+                    cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name='energy_meters' AND column_name=%s", (col_name,))
+                    if not cursor.fetchone():
+                        cursor.execute(f"ALTER TABLE energy_meters ADD COLUMN {col_name} {col_type}")
+                        logger.info(f"✅ عمود {col_name} أضيف إلى energy_meters")
+        except Exception as e:
+            logger.error(f"❌ خطأ في update_energy_meters_for_accounts: {e}")
+
+    def create_energy_account_tables(self):
+        """إنشاء جدول energy_account_transactions"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS energy_account_transactions (
+                        id SERIAL PRIMARY KEY,
+                        meter_id INTEGER NOT NULL REFERENCES energy_meters(id) ON DELETE CASCADE,
+                        transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        transaction_type VARCHAR(20) NOT NULL CHECK (transaction_type IN ('production', 'payment', 'adjustment')),
+                        amount DECIMAL(15,2) NOT NULL,
+                        balance_before DECIMAL(15,2),
+                        balance_after DECIMAL(15,2),
+                        reading_id INTEGER REFERENCES energy_daily_readings(id) ON DELETE SET NULL,
+                        profit_id INTEGER REFERENCES energy_profit_distribution(id) ON DELETE SET NULL,
+                        notes TEXT,
+                        created_by INTEGER REFERENCES users(id),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_energy_trans_meter ON energy_account_transactions(meter_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_energy_trans_date ON energy_account_transactions(transaction_date)")
+                cursor.execute("DROP TABLE IF EXISTS energy_owners CASCADE")
+                logger.info("✅ تم إنشاء جداول حركات الطاقة")
+        except Exception as e:
+            logger.error(f"❌ خطأ في إنشاء جداول الطاقة: {e}")
+
+    def update_daily_cash_add_fuel_column(self):
+        """إضافة عمود total_fuel إلى daily_cash إن لم يكن موجوداً"""
+        try:
+            with db.get_cursor() as cursor:
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name='daily_cash' AND column_name='total_fuel'")
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE daily_cash ADD COLUMN total_fuel DECIMAL(15,2) DEFAULT 0")
+                    logger.info("✅ عمود total_fuel أضيف إلى daily_cash")
+        except Exception as e:
+            logger.error(f"❌ خطأ في إضافة total_fuel: {e}")    
 
 
 # إنشاء كائن Models

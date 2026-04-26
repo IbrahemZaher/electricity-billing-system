@@ -109,7 +109,7 @@ class MobileAccountingUI(tk.Frame):
             self.sector_notebook.add(tab_frame, text=sector_name)
 
             # إضافة عمودين جديدين: visa_balance و last_reading
-            columns = ('id', 'box_number', 'name', 'balance', 'visa_balance', 'last_reading',
+            columns = ('id', 'box_number', 'name', 'balance', 'visa_balance', 'withdrawal_amount', 'last_reading',
                        'last_collection', 'expected', 'status')
             tree = ttk.Treeview(tab_frame, columns=columns, show='headings', height=12)
 
@@ -120,6 +120,7 @@ class MobileAccountingUI(tk.Frame):
             tree.heading('balance', text='الرصيد (ك.و)')
             tree.heading('visa_balance', text='رصيد التأشيرة')
             tree.heading('last_reading', text='آخر قراءة')
+            tree.heading('withdrawal_amount', text='مبلغ السحب')
             tree.heading('last_collection', text='آخر تحصيل')
             tree.heading('expected', text='المتوقع اليوم')
             tree.heading('status', text='الحالة')
@@ -131,6 +132,7 @@ class MobileAccountingUI(tk.Frame):
             tree.column('balance', width=90, anchor='center')
             tree.column('visa_balance', width=90, anchor='center')
             tree.column('last_reading', width=80, anchor='center')
+            tree.column('withdrawal_amount', width=90, anchor='center')
             tree.column('last_collection', width=130, anchor='center')
             tree.column('expected', width=90, anchor='center')
             tree.column('status', width=90, anchor='center')
@@ -145,6 +147,7 @@ class MobileAccountingUI(tk.Frame):
                 current_balance = cust.get('current_balance', 0)
                 visa_balance = cust.get('visa_balance', 0)
                 last_reading = cust.get('last_counter_reading', '')
+                withdrawal = cust.get('withdrawal_amount', 0)
                 last_payment = self.collection_manager.get_last_payment(cust['id'])
                 last_date = last_payment['payment_datetime'] if last_payment else None
                 last_amount = last_payment['amount'] if last_payment else 0
@@ -178,6 +181,7 @@ class MobileAccountingUI(tk.Frame):
                     cust['name'],
                     f"{current_balance:,.0f}",
                     f"{visa_balance:,.0f}",
+                    f"{withdrawal:,.0f}",   # العمود الجديد
                     last_reading,
                     last_display,
                     f"{current_balance:,.0f}",
@@ -318,7 +322,6 @@ class MobileAccountingUI(tk.Frame):
             filepath = os.path.join(export_dir, filename)
 
             with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                # بيانات الملخص
                 summary_data = []
                 grand_total_customers = 0
                 grand_total_balance = 0.0
@@ -328,9 +331,12 @@ class MobileAccountingUI(tk.Frame):
                     total_balance = 0.0
                     for item in tree.get_children():
                         values = tree.item(item)['values']
-                        if len(values) >= 9:  # الآن 9 أعمدة
+                        # يجب أن يكون هناك 10 قيم (بعد إضافة withdrawal_amount)
+                        if len(values) >= 10:
+                            # استخراج القيم حسب الفهرس
                             balance_str = values[3]
                             visa_str = values[4]
+                            withdrawal_str = values[5]
                             try:
                                 balance = float(str(balance_str).replace(',', '').replace('ك.و', '').strip())
                             except:
@@ -339,6 +345,10 @@ class MobileAccountingUI(tk.Frame):
                                 visa = float(str(visa_str).replace(',', '').replace('ك.و', '').strip())
                             except:
                                 visa = 0.0
+                            try:
+                                withdrawal = float(str(withdrawal_str).replace(',', '').replace('ك.و', '').strip())
+                            except:
+                                withdrawal = 0.0
                             total_balance += balance
                             customers.append({
                                 'id': values[0],
@@ -346,10 +356,11 @@ class MobileAccountingUI(tk.Frame):
                                 'name': values[2],
                                 'balance': balance,
                                 'visa_balance': visa,
-                                'last_reading': values[5],
-                                'last_collection': values[6],
-                                'expected': values[7],
-                                'status': values[8]
+                                'withdrawal_amount': withdrawal,
+                                'last_reading': values[6],
+                                'last_collection': values[7],
+                                'expected': values[8],
+                                'status': values[9]
                             })
 
                     sector_info = {
@@ -362,16 +373,14 @@ class MobileAccountingUI(tk.Frame):
                     grand_total_customers += len(customers)
                     grand_total_balance += total_balance
 
-                    # ورقة خاصة بالقطاع
+                    # إنشاء ورقة القطاع فقط إذا كان هناك زبائن
                     if customers:
                         df_sector = pd.DataFrame(customers)
-                        # ترتيب الأعمدة
-                        df_sector = df_sector[['id', 'box_number', 'name', 'balance', 'visa_balance',
-                                               'last_reading', 'last_collection', 'expected', 'status']]
+                        df_sector = df_sector[['id', 'box_number', 'name', 'balance', 'visa_balance', 'withdrawal_amount',
+                                            'last_reading', 'last_collection', 'expected', 'status']]
                         df_sector.columns = ['المعرف', 'رقم العلبة', 'الاسم', 'الرصيد',
-                                             'رصيد التأشيرة', 'آخر قراءة', 'آخر تحصيل', 'المتوقع', 'الحالة']
-
-                        # إضافة صف إجمالي (يظهر فقط الرصيد الكلي)
+                                            'رصيد التأشيرة', 'مبلغ السحب', 'آخر قراءة', 'آخر تحصيل', 'المتوقع', 'الحالة']
+                        # إضافة صف إجمالي
                         total_row = pd.DataFrame([[
                             'إجمالي القطاع',
                             f"{len(customers)} زبون",
@@ -381,14 +390,14 @@ class MobileAccountingUI(tk.Frame):
                             '',
                             '',
                             '',
+                            '',
                             ''
                         ]], columns=df_sector.columns)
                         df_sector = pd.concat([df_sector, total_row], ignore_index=True)
-
-                        sheet_name = sector_name[:31]
+                        sheet_name = sector_name[:31]  # openpyxl يحدد طول اسم الورقة بـ 31 حرفاً
                         df_sector.to_excel(writer, sheet_name=sheet_name, index=False)
 
-                # ورقة الملخص
+                # إنشاء ورقة الملخص دائماً (حتى لو كانت summary_data فارغة)
                 summary_rows = []
                 for sec in summary_data:
                     summary_rows.append([
@@ -396,12 +405,13 @@ class MobileAccountingUI(tk.Frame):
                         sec['total_customers'],
                         f"{sec['total_balance']:,.0f}"
                     ])
+                # إضافة صف الإجمالي العام حتى لو لم تكن هناك بيانات
                 summary_rows.append(['الإجمالي العام', grand_total_customers, f"{grand_total_balance:,.0f}"])
 
                 df_summary = pd.DataFrame(summary_rows, columns=['القطاع', 'عدد الزبائن', 'إجمالي الرصيد'])
                 df_summary.to_excel(writer, sheet_name='ملخص القطاعات', index=False)
 
-                # تنسيق عرض الأعمدة
+                # تنسيق عرض الأعمدة لجميع الأوراق
                 for sheet_name in writer.sheets:
                     worksheet = writer.sheets[sheet_name]
                     for col in worksheet.columns:

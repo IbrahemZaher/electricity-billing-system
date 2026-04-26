@@ -179,6 +179,8 @@ class MainWindow:
             ("🔄 النسخ الاحتياطي", "backup"),
             ("📱 المحاسبة الجوالة", "mobile_accounting"),
             ("📈 متابعة الجباية", "collection_monitor"),
+            ("📒 دفتر اليومية", "daily_cash"),
+            ("💵 الرواتب والسلف", "salary"),            
             ("📈 نسب التحويل", "fuel_management"),
             ("❌ خروج", "logout")
         ]
@@ -270,6 +272,23 @@ class MainWindow:
                 messagebox.showerror("صلاحيات", "ليس لديك صلاحية عرض التقرير")
         elif command == "fuel_management":
             self.show_fuel_management()
+        elif command == "daily_cash":
+            self.show_daily_cash_ui()
+        elif command == "salary":
+            self.show_salary_ui()
+
+
+    def show_salary_ui(self):
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        from ui.salary_ui import SalaryUI
+        SalaryUI(self.content_frame, self.user_data).pack(fill='both', expand=True)                         
+
+    def show_daily_cash_ui(self):
+        for widget in self.content_frame.winfo_children():
+            widget.destroy()
+        from ui.daily_cash_ui import DailyCashUI
+        DailyCashUI(self.content_frame, self.user_data).pack(fill='both', expand=True)               
 
     def show_fuel_management(self):
         try:
